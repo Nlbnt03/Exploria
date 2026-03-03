@@ -253,7 +253,7 @@ class _HomeTab extends StatelessWidget {
             'Hoş geldin, $titleName',
             style: const TextStyle(
               color: AppColors.textMain,
-              fontSize: 38,
+              fontSize: 32,
               fontWeight: FontWeight.w800,
               height: 1.1,
             ),
@@ -475,7 +475,7 @@ class _JourneyModeCard extends StatelessWidget {
             title,
             style: const TextStyle(
               color: AppColors.textMain,
-              fontSize: 42,
+              fontSize: 35,
               fontWeight: FontWeight.w800,
               height: 1,
             ),
@@ -554,7 +554,7 @@ class _JourneyModeCard extends StatelessWidget {
                   buttonText,
                   style: const TextStyle(
                     color: Colors.white,
-                    fontSize: 16,
+                    fontSize: 14,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 0.8,
                   ),

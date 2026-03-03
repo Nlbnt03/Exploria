@@ -7,7 +7,14 @@ service cloud.firestore {
     }
 
     function isVerified() {
-      return isSignedIn() && request.auth.token.email_verified == true;
+      return isSignedIn()
+        && (
+          request.auth.token.email_verified == true
+          || (
+            exists(/databases/$(database)/documents/users/$(request.auth.uid))
+            && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.emailVerified == true
+          )
+        );
     }
 
     function isOwner(uid) {
@@ -49,8 +56,19 @@ service cloud.firestore {
         || requestStatusNowOrAfterIs(uidB + '_' + uidA, 'accepted');
     }
 
+    function isRoomMember(roomId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/rooms/$(roomId)/members/$(request.auth.uid));
+    }
+
+    function isRoomHost(roomId) {
+      return isSignedIn()
+        && exists(/databases/$(database)/documents/rooms/$(roomId))
+        && get(/databases/$(database)/documents/rooms/$(roomId)).data.hostId == request.auth.uid;
+    }
+
     match /users/{uid} {
-      allow read: if isVerified();
+      allow read: if isSignedIn();
 
       allow create: if isOwner(uid)
         && isVerified()
@@ -98,9 +116,9 @@ service cloud.firestore {
       allow delete: if false;
 
       match /friends/{friendUid} {
-        allow read: if isVerified() && (isOwner(uid) || isOwner(friendUid));
+        allow read: if isSignedIn() && (isOwner(uid) || isOwner(friendUid));
 
-        allow create, update: if isVerified()
+        allow create, update: if isSignedIn()
           && (isOwner(uid) || isOwner(friendUid))
           && hasAcceptedFriendship(uid, friendUid)
           && request.resource.data.friendUid == friendUid
@@ -114,7 +132,7 @@ service cloud.firestore {
             'since'
           ]);
 
-        allow delete: if isVerified() && (isOwner(uid) || isOwner(friendUid));
+        allow delete: if isSignedIn() && (isOwner(uid) || isOwner(friendUid));
       }
     }
 
@@ -146,14 +164,14 @@ service cloud.firestore {
       // sendFriendRequest transaction'ında tx.get(...) ile henüz var olmayan
       // friendRequests dokümanları okunuyor. resource == null durumuna izin vermezsek
       // işlem permission-denied ile düşer.
-      allow read: if isVerified()
+      allow read: if isSignedIn()
         && (
           resource == null
           || resource.data.fromUid == request.auth.uid
           || resource.data.toUid == request.auth.uid
         );
 
-      allow create: if isVerified()
+      allow create: if isSignedIn()
         && request.resource.data.keys().hasOnly([
           'fromUid',
           'toUid',
@@ -168,51 +186,23 @@ service cloud.firestore {
         && request.resource.data.toUid is string
         && request.resource.data.toUid != request.auth.uid
         && request.resource.data.status == 'pending'
-        && request.resource.id == request.resource.data.fromUid + '_' + request.resource.data.toUid
-        && !hasAcceptedFriendship(request.resource.data.fromUid, request.resource.data.toUid)
-        && !requestStatusNowIs(request.resource.id, 'pending')
-        && !requestStatusNowIs(request.resource.data.toUid + '_' + request.resource.data.fromUid, 'pending');
+        && request.resource.id == request.resource.data.fromUid + '_' + request.resource.data.toUid;
 
-      allow update: if isVerified() && (
+      allow update: if isSignedIn() && (
         // Alıcı, bekleyen isteği kabul/reddet edebilir.
         (
           request.auth.uid == resource.data.toUid
           && resource.data.status == 'pending'
-          && request.resource.data.keys().hasOnly([
-            'fromUid',
-            'toUid',
-            'fromUsername',
-            'toUsername',
-            'pairKey',
-            'status',
-            'createdAt',
-            'updatedAt',
-            'respondedAt'
-          ])
           && request.resource.data.fromUid == resource.data.fromUid
           && request.resource.data.toUid == resource.data.toUid
-          && request.resource.data.pairKey == resource.data.pairKey
-          && request.resource.data.createdAt == resource.data.createdAt
           && request.resource.data.status in ['accepted', 'rejected']
         ) ||
         // Gönderen, daha önce reddedilen/iptal edilen isteği tekrar pending'e çekebilir.
         (
           request.auth.uid == resource.data.fromUid
           && resource.data.status in ['rejected', 'cancelled']
-          && request.resource.data.keys().hasOnly([
-            'fromUid',
-            'toUid',
-            'fromUsername',
-            'toUsername',
-            'pairKey',
-            'status',
-            'createdAt',
-            'updatedAt',
-            'respondedAt'
-          ])
           && request.resource.data.fromUid == resource.data.fromUid
           && request.resource.data.toUid == resource.data.toUid
-          && request.resource.data.pairKey == resource.data.pairKey
           && request.resource.data.status == 'pending'
         )
       );
@@ -221,11 +211,11 @@ service cloud.firestore {
     }
 
     match /multiInvites/{inviteId} {
-      allow read: if isVerified()
+      allow read: if isSignedIn()
         && (resource.data.fromUid == request.auth.uid
           || resource.data.toUid == request.auth.uid);
 
-      allow create: if isVerified()
+      allow create: if isSignedIn()
         && request.resource.data.keys().hasOnly([
           'fromUid',
           'toUid',
@@ -243,7 +233,7 @@ service cloud.firestore {
         && request.resource.id == request.resource.data.fromUid + '_' + request.resource.data.toUid
         && hasAcceptedFriendship(request.resource.data.fromUid, request.resource.data.toUid);
 
-      allow update: if isVerified()
+      allow update: if isSignedIn()
         && (request.auth.uid == resource.data.fromUid
           || request.auth.uid == resource.data.toUid)
         && request.resource.data.fromUid == resource.data.fromUid
@@ -251,6 +241,129 @@ service cloud.firestore {
         && request.resource.data.mode == resource.data.mode
         && request.resource.data.city == resource.data.city
         && request.resource.data.status in ['pending', 'accepted', 'rejected', 'cancelled'];
+
+      allow delete: if false;
+    }
+
+    match /rooms/{roomId} {
+      allow read: if isRoomMember(roomId);
+
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly([
+          'hostId',
+          'cityId',
+          'roomName',
+          'status',
+          'minPlayers',
+          'createdAt'
+        ])
+        && request.resource.data.hostId == request.auth.uid
+        && request.resource.data.cityId is string
+        && request.resource.data.roomName is string
+        && request.resource.data.roomName.size() > 0
+        && request.resource.data.status == 'waiting'
+        && request.resource.data.minPlayers is int
+        && request.resource.data.minPlayers >= 2;
+
+      allow update: if isRoomHost(roomId)
+        && isRoomMember(roomId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'status',
+          'updatedAt'
+        ])
+        && request.resource.data.status in ['active', 'finished']
+        && resource.data.status in ['waiting', 'active', 'finished'];
+
+      allow delete: if false;
+
+      match /members/{uid} {
+        allow read: if isRoomMember(roomId);
+
+        allow create: if isSignedIn()
+          && uid == request.auth.uid
+          && (
+            existsAfter(/databases/$(database)/documents/rooms/$(roomId))
+            || exists(/databases/$(database)/documents/rooms/$(roomId))
+          )
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.username is string
+          && request.resource.data.keys().hasOnly([
+            'uid',
+            'username',
+            'joinedAt'
+          ]);
+
+        allow update: if isSignedIn()
+          && uid == request.auth.uid
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.keys().hasOnly([
+            'uid',
+            'username',
+            'joinedAt'
+          ]);
+
+        allow delete: if isSignedIn() && uid == request.auth.uid;
+      }
+
+      match /locations/{uid} {
+        allow read: if isRoomMember(roomId);
+
+        allow create, update: if isSignedIn()
+          && uid == request.auth.uid
+          && isRoomMember(roomId)
+          && request.resource.data.keys().hasOnly([
+            'lat',
+            'lng',
+            'updatedAt'
+          ])
+          && request.resource.data.lat is number
+          && request.resource.data.lng is number;
+
+        allow delete: if isSignedIn() && uid == request.auth.uid;
+      }
+    }
+
+    match /invites/{inviteId} {
+      allow read: if isSignedIn()
+        && (
+          resource == null
+          ||
+          resource.data.fromUserId == request.auth.uid
+          || resource.data.toUserId == request.auth.uid
+        );
+
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly([
+          'roomId',
+          'fromUserId',
+          'toUserId',
+          'status',
+          'createdAt'
+        ])
+        && request.resource.data.fromUserId == request.auth.uid
+        && request.resource.data.toUserId is string
+        && request.resource.data.toUserId != request.auth.uid
+        && request.resource.data.status == 'pending'
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid)/friends/$(request.resource.data.toUserId))
+        && isRoomHost(request.resource.data.roomId)
+        && exists(/databases/$(database)/documents/rooms/$(request.resource.data.roomId));
+
+      allow update: if isSignedIn()
+        && request.auth.uid == resource.data.toUserId
+        && resource.data.status == 'pending'
+        && request.resource.data.keys().hasOnly([
+          'roomId',
+          'fromUserId',
+          'toUserId',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ])
+        && request.resource.data.roomId == resource.data.roomId
+        && request.resource.data.fromUserId == resource.data.fromUserId
+        && request.resource.data.toUserId == resource.data.toUserId
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.status in ['accepted', 'rejected'];
 
       allow delete: if false;
     }

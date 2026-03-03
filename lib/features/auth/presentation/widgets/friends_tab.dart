@@ -1,8 +1,10 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../app/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../data/services/friends_service.dart';
+import '../../../multi_room/services/multi_room_firestore_service.dart';
 
 class FriendsTab extends StatefulWidget {
   const FriendsTab({
@@ -10,11 +12,13 @@ class FriendsTab extends StatefulWidget {
     required this.uid,
     this.focusIncomingRequests = false,
     this.onFocusHandled,
+    this.onOpenRoomInvites,
   });
 
   final String uid;
   final bool focusIncomingRequests;
   final VoidCallback? onFocusHandled;
+  final VoidCallback? onOpenRoomInvites;
 
   @override
   State<FriendsTab> createState() => _FriendsTabState();
@@ -22,6 +26,8 @@ class FriendsTab extends StatefulWidget {
 
 class _FriendsTabState extends State<FriendsTab> {
   final FriendsService _friendsService = FriendsService();
+  final MultiRoomFirestoreService _multiRoomService =
+      MultiRoomFirestoreService();
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final GlobalKey _incomingSectionKey = GlobalKey();
@@ -256,6 +262,8 @@ class _FriendsTabState extends State<FriendsTab> {
             ),
           ),
           const SizedBox(height: 14),
+          _buildRoomInvitesButton(),
+          const SizedBox(height: 16),
           _buildSearchSection(),
           const SizedBox(height: 16),
           Container(
@@ -266,6 +274,65 @@ class _FriendsTabState extends State<FriendsTab> {
           _buildFriendsSection(),
         ],
       ),
+    );
+  }
+
+  Widget _buildRoomInvitesButton() {
+    return StreamBuilder<int>(
+      stream: _multiRoomService.listenPendingInvitesCountFor(widget.uid),
+      builder: (context, snapshot) {
+        final inviteCount = snapshot.data ?? 0;
+
+        return SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed:
+                widget.onOpenRoomInvites ??
+                () => Navigator.pushNamed(context, AppRouter.pendingInvites),
+            icon: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                const Icon(Icons.mark_email_unread_outlined),
+                if (inviteCount > 0)
+                  Positioned(
+                    right: -8,
+                    top: -8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 5,
+                        vertical: 1,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        inviteCount > 99 ? '99+' : '$inviteCount',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            label: Text(
+              inviteCount > 0
+                  ? 'Oda Davetleri ($inviteCount)'
+                  : 'Oda Davetleri',
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.textMain,
+              side: BorderSide(
+                color: AppColors.inputBorder.withValues(alpha: 0.7),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
+          ),
+        );
+      },
     );
   }
 

@@ -10,6 +10,7 @@ import '../../data/services/map_progress_service.dart';
 import '../map/gtu_boundary.dart';
 import '../map/location_service.dart';
 import 'city_map_page.dart';
+import '../../../multi_room/presentation/screens/create_room_screen.dart';
 
 class CitySelectionPageArgs {
   const CitySelectionPageArgs({required this.mode});
@@ -72,30 +73,29 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
   Future<void> _openSelectedMap() async {
     if (_isOpeningMap) return;
     final selectedArea = _selectedArea;
+
+    if (widget.mode == 'multi') {
+      setState(() => _isOpeningMap = true);
+      try {
+        await Navigator.pushNamed(
+          context,
+          AppRouter.createMultiRoom,
+          arguments: CreateRoomScreenArgs(
+            cityId: 'istanbul',
+            initialRoomName: '${selectedArea.title} Ekibi',
+          ),
+        );
+      } finally {
+        if (mounted) setState(() => _isOpeningMap = false);
+      }
+      return;
+    }
+
     final mapName = await _askMapName(selectedArea.title);
     if (mapName == null || !mounted) return;
 
     setState(() => _isOpeningMap = true);
     try {
-      if (widget.mode != 'solo') {
-        final mapId = await _createMapForSelection(
-          areaId: selectedArea.id,
-          mapName: mapName,
-        );
-        if (mapId == null || !mounted) return;
-
-        await Navigator.pushNamed(
-          context,
-          AppRouter.cityMap,
-          arguments: CityMapPageArgs(
-            areaId: _selectedAreaId,
-            mapId: mapId,
-            mapName: mapName,
-          ),
-        );
-        return;
-      }
-
       final accessResult = await LocationService.requestSinglePosition();
       if (!mounted) return;
 
@@ -489,7 +489,9 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
                                     ),
                                   )
                                   : Text(
-                                    '${_selectedArea.title} Haritasini Ac',
+                                    widget.mode == 'multi'
+                                        ? 'Coklu Oda Olustur'
+                                        : '${_selectedArea.title} Haritasini Ac',
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 16,
