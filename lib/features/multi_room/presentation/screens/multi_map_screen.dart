@@ -51,9 +51,12 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
   StreamSubscription<Room?>? _roomSub;
   StreamSubscription<List<Member>>? _membersSub;
   StreamSubscription<List<LiveLocation>>? _locationsSub;
+  StreamSubscription<Set<String>>? _presenceSub;
 
   final Map<String, Member> _memberByUid = <String, Member>{};
   final Map<String, LiveLocation> _locationByUid = <String, LiveLocation>{};
+  final Set<String> _inMapUids = <String>{};
+  final Set<String> _presenceJoinNotifiedUids = <String>{};
 
   Room? _room;
   Position? _lastInsidePosition;
@@ -69,6 +72,7 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
   bool _fogRefreshInFlight = false;
   bool _fogRefreshQueued = false;
   bool _historyMarked = false;
+  bool _allMembersReadyToExplore = false;
 
   String? _historyMapId;
   String? _historyAreaId;
@@ -102,6 +106,7 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
               ..addEntries(
                 members.map((member) => MapEntry(member.uid, member)),
               );
+            _refreshExplorationGate();
             unawaited(_refreshLocationSource());
             if (mounted) {
               setState(() {});
@@ -134,6 +139,26 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
             }
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(content: Text('Canli konumlar alinamadi: $error')),
+            );
+          },
+        );
+
+    _presenceSub = _service
+        .listenInMapUids(widget.roomId)
+        .listen(
+          (uids) {
+            final previous = Set<String>.from(_inMapUids);
+            _inMapUids
+              ..clear()
+              ..addAll(uids);
+            _onPresenceChanged(previous);
+          },
+          onError: (Object error) {
+            if (!mounted) {
+              return;
+            }
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Harita giris durumu alinamadi: $error')),
             );
           },
         );
@@ -187,10 +212,69 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
     }
 
     if (room.isActive) {
-      _startTracking();
+      unawaited(_service.setMyInMapPresence(widget.roomId, inMap: true));
+      _refreshExplorationGate();
       unawaited(_markRoomMapOpenedForHistory(room));
     } else {
       _stopTracking();
+      _allMembersReadyToExplore = false;
+      unawaited(_service.setMyInMapPresence(widget.roomId, inMap: false));
+    }
+  }
+
+  void _onPresenceChanged(Set<String> previous) {
+    final currentUid = _service.currentUid;
+    final newlyJoined = _inMapUids.difference(previous);
+    for (final uid in newlyJoined) {
+      if (uid == currentUid || _presenceJoinNotifiedUids.contains(uid)) {
+        continue;
+      }
+      _presenceJoinNotifiedUids.add(uid);
+      if (!mounted) {
+        continue;
+      }
+      final username = _memberByUid[uid]?.username ?? 'Bir oyuncu';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$username haritaya girdi.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+    _refreshExplorationGate();
+  }
+
+  bool _computeAllMembersReadyToExplore() {
+    final room = _room;
+    if (room == null || !room.isActive) {
+      return false;
+    }
+
+    final memberUids = _memberByUid.keys.toSet();
+    if (memberUids.isEmpty) {
+      return false;
+    }
+
+    return _inMapUids.containsAll(memberUids);
+  }
+
+  void _refreshExplorationGate() {
+    final isReady = _computeAllMembersReadyToExplore();
+    final changed = _allMembersReadyToExplore != isReady;
+    _allMembersReadyToExplore = isReady;
+
+    if (_room?.isActive == true) {
+      if (_allMembersReadyToExplore) {
+        unawaited(_startTracking());
+      } else {
+        _stopTracking();
+      }
+    } else {
+      _stopTracking();
+    }
+
+    if (changed && mounted) {
+      setState(() {});
     }
   }
 
@@ -227,6 +311,9 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
 
   Future<void> _startTracking() async {
     if (_isTracking) {
+      return;
+    }
+    if (!_allMembersReadyToExplore || !(_room?.isActive ?? false)) {
       return;
     }
 
@@ -273,7 +360,10 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
 
   Future<void> _pushCurrentLocation() async {
     final room = _room;
-    if (!_isTracking || room == null || !room.isActive) {
+    if (!_isTracking ||
+        room == null ||
+        !room.isActive ||
+        !_allMembersReadyToExplore) {
       return;
     }
 
@@ -338,6 +428,7 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
   Future<void> _leaveRoom() async {
     try {
       _stopTracking();
+      await _service.setMyInMapPresence(widget.roomId, inMap: false);
       await _service.leaveRoom(widget.roomId);
       if (!mounted) {
         return;
@@ -727,9 +818,11 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
     _fogAnimationTicker?.cancel();
     _persistMapStateDebounce?.cancel();
     unawaited(_persistMapState());
+    unawaited(_service.setMyInMapPresence(widget.roomId, inMap: false));
     _roomSub?.cancel();
     _membersSub?.cancel();
     _locationsSub?.cancel();
+    _presenceSub?.cancel();
     super.dispose();
   }
 
@@ -738,6 +831,14 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
     final room = _room;
     final isHost = room?.hostId == _service.currentUid;
     final area = _resolveAreaForRoom(room);
+    final shouldLockExploration =
+        room?.isActive == true && !_allMembersReadyToExplore;
+    final waitingUids =
+        _memberByUid.keys.where((uid) => !_inMapUids.contains(uid)).toList();
+    final waitingNames = waitingUids
+        .map((uid) => _memberByUid[uid]?.username ?? uid)
+        .take(3)
+        .join(', ');
     final fogManager = _fogManager;
     final fogSummary =
         fogManager == null
@@ -766,19 +867,71 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
       ),
       body: Stack(
         children: [
-          MapWidget(
-            key: ValueKey('multi-map-${widget.roomId}-${area.id}'),
-            styleUri: area.styleUri,
-            cameraOptions: CameraOptions(
-              center: Point(coordinates: area.center),
-              zoom: 14.8,
-              bearing: 0,
-              pitch: 0,
+          AbsorbPointer(
+            absorbing: shouldLockExploration,
+            child: MapWidget(
+              key: ValueKey('multi-map-${widget.roomId}-${area.id}'),
+              styleUri: area.styleUri,
+              cameraOptions: CameraOptions(
+                center: Point(coordinates: area.center),
+                zoom: 14.8,
+                bearing: 0,
+                pitch: 0,
+              ),
+              onMapCreated: (mapboxMap) => unawaited(_onMapCreated(mapboxMap)),
+              onStyleLoadedListener: (_) => unawaited(_onStyleLoaded()),
+              onCameraChangeListener: _onCameraChanged,
             ),
-            onMapCreated: (mapboxMap) => unawaited(_onMapCreated(mapboxMap)),
-            onStyleLoadedListener: (_) => unawaited(_onStyleLoaded()),
-            onCameraChangeListener: _onCameraChanged,
           ),
+          if (shouldLockExploration)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(
+                  color: const Color(0x7A120A24),
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(horizontal: 24),
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: const Color(0xEE1A1030),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: AppColors.inputBorder.withValues(alpha: 0.6),
+                      ),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 14,
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Text(
+                            'Keşif kilitli',
+                            style: TextStyle(
+                              color: AppColors.textMain,
+                              fontWeight: FontWeight.w800,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            waitingNames.isEmpty
+                                ? 'Tüm oyuncular haritaya girene kadar bekleniyor.'
+                                : 'Beklenen oyuncu: $waitingNames',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: AppColors.textMuted,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           Positioned(
             top: 12,
             left: 12,
@@ -808,7 +961,7 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'Canli uyeler: ${_memberByUid.length} | Konum gelen: ${_locationByUid.length}',
+                      'Canli uyeler: ${_memberByUid.length} | Haritada: ${_inMapUids.length} | Konum gelen: ${_locationByUid.length}',
                       style: const TextStyle(
                         color: AppColors.textMuted,
                         fontSize: 12,

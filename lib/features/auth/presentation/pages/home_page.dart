@@ -9,6 +9,7 @@ import '../../data/services/map_progress_service.dart';
 import '../../data/services/firestore_user_service.dart';
 import '../../data/services/friends_service.dart';
 import '../../domain/models/user_map_record.dart';
+import '../../../multi_room/presentation/screens/multi_map_screen.dart';
 import '../../../multi_room/services/multi_room_firestore_service.dart';
 import '../../../multi_room/presentation/screens/waiting_room_screen.dart';
 import '../map/gtu_boundary.dart';
@@ -650,18 +651,116 @@ class _HistoryTabState extends State<_HistoryTab> {
   }
 
   Future<void> _openMultiMapFromHistory(UserMapRecord record) async {
-    final resolvedAreaId = resolveCampusArea(record.areaId).id;
-    final roomName = _roomNameFromHistory(record.mapName);
-    final roomId = await _multiRoomService.createRoom(roomName, resolvedAreaId);
-    if (!mounted) {
+    final roomId = _extractRoomIdFromHistory(record.mapId);
+    if (roomId == null) {
+      await _openFinishedMultiMapSnapshot(record);
       return;
     }
 
-    await Navigator.pushNamed(
-      context,
-      AppRouter.waitingRoom,
-      arguments: WaitingRoomScreenArgs(roomId: roomId),
-    );
+    try {
+      var room = await _multiRoomService.fetchRoom(roomId);
+
+      if (room == null) {
+        if (!mounted) {
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Oda bulunamadi. Kayitli harita ozeti aciliyor.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        await _openFinishedMultiMapSnapshot(record);
+        return;
+      }
+
+      if (!(room.isWaiting || room.isActive)) {
+        await _openFinishedMultiMapSnapshot(record);
+        return;
+      }
+
+      try {
+        await _multiRoomService.ensureRoomMembership(room.id);
+      } on FirebaseException catch (_) {
+        // Membership set is best-effort. We can still try to continue.
+      }
+
+      room = await _multiRoomService.fetchRoom(room.id);
+      if (room == null || room.isFinished) {
+        await _openFinishedMultiMapSnapshot(record);
+        return;
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      if (room.isActive) {
+        await Navigator.pushNamed(
+          context,
+          AppRouter.multiMap,
+          arguments: MultiMapScreenArgs(roomId: room.id),
+        );
+        return;
+      }
+
+      await Navigator.pushNamed(
+        context,
+        AppRouter.waitingRoom,
+        arguments: WaitingRoomScreenArgs(roomId: room.id),
+      );
+    } on FirebaseException catch (e) {
+      if (!mounted) {
+        return;
+      }
+      if (e.code == 'permission-denied') {
+        try {
+          await _multiRoomService.ensureRoomMembership(roomId);
+          final room = await _multiRoomService.fetchRoom(roomId);
+          if (room != null) {
+            if (room.isActive) {
+              if (!mounted) {
+                return;
+              }
+              await Navigator.pushNamed(
+                context,
+                AppRouter.multiMap,
+                arguments: MultiMapScreenArgs(roomId: room.id),
+              );
+              return;
+            }
+            if (room.isWaiting) {
+              if (!mounted) {
+                return;
+              }
+              await Navigator.pushNamed(
+                context,
+                AppRouter.waitingRoom,
+                arguments: WaitingRoomScreenArgs(roomId: room.id),
+              );
+              return;
+            }
+          }
+        } on FirebaseException catch (_) {
+          // Ignore and fallback to snapshot.
+        }
+
+        if (!mounted) {
+          return;
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Bu odaya tekrar katilma yetkin yok. Kayitli harita ozeti aciliyor.',
+            ),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        await _openFinishedMultiMapSnapshot(record);
+        return;
+      }
+      rethrow;
+    }
   }
 
   bool _isMultiHistoryRecord(UserMapRecord record) {
@@ -674,18 +773,30 @@ class _HistoryTabState extends State<_HistoryTab> {
     return mapName.contains('(coklu)') || mapName.contains('(çoklu)');
   }
 
-  String _roomNameFromHistory(String mapName) {
-    final normalized =
-        mapName
-            .replaceAll(
-              RegExp(r'\s*\((coklu|çoklu)\)\s*$', caseSensitive: false),
-              '',
-            )
-            .trim();
-    if (normalized.isNotEmpty) {
-      return normalized;
+  String? _extractRoomIdFromHistory(String mapId) {
+    final normalized = mapId.trim();
+    const prefix = 'multi_';
+    if (!normalized.startsWith(prefix) || normalized.length <= prefix.length) {
+      return null;
     }
-    return 'Coklu Oda';
+    return normalized.substring(prefix.length);
+  }
+
+  Future<void> _openFinishedMultiMapSnapshot(UserMapRecord record) async {
+    final resolvedAreaId = resolveCampusArea(record.areaId).id;
+    if (!mounted) {
+      return;
+    }
+
+    await Navigator.pushNamed(
+      context,
+      AppRouter.cityMap,
+      arguments: CityMapPageArgs(
+        areaId: resolvedAreaId,
+        mapId: record.mapId,
+        mapName: record.mapName,
+      ),
+    );
   }
 
   Future<void> _deleteMap(UserMapRecord record) async {

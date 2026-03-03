@@ -67,6 +67,26 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/rooms/$(roomId)).data.hostId == request.auth.uid;
     }
 
+    function isCurrentRoomHostByField() {
+      return isSignedIn()
+        && resource.data.hostId == request.auth.uid;
+    }
+
+    function roomExistsNowOrAfter(roomId) {
+      return existsAfter(/databases/$(database)/documents/rooms/$(roomId))
+        || exists(/databases/$(database)/documents/rooms/$(roomId));
+    }
+
+    function roomStatusNowOrAfterWaitingOrActive(roomId) {
+      return (
+          existsAfter(/databases/$(database)/documents/rooms/$(roomId))
+          && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.status in ['waiting', 'active']
+        ) || (
+          exists(/databases/$(database)/documents/rooms/$(roomId))
+          && get(/databases/$(database)/documents/rooms/$(roomId)).data.status in ['waiting', 'active']
+        );
+    }
+
     match /users/{uid} {
       allow read: if isSignedIn();
 
@@ -246,7 +266,7 @@ service cloud.firestore {
     }
 
     match /rooms/{roomId} {
-      allow read: if isRoomMember(roomId);
+      allow get, list: if isCurrentRoomHostByField() || isRoomMember(roomId);
 
       allow create: if isSignedIn()
         && request.resource.data.keys().hasOnly([
@@ -277,14 +297,12 @@ service cloud.firestore {
       allow delete: if false;
 
       match /members/{uid} {
-        allow read: if isRoomMember(roomId);
+        allow read: if isRoomMember(roomId) || isRoomHost(roomId);
 
         allow create: if isSignedIn()
           && uid == request.auth.uid
-          && (
-            existsAfter(/databases/$(database)/documents/rooms/$(roomId))
-            || exists(/databases/$(database)/documents/rooms/$(roomId))
-          )
+          && roomExistsNowOrAfter(roomId)
+          && roomStatusNowOrAfterWaitingOrActive(roomId)
           && request.resource.data.uid == request.auth.uid
           && request.resource.data.username is string
           && request.resource.data.keys().hasOnly([
@@ -306,7 +324,7 @@ service cloud.firestore {
       }
 
       match /locations/{uid} {
-        allow read: if isRoomMember(roomId);
+        allow read: if isRoomMember(roomId) || isRoomHost(roomId);
 
         allow create, update: if isSignedIn()
           && uid == request.auth.uid
@@ -318,6 +336,24 @@ service cloud.firestore {
           ])
           && request.resource.data.lat is number
           && request.resource.data.lng is number;
+
+        allow delete: if isSignedIn() && uid == request.auth.uid;
+      }
+
+      match /presence/{uid} {
+        allow read: if isRoomMember(roomId) || isRoomHost(roomId);
+
+        allow create, update: if isSignedIn()
+          && uid == request.auth.uid
+          && isRoomMember(roomId)
+          && request.resource.data.keys().hasOnly([
+            'uid',
+            'inMap',
+            'updatedAt',
+            'enteredAt'
+          ])
+          && request.resource.data.uid == request.auth.uid
+          && request.resource.data.inMap is bool;
 
         allow delete: if isSignedIn() && uid == request.auth.uid;
       }

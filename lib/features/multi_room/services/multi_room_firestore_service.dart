@@ -38,7 +38,11 @@ class MultiRoomFirestoreService {
     return uid;
   }
 
-  Future<String> createRoom(String roomName, String cityId) async {
+  Future<String> createRoom(
+    String roomName,
+    String cityId, {
+    bool reuseWaitingOrActive = false,
+  }) async {
     final uid = _uid;
     final normalizedRoomName = roomName.trim();
     if (normalizedRoomName.isEmpty) {
@@ -50,6 +54,17 @@ class MultiRoomFirestoreService {
     }
 
     final normalizedCityId = cityId.trim().isEmpty ? 'istanbul' : cityId.trim();
+    if (reuseWaitingOrActive) {
+      final reusableRoom = await _findReusableHostRoom(
+        hostId: uid,
+        cityId: normalizedCityId,
+      );
+      if (reusableRoom != null) {
+        await ensureRoomMembership(reusableRoom.id);
+        return reusableRoom.id;
+      }
+    }
+
     final username = await _resolveUsername(uid);
     final roomRef = _rooms.doc();
     final memberRef = roomRef.collection('members').doc(uid);
@@ -74,6 +89,58 @@ class MultiRoomFirestoreService {
     return roomRef.id;
   }
 
+  Future<Room?> _findReusableHostRoom({
+    required String hostId,
+    required String cityId,
+  }) async {
+    const reusableStatuses = <String>['active', 'waiting'];
+    for (final status in reusableStatuses) {
+      final query =
+          await _rooms
+              .where('cityId', isEqualTo: cityId)
+              .where('hostId', isEqualTo: hostId)
+              .where('status', isEqualTo: status)
+              .limit(1)
+              .get();
+      if (query.docs.isNotEmpty) {
+        return Room.fromDoc(query.docs.first);
+      }
+    }
+    return null;
+  }
+
+  Future<Room?> fetchRoom(String roomId) async {
+    final normalizedRoomId = roomId.trim();
+    if (normalizedRoomId.isEmpty) {
+      return null;
+    }
+
+    final snap = await _rooms.doc(normalizedRoomId).get();
+    if (!snap.exists) {
+      return null;
+    }
+    return Room.fromDoc(snap);
+  }
+
+  Future<void> ensureRoomMembership(String roomId) async {
+    final normalizedRoomId = roomId.trim();
+    if (normalizedRoomId.isEmpty) {
+      throw FirebaseException(
+        plugin: 'multi_room_firestore_service',
+        code: 'invalid-room-id',
+        message: 'Gecersiz oda kimligi.',
+      );
+    }
+
+    final uid = _uid;
+    final username = await _resolveUsername(uid);
+    await _rooms.doc(normalizedRoomId).collection('members').doc(uid).set({
+      'uid': uid,
+      'username': username,
+      'joinedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
   Stream<Room?> listenRoom(String roomId) {
     return _rooms.doc(roomId).snapshots().map((doc) {
       if (!doc.exists) return null;
@@ -96,6 +163,40 @@ class MultiRoomFirestoreService {
         .collection('locations')
         .snapshots()
         .map((snapshot) => snapshot.docs.map(LiveLocation.fromDoc).toList());
+  }
+
+  Stream<Set<String>> listenInMapUids(String roomId) {
+    return _rooms
+        .doc(roomId)
+        .collection('presence')
+        .where('inMap', isEqualTo: true)
+        .snapshots()
+        .map((snapshot) {
+          final uids = <String>{};
+          for (final doc in snapshot.docs) {
+            final uid = (doc.data()['uid'] as String?)?.trim() ?? doc.id.trim();
+            if (uid.isNotEmpty) {
+              uids.add(uid);
+            }
+          }
+          return uids;
+        });
+  }
+
+  Future<void> setMyInMapPresence(String roomId, {required bool inMap}) async {
+    final uid = _uid;
+    final ref = _rooms.doc(roomId).collection('presence').doc(uid);
+
+    final payload = <String, dynamic>{
+      'uid': uid,
+      'inMap': inMap,
+      'updatedAt': FieldValue.serverTimestamp(),
+    };
+    if (inMap) {
+      payload['enteredAt'] = FieldValue.serverTimestamp();
+    }
+
+    await ref.set(payload, SetOptions(merge: true));
   }
 
   Future<void> sendInvite(String roomId, String toUserId) async {
