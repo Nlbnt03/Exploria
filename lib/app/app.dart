@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 import '../core/theme/app_theme.dart';
@@ -8,11 +9,12 @@ class ExploriaApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final hasSession = FirebaseAuth.instance.currentUser != null;
     return MaterialApp(
       title: 'Exploria',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark,
-      initialRoute: AppRouter.login,
+      initialRoute: hasSession ? AppRouter.home : AppRouter.login,
       onGenerateRoute: AppRouter.onGenerateRoute,
     );
   }

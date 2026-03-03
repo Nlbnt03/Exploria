@@ -9,6 +9,8 @@ import '../../data/services/map_progress_service.dart';
 import '../../data/services/firestore_user_service.dart';
 import '../../data/services/friends_service.dart';
 import '../../domain/models/user_map_record.dart';
+import '../../../multi_room/services/multi_room_firestore_service.dart';
+import '../../../multi_room/presentation/screens/waiting_room_screen.dart';
 import '../map/gtu_boundary.dart';
 import '../widgets/friends_tab.dart';
 import 'city_map_page.dart';
@@ -301,72 +303,90 @@ class _IncomingRequestsBell extends StatelessWidget {
   final String uid;
   final VoidCallback onTap;
   final FriendsService _friendsService = FriendsService();
+  final MultiRoomFirestoreService _multiRoomService =
+      MultiRoomFirestoreService();
 
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<int>(
       stream: _friendsService.watchIncomingRequestCount(uid),
       builder: (context, snapshot) {
-        final count = snapshot.data ?? 0;
-        return Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(14),
-            onTap: onTap,
-            child: Ink(
-              width: 48,
-              height: 48,
-              decoration: BoxDecoration(
-                color: AppColors.card,
+        final friendCount = snapshot.data ?? 0;
+        return StreamBuilder<int>(
+          stream: _multiRoomService.listenPendingInvitesCountFor(uid),
+          builder: (context, inviteSnapshot) {
+            final roomInviteCount = inviteSnapshot.data ?? 0;
+            final totalCount = friendCount + roomInviteCount;
+
+            return Material(
+              color: Colors.transparent,
+              child: InkWell(
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(
-                  color: AppColors.inputBorder.withValues(alpha: 0.45),
-                ),
-              ),
-              child: Stack(
-                clipBehavior: Clip.none,
-                children: [
-                  const Center(
-                    child: Icon(
-                      Icons.notifications_none_rounded,
-                      color: AppColors.textMain,
-                      size: 24,
+                onTap: () {
+                  if (roomInviteCount > 0) {
+                    Navigator.pushNamed(context, AppRouter.pendingInvites);
+                    return;
+                  }
+                  onTap();
+                },
+                child: Ink(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: AppColors.card,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: AppColors.inputBorder.withValues(alpha: 0.45),
                     ),
                   ),
-                  if (count > 0)
-                    Positioned(
-                      top: -3,
-                      right: -3,
-                      child: Container(
-                        constraints: const BoxConstraints(
-                          minWidth: 19,
-                          minHeight: 19,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Center(
+                        child: Icon(
+                          roomInviteCount > 0
+                              ? Icons.mark_email_unread_outlined
+                              : Icons.notifications_none_rounded,
+                          color: AppColors.textMain,
+                          size: 24,
                         ),
-                        padding: const EdgeInsets.symmetric(horizontal: 5),
-                        decoration: BoxDecoration(
-                          color: AppColors.primary,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: AppColors.bgBottom,
-                            width: 1.2,
-                          ),
-                        ),
-                        child: Center(
-                          child: Text(
-                            count > 99 ? '99+' : '$count',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w800,
+                      ),
+                      if (totalCount > 0)
+                        Positioned(
+                          top: -3,
+                          right: -3,
+                          child: Container(
+                            constraints: const BoxConstraints(
+                              minWidth: 19,
+                              minHeight: 19,
+                            ),
+                            padding: const EdgeInsets.symmetric(horizontal: 5),
+                            decoration: BoxDecoration(
+                              color: AppColors.primary,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: AppColors.bgBottom,
+                                width: 1.2,
+                              ),
+                            ),
+                            child: Center(
+                              child: Text(
+                                totalCount > 99 ? '99+' : '$totalCount',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      ),
-                    ),
-                ],
+                    ],
+                  ),
+                ),
               ),
-            ),
-          ),
+            );
+          },
         );
       },
     );
@@ -579,18 +599,93 @@ class _HistoryTab extends StatefulWidget {
 
 class _HistoryTabState extends State<_HistoryTab> {
   final MapProgressService _mapProgressService = MapProgressService();
+  final MultiRoomFirestoreService _multiRoomService =
+      MultiRoomFirestoreService();
   String? _deletingMapId;
+  String? _openingMapId;
 
   Future<void> _openMap(UserMapRecord record) async {
+    if (_openingMapId != null) {
+      return;
+    }
+
+    setState(() => _openingMapId = record.mapId);
+    try {
+      if (_isMultiHistoryRecord(record)) {
+        await _openMultiMapFromHistory(record);
+        return;
+      }
+
+      await Navigator.pushNamed(
+        context,
+        AppRouter.cityMap,
+        arguments: CityMapPageArgs(
+          areaId: record.areaId,
+          mapId: record.mapId,
+          mapName: record.mapName,
+        ),
+      );
+    } on FirebaseException catch (e) {
+      if (!mounted) return;
+      final message =
+          e.code == 'unauthenticated'
+              ? 'Oturum bulunamadi. Lutfen tekrar giris yap.'
+              : 'Harita acilamadi: ${e.message ?? e.code}';
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Harita acilamadi: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _openingMapId = null);
+      }
+    }
+  }
+
+  Future<void> _openMultiMapFromHistory(UserMapRecord record) async {
+    final resolvedAreaId = resolveCampusArea(record.areaId).id;
+    final roomName = _roomNameFromHistory(record.mapName);
+    final roomId = await _multiRoomService.createRoom(roomName, resolvedAreaId);
+    if (!mounted) {
+      return;
+    }
+
     await Navigator.pushNamed(
       context,
-      AppRouter.cityMap,
-      arguments: CityMapPageArgs(
-        areaId: record.areaId,
-        mapId: record.mapId,
-        mapName: record.mapName,
-      ),
+      AppRouter.waitingRoom,
+      arguments: WaitingRoomScreenArgs(roomId: roomId),
     );
+  }
+
+  bool _isMultiHistoryRecord(UserMapRecord record) {
+    final mapId = record.mapId.trim().toLowerCase();
+    if (mapId.startsWith('multi_')) {
+      return true;
+    }
+
+    final mapName = record.mapName.trim().toLowerCase();
+    return mapName.contains('(coklu)') || mapName.contains('(çoklu)');
+  }
+
+  String _roomNameFromHistory(String mapName) {
+    final normalized =
+        mapName
+            .replaceAll(
+              RegExp(r'\s*\((coklu|çoklu)\)\s*$', caseSensitive: false),
+              '',
+            )
+            .trim();
+    if (normalized.isNotEmpty) {
+      return normalized;
+    }
+    return 'Coklu Oda';
   }
 
   Future<void> _deleteMap(UserMapRecord record) async {
@@ -745,6 +840,7 @@ class _HistoryTabState extends State<_HistoryTab> {
                                 ? areaTitle
                                 : '$areaTitle · ${_formatDateTime(updatedAt)}';
                         final isDeleting = _deletingMapId == record.mapId;
+                        final isOpening = _openingMapId == record.mapId;
 
                         return Container(
                           margin: const EdgeInsets.only(bottom: 12),
@@ -758,7 +854,10 @@ class _HistoryTabState extends State<_HistoryTab> {
                             ),
                           ),
                           child: ListTile(
-                            onTap: () => unawaited(_openMap(record)),
+                            onTap:
+                                (isDeleting || isOpening)
+                                    ? null
+                                    : () => unawaited(_openMap(record)),
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 14,
                               vertical: 6,
@@ -796,7 +895,7 @@ class _HistoryTabState extends State<_HistoryTab> {
                               ),
                             ),
                             trailing:
-                                isDeleting
+                                (isDeleting || isOpening)
                                     ? const SizedBox(
                                       width: 20,
                                       height: 20,

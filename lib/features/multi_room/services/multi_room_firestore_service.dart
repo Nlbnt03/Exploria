@@ -119,6 +119,8 @@ class MultiRoomFirestoreService {
     }
 
     final room = Room.fromDoc(roomSnap);
+    final roomName = room.roomName.trim();
+    final fromUsername = await _resolveUsername(fromUserId);
     if (room.hostId != fromUserId) {
       throw FirebaseException(
         plugin: 'multi_room_firestore_service',
@@ -155,7 +157,9 @@ class MultiRoomFirestoreService {
 
       tx.set(inviteRef, {
         'roomId': roomId,
+        'roomName': roomName.isEmpty ? roomId : roomName,
         'fromUserId': fromUserId,
+        'fromUsername': fromUsername,
         'toUserId': normalizedToUserId,
         'status': 'pending',
         'createdAt': FieldValue.serverTimestamp(),
@@ -332,9 +336,16 @@ class MultiRoomFirestoreService {
     return _invites
         .where('toUserId', isEqualTo: uid)
         .where('status', isEqualTo: 'pending')
-        .orderBy('createdAt', descending: true)
         .snapshots()
-        .map((snapshot) => snapshot.docs.map(Invite.fromDoc).toList());
+        .map((snapshot) {
+          final invites = snapshot.docs.map(Invite.fromDoc).toList();
+          invites.sort((a, b) {
+            final aTime = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+            final bTime = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+            return bTime.compareTo(aTime);
+          });
+          return invites;
+        });
   }
 
   Stream<int> listenPendingInvitesCountFor(String uid) {
@@ -370,6 +381,13 @@ class MultiRoomFirestoreService {
 
   Future<String> _resolveUsername(String uid) async {
     final userDoc = await _users.doc(uid).get();
+    final name = (userDoc.data()?['name'] as String?)?.trim() ?? '';
+    final surname = (userDoc.data()?['surname'] as String?)?.trim() ?? '';
+    final fullName = '$name $surname'.trim();
+    if (fullName.isNotEmpty) {
+      return fullName;
+    }
+
     final username = (userDoc.data()?['username'] as String?)?.trim();
     if (username != null && username.isNotEmpty) {
       return username;

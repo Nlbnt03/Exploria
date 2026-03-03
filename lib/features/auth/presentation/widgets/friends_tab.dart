@@ -278,8 +278,12 @@ class _FriendsTabState extends State<FriendsTab> {
   }
 
   Widget _buildRoomInvitesButton() {
+    final currentUid =
+        widget.uid.trim().isNotEmpty
+            ? widget.uid
+            : (_multiRoomService.currentUid ?? '');
     return StreamBuilder<int>(
-      stream: _multiRoomService.listenPendingInvitesCountFor(widget.uid),
+      stream: _multiRoomService.listenPendingInvitesCountFor(currentUid),
       builder: (context, snapshot) {
         final inviteCount = snapshot.data ?? 0;
 

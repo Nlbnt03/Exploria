@@ -81,7 +81,7 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
           context,
           AppRouter.createMultiRoom,
           arguments: CreateRoomScreenArgs(
-            cityId: 'istanbul',
+            cityId: selectedArea.id,
             initialRoomName: '${selectedArea.title} Ekibi',
           ),
         );

@@ -335,12 +335,18 @@ service cloud.firestore {
       allow create: if isSignedIn()
         && request.resource.data.keys().hasOnly([
           'roomId',
+          'roomName',
           'fromUserId',
+          'fromUsername',
           'toUserId',
           'status',
           'createdAt'
         ])
         && request.resource.data.fromUserId == request.auth.uid
+        && request.resource.data.roomName is string
+        && request.resource.data.roomName.size() > 0
+        && request.resource.data.fromUsername is string
+        && request.resource.data.fromUsername.size() > 0
         && request.resource.data.toUserId is string
         && request.resource.data.toUserId != request.auth.uid
         && request.resource.data.status == 'pending'
@@ -353,14 +359,18 @@ service cloud.firestore {
         && resource.data.status == 'pending'
         && request.resource.data.keys().hasOnly([
           'roomId',
+          'roomName',
           'fromUserId',
+          'fromUsername',
           'toUserId',
           'status',
           'createdAt',
           'updatedAt'
         ])
         && request.resource.data.roomId == resource.data.roomId
+        && request.resource.data.roomName == resource.data.roomName
         && request.resource.data.fromUserId == resource.data.fromUserId
+        && request.resource.data.fromUsername == resource.data.fromUsername
         && request.resource.data.toUserId == resource.data.toUserId
         && request.resource.data.createdAt == resource.data.createdAt
         && request.resource.data.status in ['accepted', 'rejected'];

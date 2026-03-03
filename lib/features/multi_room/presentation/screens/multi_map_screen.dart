@@ -2,11 +2,15 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../auth/data/services/map_progress_service.dart';
+import '../../../auth/domain/models/campus_map_state.dart';
+import '../../../auth/presentation/map/fog_manager.dart';
 import '../../../auth/presentation/map/gtu_boundary.dart';
 import '../../models/live_location.dart';
 import '../../models/member.dart';
@@ -29,14 +33,20 @@ class MultiMapScreen extends StatefulWidget {
 }
 
 class _MultiMapScreenState extends State<MultiMapScreen> {
-  static const String _sourceId = 'multi-room-locations-source';
+  static const String _locationSourceId = 'multi-room-locations-source';
   static const String _circleLayerId = 'multi-room-locations-circle';
   static const String _labelLayerId = 'multi-room-locations-label';
+  static const String _fogSourceId = 'multi-room-fog-source';
+  static const String _fogLayerId = 'multi-room-fog-layer';
 
   final MultiRoomFirestoreService _service = MultiRoomFirestoreService();
+  final MapProgressService _mapProgressService = MapProgressService();
 
   MapboxMap? _mapboxMap;
   GeoJsonSource? _locationSource;
+  GeoJsonSource? _fogSource;
+  FogManager? _fogManager;
+  CameraState? _latestCameraState;
 
   StreamSubscription<Room?>? _roomSub;
   StreamSubscription<List<Member>>? _membersSub;
@@ -46,12 +56,24 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
   final Map<String, LiveLocation> _locationByUid = <String, LiveLocation>{};
 
   Room? _room;
+  Position? _lastInsidePosition;
   Timer? _locationTimer;
+  Timer? _fogRefreshDebounce;
+  Timer? _fogAnimationTicker;
+  Timer? _persistMapStateDebounce;
 
   bool _styleReady = false;
   bool _isTracking = false;
   bool _routeLocked = false;
   bool _cameraMovedToFirstPoint = false;
+  bool _fogRefreshInFlight = false;
+  bool _fogRefreshQueued = false;
+  bool _historyMarked = false;
+
+  String? _historyMapId;
+  String? _historyAreaId;
+  String? _historyMapName;
+  String? _lastRenderedFogGeoJson;
 
   @override
   void initState() {
@@ -117,6 +139,33 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
         );
   }
 
+  CampusAreaConfig _resolveAreaForRoom(Room? room) {
+    if (room == null) {
+      return resolveCampusArea(defaultCampusAreaId);
+    }
+
+    final roomCityId = room.cityId.trim();
+    final hasMatch = selectableCampusAreas.any((area) => area.id == roomCityId);
+    final areaId = hasMatch ? roomCityId : defaultCampusAreaId;
+    return resolveCampusArea(areaId);
+  }
+
+  String _resolveAreaIdForRoom(Room room) {
+    final roomCityId = room.cityId.trim();
+    final hasMatch = selectableCampusAreas.any((area) => area.id == roomCityId);
+    return hasMatch ? roomCityId : defaultCampusAreaId;
+  }
+
+  String _historyMapIdForRoom(Room room) => 'multi_${room.id}';
+
+  String _historyMapNameForRoom(Room room) {
+    final roomName = room.roomName.trim();
+    if (roomName.isEmpty) {
+      return 'Coklu Oda ${room.id}';
+    }
+    return '$roomName (Coklu)';
+  }
+
   void _onRoomChanged(Room? room) {
     _room = room;
 
@@ -139,8 +188,40 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
 
     if (room.isActive) {
       _startTracking();
+      unawaited(_markRoomMapOpenedForHistory(room));
     } else {
       _stopTracking();
+    }
+  }
+
+  Future<void> _markRoomMapOpenedForHistory(Room room) async {
+    if (_historyMarked) {
+      return;
+    }
+
+    final uid = _service.currentUid;
+    if (uid == null || uid.isEmpty) {
+      return;
+    }
+
+    final mapId = _historyMapIdForRoom(room);
+    final areaId = _resolveAreaIdForRoom(room);
+    final mapName = _historyMapNameForRoom(room);
+
+    try {
+      await _mapProgressService.markMapOpened(
+        uid: uid,
+        mapId: mapId,
+        areaId: areaId,
+        mapName: mapName,
+      );
+      _historyMarked = true;
+      _historyMapId = mapId;
+      _historyAreaId = areaId;
+      _historyMapName = mapName;
+      _schedulePersistMapState(delay: const Duration(milliseconds: 700));
+    } catch (_) {
+      // Room map history registration is best-effort.
     }
   }
 
@@ -208,8 +289,38 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
         current.latitude,
         current.longitude,
       );
+
+      _revealFogForPosition(Position(current.longitude, current.latitude));
     } on Exception {
       // Next 5-second tick retries.
+    }
+  }
+
+  void _revealFogForPosition(Position position) {
+    final fogManager = _fogManager;
+    if (fogManager == null) {
+      return;
+    }
+
+    if (!fogManager.contains(position)) {
+      return;
+    }
+
+    _lastInsidePosition = position;
+
+    final hasNewReveal = fogManager.revealForPosition(position);
+    if (hasNewReveal) {
+      _startFogAnimationTicker();
+      _scheduleFogRefresh(delay: const Duration(milliseconds: 16));
+      _schedulePersistMapState(delay: const Duration(milliseconds: 650));
+      if (mounted) {
+        setState(() {});
+      }
+      return;
+    }
+
+    if (fogManager.hasPendingRevealAnimation) {
+      _startFogAnimationTicker();
     }
   }
 
@@ -260,8 +371,86 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
   }
 
   Future<void> _onStyleLoaded() async {
+    _styleReady = false;
+    await _prepareFogLayer();
     await _prepareLocationLayers();
+    _latestCameraState = await _mapboxMap?.getCameraState();
+    _styleReady = true;
     await _refreshLocationSource();
+    _scheduleFogRefresh(delay: const Duration(milliseconds: 120));
+  }
+
+  void _onCameraChanged(CameraChangedEventData data) {
+    _latestCameraState = data.cameraState;
+    _scheduleFogRefresh();
+    _schedulePersistMapState();
+  }
+
+  Future<void> _prepareFogLayer() async {
+    final map = _mapboxMap;
+    if (map == null) {
+      return;
+    }
+
+    final area = _resolveAreaForRoom(_room);
+    final fogManager = FogManager(
+      campusBoundary: area.boundary,
+      gridSizeMeters: area.gridSizeMeters,
+    );
+    await fogManager.initialize();
+    _fogManager = fogManager;
+
+    await map.setBounds(
+      CameraBoundsOptions(
+        bounds: fogManager.bounds.toCoordinateBounds(),
+        minZoom: 14.8,
+        maxZoom: 19.2,
+        minPitch: 0,
+        maxPitch: 75,
+      ),
+    );
+
+    final source = GeoJsonSource(
+      id: _fogSourceId,
+      data: _emptyFeatureCollection(),
+    );
+
+    try {
+      await map.style.addSource(source);
+      _fogSource = source;
+    } on PlatformException catch (e) {
+      if (_isAlreadyExistsError(e)) {
+        final existing = await map.style.getSource(_fogSourceId);
+        if (existing is GeoJsonSource) {
+          _fogSource = existing;
+        }
+      } else {
+        rethrow;
+      }
+    }
+
+    await _fogSource?.updateGeoJSON(_emptyFeatureCollection());
+    _lastRenderedFogGeoJson = _emptyFeatureCollection();
+
+    try {
+      await map.style.addLayer(
+        FillLayer(
+          id: _fogLayerId,
+          sourceId: _fogSourceId,
+          fillAntialias: true,
+          fillColor: const Color(0xFF0D1117).toARGB32(),
+          fillOpacityExpression: <Object>[
+            'coalesce',
+            <Object>['get', 'opacity'],
+            fogManager.baseFogOpacity,
+          ],
+        ),
+      );
+    } on PlatformException catch (e) {
+      if (!_isAlreadyExistsError(e)) {
+        rethrow;
+      }
+    }
   }
 
   Future<void> _prepareLocationLayers() async {
@@ -271,7 +460,7 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
     }
 
     final source = GeoJsonSource(
-      id: _sourceId,
+      id: _locationSourceId,
       data: _emptyFeatureCollection(),
     );
 
@@ -279,7 +468,7 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
       await map.style.addSource(source);
       _locationSource = source;
     } on Exception {
-      final existing = await map.style.getSource(_sourceId);
+      final existing = await map.style.getSource(_locationSourceId);
       if (existing is GeoJsonSource) {
         _locationSource = existing;
       }
@@ -289,7 +478,7 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
       await map.style.addLayer(
         CircleLayer(
           id: _circleLayerId,
-          sourceId: _sourceId,
+          sourceId: _locationSourceId,
           circleRadius: 9,
           circleOpacity: 0.96,
           circleStrokeWidth: 2,
@@ -308,7 +497,7 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
       await map.style.addLayer(
         SymbolLayer(
           id: _labelLayerId,
-          sourceId: _sourceId,
+          sourceId: _locationSourceId,
           textFieldExpression: <Object>['get', 'username'],
           textSize: 12,
           textColor: Colors.white.toARGB32(),
@@ -322,8 +511,6 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
     } on Exception {
       // Layer exists.
     }
-
-    _styleReady = true;
   }
 
   Future<void> _refreshLocationSource() async {
@@ -382,6 +569,137 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
     }
   }
 
+  void _scheduleFogRefresh({
+    Duration delay = const Duration(milliseconds: 100),
+  }) {
+    _fogRefreshDebounce?.cancel();
+    _fogRefreshDebounce = Timer(delay, _refreshFog);
+  }
+
+  Future<void> _refreshFog() async {
+    if (_fogRefreshInFlight) {
+      _fogRefreshQueued = true;
+      return;
+    }
+
+    _fogRefreshInFlight = true;
+
+    final map = _mapboxMap;
+    final fogSource = _fogSource;
+    final fogManager = _fogManager;
+    final cameraState = _latestCameraState;
+    if (!_styleReady ||
+        map == null ||
+        fogSource == null ||
+        fogManager == null ||
+        cameraState == null) {
+      _fogRefreshInFlight = false;
+      return;
+    }
+
+    try {
+      final bounds = await map.coordinateBoundsForCamera(
+        cameraState.toCameraOptions(),
+      );
+      final geoJson = fogManager.geoJsonForViewport(
+        southwest: bounds.southwest.coordinates,
+        northeast: bounds.northeast.coordinates,
+      );
+      if (geoJson != _lastRenderedFogGeoJson) {
+        await fogSource.updateGeoJSON(geoJson);
+        _lastRenderedFogGeoJson = geoJson;
+      }
+    } finally {
+      _fogRefreshInFlight = false;
+      if (_fogRefreshQueued) {
+        _fogRefreshQueued = false;
+        unawaited(_refreshFog());
+      }
+    }
+  }
+
+  void _startFogAnimationTicker() {
+    if (_fogAnimationTicker != null) {
+      return;
+    }
+
+    _fogAnimationTicker = Timer.periodic(const Duration(milliseconds: 180), (
+      timer,
+    ) {
+      final fogManager = _fogManager;
+      if (fogManager == null) {
+        timer.cancel();
+        _fogAnimationTicker = null;
+        return;
+      }
+
+      final changed = fogManager.advanceRevealAnimationStep();
+      if (changed) {
+        _scheduleFogRefresh(delay: const Duration(milliseconds: 16));
+        _schedulePersistMapState(delay: const Duration(milliseconds: 650));
+        if (mounted) {
+          setState(() {});
+        }
+      }
+
+      if (!fogManager.hasPendingRevealAnimation) {
+        timer.cancel();
+        _fogAnimationTicker = null;
+      }
+    });
+  }
+
+  void _schedulePersistMapState({
+    Duration delay = const Duration(milliseconds: 850),
+  }) {
+    _persistMapStateDebounce?.cancel();
+    _persistMapStateDebounce = Timer(delay, () {
+      unawaited(_persistMapState());
+    });
+  }
+
+  Future<void> _persistMapState() async {
+    if (!_historyMarked) {
+      return;
+    }
+
+    final uid = _service.currentUid;
+    final mapId = _historyMapId;
+    final areaId = _historyAreaId;
+    final mapName = _historyMapName;
+    final fogManager = _fogManager;
+
+    if (uid == null ||
+        uid.isEmpty ||
+        mapId == null ||
+        areaId == null ||
+        mapName == null ||
+        fogManager == null) {
+      return;
+    }
+
+    final cameraState = _latestCameraState;
+    final cameraCenter = cameraState?.center.coordinates;
+    final zoom = cameraState?.zoom;
+
+    try {
+      await _mapProgressService.saveMapState(
+        uid: uid,
+        mapId: mapId,
+        areaId: areaId,
+        mapName: mapName,
+        state: CampusMapState(
+          revealedCellIds: fogManager.snapshotRevealedCellIds(),
+          lastInsidePosition: _lastInsidePosition,
+          cameraCenter: cameraCenter,
+          zoom: zoom,
+        ),
+      );
+    } catch (_) {
+      // Persisting map state is best-effort.
+    }
+  }
+
   String _emptyFeatureCollection() {
     return '{"type":"FeatureCollection","features":[]}';
   }
@@ -396,9 +714,19 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
     return palette[hash % palette.length];
   }
 
+  bool _isAlreadyExistsError(PlatformException error) {
+    final message =
+        '${error.message ?? ''} ${error.details ?? ''}'.toLowerCase();
+    return message.contains('already exists') || message.contains('exists');
+  }
+
   @override
   void dispose() {
     _stopTracking();
+    _fogRefreshDebounce?.cancel();
+    _fogAnimationTicker?.cancel();
+    _persistMapStateDebounce?.cancel();
+    unawaited(_persistMapState());
     _roomSub?.cancel();
     _membersSub?.cancel();
     _locationsSub?.cancel();
@@ -409,13 +737,19 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
   Widget build(BuildContext context) {
     final room = _room;
     final isHost = room?.hostId == _service.currentUid;
+    final area = _resolveAreaForRoom(room);
+    final fogManager = _fogManager;
+    final fogSummary =
+        fogManager == null
+            ? 'Sis hazirlaniyor...'
+            : 'Sis acilan hucre: ${fogManager.revealedCount}/${fogManager.totalCount}';
 
     return Scaffold(
       backgroundColor: AppColors.bgBottom,
       appBar: AppBar(
         backgroundColor: AppColors.bgTop,
         foregroundColor: AppColors.textMain,
-        title: Text(room?.roomName ?? 'Multi Room Map'),
+        title: Text(room?.roomName ?? 'Coklu Harita'),
         actions: [
           if (isHost)
             IconButton(
@@ -433,16 +767,17 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
       body: Stack(
         children: [
           MapWidget(
-            key: ValueKey('multi-map-${widget.roomId}'),
-            styleUri: defaultMapStyleUri,
+            key: ValueKey('multi-map-${widget.roomId}-${area.id}'),
+            styleUri: area.styleUri,
             cameraOptions: CameraOptions(
-              center: Point(coordinates: gtuCampusCenter),
-              zoom: 13,
+              center: Point(coordinates: area.center),
+              zoom: 14.8,
               bearing: 0,
               pitch: 0,
             ),
             onMapCreated: (mapboxMap) => unawaited(_onMapCreated(mapboxMap)),
             onStyleLoadedListener: (_) => unawaited(_onStyleLoaded()),
+            onCameraChangeListener: _onCameraChanged,
           ),
           Positioned(
             top: 12,
@@ -477,6 +812,15 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
                       style: const TextStyle(
                         color: AppColors.textMuted,
                         fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      fogSummary,
+                      style: const TextStyle(
+                        color: AppColors.primary,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ],

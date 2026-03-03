@@ -72,8 +72,42 @@ class _PendingInvitesScreenState extends State<PendingInvitesScreen> {
   }
 
   Future<_InviteMeta> _loadInviteMeta(Invite invite) async {
-    final fromUsername = await _service.fetchUsername(invite.fromUserId);
-    return _InviteMeta(roomName: invite.roomId, fromUsername: fromUsername);
+    final cachedRoomName = invite.roomName?.trim() ?? '';
+    final roomName = cachedRoomName.isNotEmpty ? cachedRoomName : invite.roomId;
+
+    final cachedUsername = invite.fromUsername?.trim() ?? '';
+    if (cachedUsername.isNotEmpty) {
+      return _InviteMeta(roomName: roomName, fromUsername: cachedUsername);
+    }
+
+    try {
+      final fromUsername = await _service.fetchUsername(invite.fromUserId);
+      final normalized = fromUsername.trim();
+      return _InviteMeta(
+        roomName: roomName,
+        fromUsername: normalized.isNotEmpty ? normalized : 'Kullanici',
+      );
+    } catch (_) {
+      return _InviteMeta(roomName: roomName, fromUsername: 'Kullanici');
+    }
+  }
+
+  String _formatInviteTime(DateTime? createdAt) {
+    if (createdAt == null) {
+      return 'Az once gonderildi';
+    }
+    final now = DateTime.now();
+    final diff = now.difference(createdAt);
+    if (diff.inMinutes < 1) {
+      return 'Simdi gonderildi';
+    }
+    if (diff.inHours < 1) {
+      return '${diff.inMinutes} dk once gonderildi';
+    }
+    if (diff.inDays < 1) {
+      return '${diff.inHours} saat once gonderildi';
+    }
+    return '${diff.inDays} gun once gonderildi';
   }
 
   @override
@@ -83,7 +117,7 @@ class _PendingInvitesScreenState extends State<PendingInvitesScreen> {
       appBar: AppBar(
         backgroundColor: AppColors.bgTop,
         foregroundColor: AppColors.textMain,
-        title: const Text('Pending Room Invites'),
+        title: const Text('Oda Davetleri'),
       ),
       body: StreamBuilder<List<Invite>>(
         stream: _service.listenPendingInvites(),
@@ -108,9 +142,13 @@ class _PendingInvitesScreenState extends State<PendingInvitesScreen> {
           final invites = snapshot.data ?? const <Invite>[];
           if (invites.isEmpty) {
             return const Center(
-              child: Text(
-                'Bekleyen davet yok.',
-                style: TextStyle(color: AppColors.textMuted),
+              child: Padding(
+                padding: EdgeInsets.symmetric(horizontal: 28),
+                child: Text(
+                  'Su an bekleyen oda davetin yok.\nYeni davet geldiginde burada gorunecek.',
+                  style: TextStyle(color: AppColors.textMuted),
+                  textAlign: TextAlign.center,
+                ),
               ),
             );
           }
@@ -137,7 +175,7 @@ class _PendingInvitesScreenState extends State<PendingInvitesScreen> {
                     final roomName =
                         metaSnapshot.data?.roomName ?? invite.roomId;
                     final fromUsername =
-                        metaSnapshot.data?.fromUsername ?? invite.fromUserId;
+                        metaSnapshot.data?.fromUsername ?? 'Kullanici';
 
                     return Padding(
                       padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
@@ -156,6 +194,14 @@ class _PendingInvitesScreenState extends State<PendingInvitesScreen> {
                           Text(
                             'Davet eden: $fromUsername',
                             style: const TextStyle(color: AppColors.textMuted),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            _formatInviteTime(invite.createdAt),
+                            style: const TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 12,
+                            ),
                           ),
                           const SizedBox(height: 12),
                           Row(
@@ -180,7 +226,7 @@ class _PendingInvitesScreenState extends State<PendingInvitesScreen> {
                                               color: Colors.white,
                                             ),
                                           )
-                                          : const Text('Accept'),
+                                          : const Text('Kabul Et'),
                                 ),
                               ),
                               const SizedBox(width: 10),
@@ -198,7 +244,7 @@ class _PendingInvitesScreenState extends State<PendingInvitesScreen> {
                                       ),
                                     ),
                                   ),
-                                  child: const Text('Reject'),
+                                  child: const Text('Reddet'),
                                 ),
                               ),
                             ],
