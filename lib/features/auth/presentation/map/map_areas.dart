@@ -4,12 +4,12 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
 const String defaultMapStyleUri =
     'mapbox://styles/ynalbant/cmm88zj0i001701sh7fzxcnen';
-const String campusAreaGtu = 'gebze_teknik_universitesi';
-const String campusAreaGebzeKyk = 'gebze_kyk';
-const String defaultCampusAreaId = campusAreaGtu;
+const String mapAreaGtu = 'gebze_teknik_universitesi';
+const String mapAreaGebzeKyk = 'gebze_kyk';
+const String defaultMapAreaId = mapAreaGtu;
 
-class CampusAreaConfig {
-  const CampusAreaConfig({
+class MapAreaConfig {
+  const MapAreaConfig({
     required this.id,
     required this.title,
     required this.subtitle,
@@ -30,47 +30,58 @@ class CampusAreaConfig {
 
 const String gtuStyleUri = defaultMapStyleUri;
 
-final Position gtuCampusCenter = Position(29.3682, 40.8105);
+final Position gebzeTeknikCenter = Position(29.361052, 40.809886);
 
-final List<Position> gtuCampusBoundary = <Position>[
-  Position(29.3548, 40.8012),
-  Position(29.3622, 40.7998),
-  Position(29.3698, 40.8006),
-  Position(29.3774, 40.8034),
-  Position(29.3846, 40.8079),
-  Position(29.3862, 40.8139),
-  Position(29.3834, 40.8193),
-  Position(29.3766, 40.8214),
-  Position(29.3688, 40.8210),
-  Position(29.3609, 40.8188),
-  Position(29.3553, 40.8137),
-  Position(29.3532, 40.8074),
-  Position(29.3548, 40.8012),
+final List<Position> gebzeTeknikBoundary = <Position>[
+  Position(29.354666, 40.809329),
+  Position(29.353445, 40.805435),
+  Position(29.354666, 40.803008),
+  Position(29.355096, 40.802736),
+  Position(29.359188, 40.802936),
+  Position(29.364477, 40.804765),
+  Position(29.365984, 40.811104),
+  Position(29.363328, 40.813586),
+  Position(29.360995, 40.817011),
+  Position(29.360297, 40.816708),
+  Position(29.358934, 40.813032),
+  Position(29.358213, 40.813116),
+  Position(29.357086, 40.81212),
+  Position(29.354962, 40.811919),
+  Position(29.353842, 40.813501),
+  Position(29.351778, 40.814006),
+  Position(29.350304, 40.813636),
+  Position(29.349873, 40.812387),
+  Position(29.349289, 40.810545),
+  Position(29.351921, 40.80999),
+  Position(29.353689, 40.809635),
+  Position(29.354666, 40.809329),
 ];
 
 final Position gebzeKykCenter = Position(29.492377, 40.789251);
 
 final List<Position> gebzeKykBoundary = <Position>[
-  Position(29.489850, 40.788250),
-  Position(29.494450, 40.788250),
-  Position(29.494650, 40.790050),
-  Position(29.493700, 40.790850),
-  Position(29.490050, 40.790450),
-  Position(29.489850, 40.788250),
+  Position(29.489638, 40.789002),
+  Position(29.492604, 40.790494),
+  Position(29.493774, 40.790501),
+  Position(29.494954, 40.789388),
+  Position(29.494813, 40.788875),
+  Position(29.490703, 40.788529),
+  Position(29.489691, 40.788529),
+  Position(29.489638, 40.789002),
 ];
 
-final List<CampusAreaConfig> selectableCampusAreas = <CampusAreaConfig>[
-  CampusAreaConfig(
-    id: campusAreaGtu,
+final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
+  MapAreaConfig(
+    id: mapAreaGtu,
     title: 'Gebze Teknik Universitesi',
     subtitle: 'Sadece GTU kampus sinirlari',
     styleUri: defaultMapStyleUri,
-    center: gtuCampusCenter,
-    boundary: gtuCampusBoundary,
+    center: gebzeTeknikCenter,
+    boundary: gebzeTeknikBoundary,
     gridSizeMeters: 30,
   ),
-  CampusAreaConfig(
-    id: campusAreaGebzeKyk,
+  MapAreaConfig(
+    id: mapAreaGebzeKyk,
     title: 'Gebze KYK',
     subtitle: 'Gebze ogrenci yurdu sinirlari',
     styleUri: defaultMapStyleUri,
@@ -80,17 +91,16 @@ final List<CampusAreaConfig> selectableCampusAreas = <CampusAreaConfig>[
   ),
 ];
 
-final Map<String, CampusAreaConfig> _campusAreaById =
-    <String, CampusAreaConfig>{
-      for (final area in selectableCampusAreas) area.id: area,
-    };
+final Map<String, MapAreaConfig> _mapAreaById = <String, MapAreaConfig>{
+  for (final area in selectableMapAreas) area.id: area,
+};
 
-CampusAreaConfig resolveCampusArea(String areaId) {
-  return _campusAreaById[areaId] ?? _campusAreaById[defaultCampusAreaId]!;
+MapAreaConfig resolveMapArea(String areaId) {
+  return _mapAreaById[areaId] ?? _mapAreaById[defaultMapAreaId]!;
 }
 
-class CampusBounds {
-  const CampusBounds({
+class MapAreaBounds {
+  const MapAreaBounds({
     required this.minLat,
     required this.maxLat,
     required this.minLng,
@@ -113,7 +123,7 @@ class CampusBounds {
   }
 }
 
-CampusBounds calculateBounds(List<Position> polygon) {
+MapAreaBounds calculatePolygonBounds(List<Position> polygon) {
   var minLat = double.infinity;
   var maxLat = -double.infinity;
   var minLng = double.infinity;
@@ -128,7 +138,7 @@ CampusBounds calculateBounds(List<Position> polygon) {
     if (lng > maxLng) maxLng = lng;
   }
 
-  return CampusBounds(
+  return MapAreaBounds(
     minLat: minLat,
     maxLat: maxLat,
     minLng: minLng,

@@ -12,7 +12,7 @@ import '../../domain/models/user_map_record.dart';
 import '../../../multi_room/presentation/screens/multi_map_screen.dart';
 import '../../../multi_room/services/multi_room_firestore_service.dart';
 import '../../../multi_room/presentation/screens/waiting_room_screen.dart';
-import '../map/gtu_boundary.dart';
+import '../map/map_areas.dart';
 import '../widgets/friends_tab.dart';
 import 'city_map_page.dart';
 import 'city_selection_page.dart';
@@ -783,7 +783,7 @@ class _HistoryTabState extends State<_HistoryTab> {
   }
 
   Future<void> _openFinishedMultiMapSnapshot(UserMapRecord record) async {
-    final resolvedAreaId = resolveCampusArea(record.areaId).id;
+    final resolvedAreaId = resolveMapArea(record.areaId).id;
     if (!mounted) {
       return;
     }
@@ -943,8 +943,7 @@ class _HistoryTabState extends State<_HistoryTab> {
                 return Column(
                   children: records
                       .map((record) {
-                        final areaTitle =
-                            resolveCampusArea(record.areaId).title;
+                        final areaTitle = resolveMapArea(record.areaId).title;
                         final updatedAt = record.updatedAt ?? record.createdAt;
                         final subtitle =
                             updatedAt == null

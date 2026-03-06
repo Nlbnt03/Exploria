@@ -9,7 +9,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../data/services/map_progress_service.dart';
 import '../../domain/models/campus_map_state.dart';
 import '../map/fog_manager.dart';
-import '../map/gtu_boundary.dart';
+import '../map/map_areas.dart';
 import '../map/location_service.dart';
 import '../map/map_controller.dart';
 
@@ -49,7 +49,7 @@ class _CityMapPageState extends State<CityMapPage> {
   final MapProgressService _mapProgressService = MapProgressService();
 
   CampusMapController? _mapController;
-  late final CampusAreaConfig _selectedArea;
+  late final MapAreaConfig _selectedArea;
   late final String _mapId;
   late final String _mapName;
   late Position _initialCenter;
@@ -61,7 +61,7 @@ class _CityMapPageState extends State<CityMapPage> {
   @override
   void initState() {
     super.initState();
-    _selectedArea = resolveCampusArea(widget.areaId);
+    _selectedArea = resolveMapArea(widget.areaId);
     _mapId = widget.mapId.trim().isEmpty ? widget.areaId : widget.mapId.trim();
     _mapName =
         widget.mapName.trim().isEmpty

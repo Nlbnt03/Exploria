@@ -6,7 +6,7 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
 import '../../domain/models/campus_map_state.dart';
 import 'fog_manager.dart';
-import 'gtu_boundary.dart';
+import 'map_areas.dart';
 import 'location_service.dart';
 
 class CampusMapController extends ChangeNotifier {
@@ -23,6 +23,8 @@ class CampusMapController extends ChangeNotifier {
 
   static const String _fogSourceId = 'gtu-fog-source';
   static const String _fogLayerId = 'gtu-fog-layer';
+  static const String _cloudSourceId = 'gtu-cloud-source';
+  static const String _cloudLayerId = 'gtu-cloud-layer';
 
   final FogManager fogManager;
   final LocationService locationService;
@@ -33,6 +35,7 @@ class CampusMapController extends ChangeNotifier {
 
   MapboxMap? _mapboxMap;
   GeoJsonSource? _fogSource;
+  GeoJsonSource? _cloudSource;
   CameraState? _latestCameraState;
   StreamSubscription<Position>? _locationSubscription;
   Timer? _fogUpdateDebounce;
@@ -51,6 +54,7 @@ class CampusMapController extends ChangeNotifier {
   double _currentZoom;
   Position? _lastInsidePosition;
   String? _lastRenderedFogGeoJson;
+  String? _lastRenderedCloudGeoJson;
   bool _refreshInFlight = false;
   bool _refreshQueued = false;
 
@@ -129,7 +133,6 @@ class CampusMapController extends ChangeNotifier {
       return;
     }
 
-    if (_isOutOfCampus) return;
     _scheduleFogRefresh();
     _schedulePersist();
   }
@@ -184,12 +187,68 @@ class CampusMapController extends ChangeNotifier {
         FillLayer(
           id: _fogLayerId,
           sourceId: _fogSourceId,
-          fillAntialias: true,
-          fillColor: const Color(0xFF0D1117).toARGB32(),
+          fillAntialias: false,
+          fillColor: const Color(0xFFFFFFFF).toARGB32(),
           fillOpacityExpression: <Object>[
+            '*',
+            <Object>[
+              'coalesce',
+              <Object>['get', 'opacity'],
+              fogManager.baseFogOpacity,
+            ],
+            0.06,
+          ],
+        ),
+      );
+    } on PlatformException catch (e) {
+      if (!_isAlreadyExistsError(e)) {
+        rethrow;
+      }
+    }
+
+    _cloudSource = GeoJsonSource(
+      id: _cloudSourceId,
+      data: _emptyFeatureCollection,
+    );
+    try {
+      await map.style.addSource(_cloudSource!);
+    } on PlatformException catch (e) {
+      if (_isAlreadyExistsError(e)) {
+        final existingSource = await map.style.getSource(_cloudSourceId);
+        if (existingSource is GeoJsonSource) {
+          _cloudSource = existingSource;
+        }
+      } else {
+        rethrow;
+      }
+    }
+    await _cloudSource?.updateGeoJSON(_emptyFeatureCollection);
+    _lastRenderedCloudGeoJson = _emptyFeatureCollection;
+
+    try {
+      await map.style.addLayer(
+        CircleLayer(
+          id: _cloudLayerId,
+          sourceId: _cloudSourceId,
+          circleColor: const Color(0xFFFFFFFF).toARGB32(),
+          circleBlur: 0.96,
+          circleOpacityExpression: <Object>[
+            'min',
+            0.95,
+            <Object>[
+              '*',
+              <Object>[
+                'coalesce',
+                <Object>['get', 'opacity'],
+                0.0,
+              ],
+              1.35,
+            ],
+          ],
+          circleRadiusExpression: <Object>[
             'coalesce',
-            <Object>['get', 'opacity'],
-            fogManager.baseFogOpacity,
+            <Object>['get', 'radius'],
+            24.0,
           ],
         ),
       );
@@ -298,12 +357,13 @@ class CampusMapController extends ChangeNotifier {
     _refreshInFlight = true;
     final map = _mapboxMap;
     final fogSource = _fogSource;
+    final cloudSource = _cloudSource;
     final cameraState = _latestCameraState;
 
     if (map == null ||
         fogSource == null ||
-        cameraState == null ||
-        _isOutOfCampus) {
+        cloudSource == null ||
+        cameraState == null) {
       _refreshInFlight = false;
       return;
     }
@@ -319,6 +379,15 @@ class CampusMapController extends ChangeNotifier {
       if (geoJson != _lastRenderedFogGeoJson) {
         await fogSource.updateGeoJSON(geoJson);
         _lastRenderedFogGeoJson = geoJson;
+      }
+
+      final cloudGeoJson = fogManager.cloudGeoJsonForViewport(
+        southwest: bounds.southwest.coordinates,
+        northeast: bounds.northeast.coordinates,
+      );
+      if (cloudGeoJson != _lastRenderedCloudGeoJson) {
+        await cloudSource.updateGeoJSON(cloudGeoJson);
+        _lastRenderedCloudGeoJson = cloudGeoJson;
       }
     } finally {
       _refreshInFlight = false;
@@ -345,12 +414,12 @@ class CampusMapController extends ChangeNotifier {
       await map.location.updateSettings(
         LocationComponentSettings(
           enabled: true,
-          pulsingEnabled: true,
-          pulsingColor: const Color(0xFF22D3EE).toARGB32(),
-          pulsingMaxRadius: 24,
+          pulsingEnabled: false,
+          pulsingColor: const Color(0xFF00D7FF).toARGB32(),
+          pulsingMaxRadius: 34,
           showAccuracyRing: false,
-          accuracyRingColor: const Color(0x3322D3EE).toARGB32(),
-          accuracyRingBorderColor: const Color(0xAA22D3EE).toARGB32(),
+          accuracyRingColor: const Color(0x4400D7FF).toARGB32(),
+          accuracyRingBorderColor: const Color(0xCC00D7FF).toARGB32(),
           puckBearingEnabled: true,
           puckBearing: PuckBearing.HEADING,
         ),

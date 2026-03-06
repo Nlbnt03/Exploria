@@ -11,7 +11,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../auth/data/services/map_progress_service.dart';
 import '../../../auth/domain/models/campus_map_state.dart';
 import '../../../auth/presentation/map/fog_manager.dart';
-import '../../../auth/presentation/map/gtu_boundary.dart';
+import '../../../auth/presentation/map/map_areas.dart';
 import '../../models/live_location.dart';
 import '../../models/member.dart';
 import '../../models/room.dart';
@@ -38,6 +38,8 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
   static const String _labelLayerId = 'multi-room-locations-label';
   static const String _fogSourceId = 'multi-room-fog-source';
   static const String _fogLayerId = 'multi-room-fog-layer';
+  static const String _cloudSourceId = 'multi-room-cloud-source';
+  static const String _cloudLayerId = 'multi-room-cloud-layer';
 
   final MultiRoomFirestoreService _service = MultiRoomFirestoreService();
   final MapProgressService _mapProgressService = MapProgressService();
@@ -45,6 +47,7 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
   MapboxMap? _mapboxMap;
   GeoJsonSource? _locationSource;
   GeoJsonSource? _fogSource;
+  GeoJsonSource? _cloudSource;
   FogManager? _fogManager;
   CameraState? _latestCameraState;
 
@@ -78,6 +81,7 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
   String? _historyAreaId;
   String? _historyMapName;
   String? _lastRenderedFogGeoJson;
+  String? _lastRenderedCloudGeoJson;
 
   @override
   void initState() {
@@ -164,21 +168,21 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
         );
   }
 
-  CampusAreaConfig _resolveAreaForRoom(Room? room) {
+  MapAreaConfig _resolveAreaForRoom(Room? room) {
     if (room == null) {
-      return resolveCampusArea(defaultCampusAreaId);
+      return resolveMapArea(defaultMapAreaId);
     }
 
     final roomCityId = room.cityId.trim();
-    final hasMatch = selectableCampusAreas.any((area) => area.id == roomCityId);
-    final areaId = hasMatch ? roomCityId : defaultCampusAreaId;
-    return resolveCampusArea(areaId);
+    final hasMatch = selectableMapAreas.any((area) => area.id == roomCityId);
+    final areaId = hasMatch ? roomCityId : defaultMapAreaId;
+    return resolveMapArea(areaId);
   }
 
   String _resolveAreaIdForRoom(Room room) {
     final roomCityId = room.cityId.trim();
-    final hasMatch = selectableCampusAreas.any((area) => area.id == roomCityId);
-    return hasMatch ? roomCityId : defaultCampusAreaId;
+    final hasMatch = selectableMapAreas.any((area) => area.id == roomCityId);
+    return hasMatch ? roomCityId : defaultMapAreaId;
   }
 
   String _historyMapIdForRoom(Room room) => 'multi_${room.id}';
@@ -528,12 +532,71 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
         FillLayer(
           id: _fogLayerId,
           sourceId: _fogSourceId,
-          fillAntialias: true,
-          fillColor: const Color(0xFF0D1117).toARGB32(),
+          fillAntialias: false,
+          fillColor: const Color(0xFFFFFFFF).toARGB32(),
           fillOpacityExpression: <Object>[
+            '*',
+            <Object>[
+              'coalesce',
+              <Object>['get', 'opacity'],
+              fogManager.baseFogOpacity,
+            ],
+            0.06,
+          ],
+        ),
+      );
+    } on PlatformException catch (e) {
+      if (!_isAlreadyExistsError(e)) {
+        rethrow;
+      }
+    }
+
+    final cloudSource = GeoJsonSource(
+      id: _cloudSourceId,
+      data: _emptyFeatureCollection(),
+    );
+
+    try {
+      await map.style.addSource(cloudSource);
+      _cloudSource = cloudSource;
+    } on PlatformException catch (e) {
+      if (_isAlreadyExistsError(e)) {
+        final existing = await map.style.getSource(_cloudSourceId);
+        if (existing is GeoJsonSource) {
+          _cloudSource = existing;
+        }
+      } else {
+        rethrow;
+      }
+    }
+
+    await _cloudSource?.updateGeoJSON(_emptyFeatureCollection());
+    _lastRenderedCloudGeoJson = _emptyFeatureCollection();
+
+    try {
+      await map.style.addLayer(
+        CircleLayer(
+          id: _cloudLayerId,
+          sourceId: _cloudSourceId,
+          circleColor: const Color(0xFFFFFFFF).toARGB32(),
+          circleBlur: 0.96,
+          circleOpacityExpression: <Object>[
+            'min',
+            0.95,
+            <Object>[
+              '*',
+              <Object>[
+                'coalesce',
+                <Object>['get', 'opacity'],
+                0.0,
+              ],
+              1.35,
+            ],
+          ],
+          circleRadiusExpression: <Object>[
             'coalesce',
-            <Object>['get', 'opacity'],
-            fogManager.baseFogOpacity,
+            <Object>['get', 'radius'],
+            24.0,
           ],
         ),
       );
@@ -677,11 +740,13 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
 
     final map = _mapboxMap;
     final fogSource = _fogSource;
+    final cloudSource = _cloudSource;
     final fogManager = _fogManager;
     final cameraState = _latestCameraState;
     if (!_styleReady ||
         map == null ||
         fogSource == null ||
+        cloudSource == null ||
         fogManager == null ||
         cameraState == null) {
       _fogRefreshInFlight = false;
@@ -699,6 +764,15 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
       if (geoJson != _lastRenderedFogGeoJson) {
         await fogSource.updateGeoJSON(geoJson);
         _lastRenderedFogGeoJson = geoJson;
+      }
+
+      final cloudGeoJson = fogManager.cloudGeoJsonForViewport(
+        southwest: bounds.southwest.coordinates,
+        northeast: bounds.northeast.coordinates,
+      );
+      if (cloudGeoJson != _lastRenderedCloudGeoJson) {
+        await cloudSource.updateGeoJSON(cloudGeoJson);
+        _lastRenderedCloudGeoJson = cloudGeoJson;
       }
     } finally {
       _fogRefreshInFlight = false;

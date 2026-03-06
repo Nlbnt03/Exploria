@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import '../../../../app/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../data/services/map_progress_service.dart';
-import '../map/gtu_boundary.dart';
+import '../map/map_areas.dart';
 import '../map/location_service.dart';
 import 'city_map_page.dart';
 import '../../../multi_room/presentation/screens/create_room_screen.dart';
@@ -30,10 +30,10 @@ class CitySelectionPage extends StatefulWidget {
 class _CitySelectionPageState extends State<CitySelectionPage> {
   final MapProgressService _mapProgressService = MapProgressService();
 
-  String _selectedAreaId = defaultCampusAreaId;
+  String _selectedAreaId = defaultMapAreaId;
   bool _isOpeningMap = false;
 
-  CampusAreaConfig get _selectedArea => resolveCampusArea(_selectedAreaId);
+  MapAreaConfig get _selectedArea => resolveMapArea(_selectedAreaId);
 
   @override
   void initState() {
@@ -51,7 +51,7 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
         return;
       }
 
-      final exists = selectableCampusAreas.any((area) => area.id == lastAreaId);
+      final exists = selectableMapAreas.any((area) => area.id == lastAreaId);
       if (!exists) return;
 
       setState(() => _selectedAreaId = lastAreaId);
@@ -288,13 +288,13 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
                     const SizedBox(height: 12),
                     Expanded(
                       child: ListView.separated(
-                        itemCount: selectableCampusAreas.length,
+                        itemCount: selectableMapAreas.length,
                         separatorBuilder: (_, _) => const SizedBox(height: 12),
                         itemBuilder: (context, index) {
-                          final area = selectableCampusAreas[index];
+                          final area = selectableMapAreas[index];
                           final isSelected = area.id == _selectedAreaId;
                           final icon =
-                              area.id == campusAreaGtu
+                              area.id == mapAreaGtu
                                   ? Icons.school_rounded
                                   : Icons.apartment_rounded;
                           return InkWell(

@@ -3,7 +3,7 @@ import 'dart:math' as math;
 
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
-import 'gtu_boundary.dart';
+import 'map_areas.dart';
 
 class FogManager {
   FogManager({
@@ -11,13 +11,13 @@ class FogManager {
     this.gridSizeMeters = 50,
     this.baseFogOpacity = 0.65,
     this.revealRadiusMeters = 28,
-  }) : _campusBounds = calculateBounds(campusBoundary);
+  }) : _campusBounds = calculatePolygonBounds(campusBoundary);
 
   final List<Position> campusBoundary;
   final double gridSizeMeters;
   final double baseFogOpacity;
   final double revealRadiusMeters;
-  final CampusBounds _campusBounds;
+  final MapAreaBounds _campusBounds;
 
   final Map<String, _FogCell> _cells = <String, _FogCell>{};
   final Set<String> _revealedCellIds = <String>{};
@@ -28,8 +28,9 @@ class FogManager {
   late final double _lonStepDeg;
   static const double _viewportBufferRatio = 0.28;
   static const List<double> _fadeOpacitySteps = <double>[0.5, 0.3, 0.1, 0.0];
+  static const int _cloudPuffsPerCell = 50;
 
-  CampusBounds get bounds => _campusBounds;
+  MapAreaBounds get bounds => _campusBounds;
   int get revealedCount => _revealedCellIds.length + _fadingCellStepById.length;
   int get totalCount => _cells.length;
   bool get hasPendingRevealAnimation => _fadingCellStepById.isNotEmpty;
@@ -161,44 +162,14 @@ class FogManager {
       return _emptyFeatureCollection;
     }
 
-    final swLat = southwest.lat.toDouble();
-    final neLat = northeast.lat.toDouble();
-    final swLng = southwest.lng.toDouble();
-    final neLng = northeast.lng.toDouble();
-
-    final minLat = math.min(swLat, neLat);
-    final maxLat = math.max(swLat, neLat);
-    final minLng = math.min(swLng, neLng);
-    final maxLng = math.max(swLng, neLng);
-    final latBuffer = math.max(
-      _latStepDeg * 1.5,
-      (maxLat - minLat).abs() * _viewportBufferRatio,
+    final viewport = _buildPaddedViewport(
+      southwest: southwest,
+      northeast: northeast,
     );
-    final lngBuffer = math.max(
-      _lonStepDeg * 1.5,
-      (maxLng - minLng).abs() * _viewportBufferRatio,
-    );
-    final paddedMinLat = minLat - latBuffer;
-    final paddedMaxLat = maxLat + latBuffer;
-    final paddedMinLng = minLng - lngBuffer;
-    final paddedMaxLng = maxLng + lngBuffer;
 
     final features = <Map<String, Object?>>[];
-    for (final cell in _cells.values) {
-      if (_revealedCellIds.contains(cell.id)) continue;
-
-      final intersectsViewport =
-          cell.maxLat >= paddedMinLat &&
-          cell.minLat <= paddedMaxLat &&
-          cell.maxLng >= paddedMinLng &&
-          cell.minLng <= paddedMaxLng;
-      if (!intersectsViewport) {
-        continue;
-      }
-
-      final fadeStep = _fadingCellStepById[cell.id];
-      final opacity =
-          fadeStep == null ? baseFogOpacity : _fadeOpacitySteps[fadeStep];
+    for (final cell in _visibleFogCells(viewport)) {
+      final opacity = _opacityForCell(cell.id);
 
       features.add(<String, Object?>{
         'type': 'Feature',
@@ -217,8 +188,136 @@ class FogManager {
     });
   }
 
+  String cloudGeoJsonForViewport({
+    required Position southwest,
+    required Position northeast,
+  }) {
+    if (!_initialized) {
+      return _emptyFeatureCollection;
+    }
+
+    final viewport = _buildPaddedViewport(
+      southwest: southwest,
+      northeast: northeast,
+    );
+
+    final features = <Map<String, Object?>>[];
+    for (final cell in _visibleFogCells(viewport)) {
+      final cellOpacity = _opacityForCell(cell.id);
+      if (cellOpacity <= 0.01) {
+        continue;
+      }
+
+      final centerLng = cell.center.lng.toDouble();
+      final centerLat = cell.center.lat.toDouble();
+      final cellLngSpan = (cell.maxLng - cell.minLng).abs();
+      final cellLatSpan = (cell.maxLat - cell.minLat).abs();
+      final lonSpreadDeg = cellLngSpan * 1.85;
+      final latSpreadDeg = cellLatSpan * 1.85;
+
+      for (var puffIndex = 0; puffIndex < _cloudPuffsPerCell; puffIndex++) {
+        final seed = _stableHash('${cell.id}#$puffIndex');
+        final lng = centerLng + ((_rand(seed, 1) - 0.5) * lonSpreadDeg);
+        final lat = centerLat + ((_rand(seed, 2) - 0.5) * latSpreadDeg);
+
+        final texture = 0.35 + (_rand(seed, 3) * 0.35);
+        final opacity = (cellOpacity * texture).clamp(0.0, 1.0);
+        final radius = 22.0 + (_rand(seed, 4) * 18.0);
+
+        features.add(<String, Object?>{
+          'type': 'Feature',
+          'id': '${cell.id}#cloud_$puffIndex',
+          'properties': <String, Object?>{
+            'grid_id': cell.id,
+            'opacity': opacity,
+            'radius': radius,
+          },
+          'geometry': <String, Object?>{
+            'type': 'Point',
+            'coordinates': <double>[lng, lat],
+          },
+        });
+      }
+    }
+
+    return jsonEncode(<String, Object?>{
+      'type': 'FeatureCollection',
+      'features': features,
+    });
+  }
+
   String get _emptyFeatureCollection =>
       '{"type":"FeatureCollection","features":[]}';
+
+  _PaddedViewport _buildPaddedViewport({
+    required Position southwest,
+    required Position northeast,
+  }) {
+    final swLat = southwest.lat.toDouble();
+    final neLat = northeast.lat.toDouble();
+    final swLng = southwest.lng.toDouble();
+    final neLng = northeast.lng.toDouble();
+
+    final minLat = math.min(swLat, neLat);
+    final maxLat = math.max(swLat, neLat);
+    final minLng = math.min(swLng, neLng);
+    final maxLng = math.max(swLng, neLng);
+    final latBuffer = math.max(
+      _latStepDeg * 1.5,
+      (maxLat - minLat).abs() * _viewportBufferRatio,
+    );
+    final lngBuffer = math.max(
+      _lonStepDeg * 1.5,
+      (maxLng - minLng).abs() * _viewportBufferRatio,
+    );
+
+    return _PaddedViewport(
+      minLat: minLat - latBuffer,
+      maxLat: maxLat + latBuffer,
+      minLng: minLng - lngBuffer,
+      maxLng: maxLng + lngBuffer,
+    );
+  }
+
+  Iterable<_FogCell> _visibleFogCells(_PaddedViewport viewport) sync* {
+    for (final cell in _cells.values) {
+      if (_revealedCellIds.contains(cell.id)) {
+        continue;
+      }
+
+      final intersectsViewport =
+          cell.maxLat >= viewport.minLat &&
+          cell.minLat <= viewport.maxLat &&
+          cell.maxLng >= viewport.minLng &&
+          cell.minLng <= viewport.maxLng;
+      if (!intersectsViewport) {
+        continue;
+      }
+
+      yield cell;
+    }
+  }
+
+  double _opacityForCell(String cellId) {
+    final fadeStep = _fadingCellStepById[cellId];
+    return fadeStep == null ? baseFogOpacity : _fadeOpacitySteps[fadeStep];
+  }
+
+  int _stableHash(String input) {
+    var hash = 2166136261;
+    for (final codeUnit in input.codeUnits) {
+      hash ^= codeUnit;
+      hash = (hash * 16777619) & 0x7fffffff;
+    }
+    return hash;
+  }
+
+  double _rand(int seed, int salt) {
+    var value = seed ^ (salt * 0x45d9f3b);
+    value = (value ^ (value >> 16)) * 0x45d9f3b;
+    value = value ^ (value >> 16);
+    return (value & 0x7fffffff) / 0x7fffffff;
+  }
 
   List<_FogCell> _cellsIntersectingRevealCircle({
     required Position center,
@@ -314,4 +413,18 @@ class _FogCell {
   final double minLng;
   final double maxLng;
   final List<List<double>> ring;
+}
+
+class _PaddedViewport {
+  const _PaddedViewport({
+    required this.minLat,
+    required this.maxLat,
+    required this.minLng,
+    required this.maxLng,
+  });
+
+  final double minLat;
+  final double maxLat;
+  final double minLng;
+  final double maxLng;
 }

@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
 
-import '../../features/auth/presentation/map/gtu_boundary.dart';
+import '../../features/auth/presentation/map/map_areas.dart';
 import '../../features/auth/presentation/pages/city_map_page.dart';
 import '../../features/auth/presentation/pages/city_selection_page.dart';
 import '../../features/auth/presentation/pages/home_page.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/sign_up_page.dart';
+import '../../features/auth/presentation/pages/startup_splash_page.dart';
 import '../../features/multi_room/presentation/screens/create_room_screen.dart';
 import '../../features/multi_room/presentation/screens/multi_map_screen.dart';
 import '../../features/multi_room/presentation/screens/pending_invites_screen.dart';
 import '../../features/multi_room/presentation/screens/waiting_room_screen.dart';
 
 class AppRouter {
+  static const String startup = '/startup';
   static const String login = '/login';
   static const String signUp = '/sign-up';
   static const String home = '/home';
@@ -24,6 +26,11 @@ class AppRouter {
 
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
     switch (settings.name) {
+      case startup:
+        return MaterialPageRoute<void>(
+          builder: (_) => const StartupSplashPage(),
+          settings: settings,
+        );
       case login:
         return MaterialPageRoute<void>(
           builder: (_) => const LoginPage(),
@@ -48,8 +55,7 @@ class AppRouter {
         );
       case cityMap:
         final args = settings.arguments;
-        final areaId =
-            args is CityMapPageArgs ? args.areaId : defaultCampusAreaId;
+        final areaId = args is CityMapPageArgs ? args.areaId : defaultMapAreaId;
         final mapId = args is CityMapPageArgs ? args.mapId : areaId;
         final mapName = args is CityMapPageArgs ? args.mapName : 'Yeni Harita';
         final initialUserPosition =
