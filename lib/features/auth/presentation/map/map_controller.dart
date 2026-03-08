@@ -17,6 +17,7 @@ class CampusMapController extends ChangeNotifier {
     this.initialUserPosition,
     this.restoredState,
     this.onPersistStateRequested,
+    this.testMode = false,
   }) : _lastInsidePosition =
            restoredState?.lastInsidePosition ?? initialUserPosition,
        _currentZoom = restoredState?.zoom ?? 16.0;
@@ -32,6 +33,7 @@ class CampusMapController extends ChangeNotifier {
   final Position? initialUserPosition;
   final CampusMapState? restoredState;
   final Future<void> Function(CampusMapState state)? onPersistStateRequested;
+  final bool testMode;
 
   MapboxMap? _mapboxMap;
   GeoJsonSource? _fogSource;
@@ -82,17 +84,19 @@ class CampusMapController extends ChangeNotifier {
       restoredState?.revealedCellIds ?? const <String>[],
     );
 
-    await map.setBounds(
-      CameraBoundsOptions(
-        bounds: fogManager.bounds.toCoordinateBounds(),
-        minZoom: minZoom,
-        maxZoom: maxZoom,
-        minPitch: 0,
-        maxPitch: 75,
-      ),
-    );
+    if (!testMode) {
+      await map.setBounds(
+        CameraBoundsOptions(
+          bounds: fogManager.bounds.toCoordinateBounds(),
+          minZoom: minZoom,
+          maxZoom: maxZoom,
+          minPitch: 0,
+          maxPitch: 75,
+        ),
+      );
 
-    await _upsertFogSourceAndLayer();
+      await _upsertFogSourceAndLayer();
+    }
     await _enableLocationPuck();
 
     _latestCameraState = await map.getCameraState();
@@ -100,9 +104,81 @@ class CampusMapController extends ChangeNotifier {
     _styleReady = true;
     notifyListeners();
 
-    await _startLocationTracking();
-    _scheduleFogRefresh();
-    _schedulePersist(delay: const Duration(milliseconds: 500));
+    if (!testMode) {
+      await _startLocationTracking();
+      _scheduleFogRefresh();
+      _schedulePersist(delay: const Duration(milliseconds: 500));
+    }
+  }
+
+  /// Adds POI markers as a circle + symbol layer from raw GeoJSON string.
+  Future<void> addPoiGeoJsonLayer(String geoJson) async {
+    final map = _mapboxMap;
+    if (map == null) return;
+
+    const sourceId = 'poi-source';
+    const circleLayerId = 'poi-circle-layer';
+    const labelLayerId = 'poi-label-layer';
+
+    final source = GeoJsonSource(id: sourceId, data: geoJson);
+    try {
+      await map.style.addSource(source);
+    } on PlatformException catch (e) {
+      if (!_isAlreadyExistsError(e)) rethrow;
+    }
+
+    // --- Circle layer with color by type, size by rarity ---
+    try {
+      await map.style.addLayer(
+        CircleLayer(
+          id: circleLayerId,
+          sourceId: sourceId,
+          circleRadiusExpression: <Object>[
+            'match',
+            <Object>['get', 'rarity'],
+            'legendary', 14.0,
+            'epic', 11.0,
+            'rare', 8.0,
+            6.0,
+          ],
+          circleColorExpression: <Object>[
+            'match',
+            <Object>['get', 'poi_type'],
+            'historic', '#FFB300',
+            'museum', '#42A5F5',
+            'park', '#66BB6A',
+            'tower', '#EF5350',
+            '#E0E0E0',
+          ],
+          circleStrokeWidth: 1.5,
+          circleStrokeColor: const Color(0xFFFFFFFF).toARGB32(),
+          circleOpacity: 0.92,
+        ),
+      );
+    } on PlatformException catch (e) {
+      if (!_isAlreadyExistsError(e)) rethrow;
+    }
+
+    // --- Label layer ---
+    try {
+      await map.style.addLayer(
+        SymbolLayer(
+          id: labelLayerId,
+          sourceId: sourceId,
+          textFieldExpression: <Object>['get', 'name'],
+          textSize: 12.0,
+          textColor: const Color(0xFFFFFFFF).toARGB32(),
+          textHaloColor: const Color(0xFF000000).toARGB32(),
+          textHaloWidth: 1.5,
+          textOffset: <double>[0, 1.6],
+          textMaxWidth: 10.0,
+          textAllowOverlap: false,
+          iconAllowOverlap: false,
+        ),
+      );
+    } on PlatformException catch (e) {
+      if (!_isAlreadyExistsError(e)) rethrow;
+    }
   }
 
   void onCameraChanged(CameraChangedEventData data) {

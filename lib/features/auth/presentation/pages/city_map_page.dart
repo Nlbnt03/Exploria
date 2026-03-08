@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
 import '../../../../core/theme/app_colors.dart';
@@ -57,6 +59,9 @@ class _CityMapPageState extends State<CityMapPage> {
   bool _isLoadingSession = true;
   bool _warningShown = false;
   String? _uid;
+  bool get _isTestArea =>
+      widget.areaId == 'istanbul_fatih' ||
+      widget.areaId == 'istanbul_beyoglu';
 
   @override
   void initState() {
@@ -120,6 +125,7 @@ class _CityMapPageState extends State<CityMapPage> {
       restoredState: restoredState,
       onPersistStateRequested:
           (state) => _persistMapState(uid: uid, mapState: state),
+      testMode: _isTestArea,
     );
     mapController.addListener(_onControllerChanged);
 
@@ -135,6 +141,51 @@ class _CityMapPageState extends State<CityMapPage> {
       _mapController = mapController;
       _isLoadingSession = false;
     });
+  }
+
+  Future<void> _loadAndShowPois() async {
+    final controller = _mapController;
+    if (controller == null || !_isTestArea) return;
+
+    try {
+      final assetName = widget.areaId == 'istanbul_beyoglu'
+          ? 'assets/beyoglu_pois.json'
+          : 'assets/fatih_pois.json';
+      final rawJson = await rootBundle.loadString(assetName);
+      final decoded = jsonDecode(rawJson) as Map<String, dynamic>;
+      final List<dynamic> pois = decoded['places'] as List<dynamic>;
+
+      final features = <Map<String, Object?>>[];
+      for (final poi in pois) {
+        final map = poi as Map<String, dynamic>;
+        features.add(<String, Object?>{
+          'type': 'Feature',
+          'properties': <String, Object?>{
+            'name': map['name'] as String? ?? '',
+            'poi_type': map['type'] as String? ?? 'unknown',
+            'rarity': map['rarity'] as String? ?? 'common',
+            'category': map['category'] as String? ?? '',
+            'xp': (map['xp'] as num?)?.toInt() ?? 0,
+          },
+          'geometry': <String, Object?>{
+            'type': 'Point',
+            'coordinates': <double>[
+              (map['lon'] as num).toDouble(),
+              (map['lat'] as num).toDouble(),
+            ],
+          },
+        });
+      }
+
+      final geoJson = jsonEncode(<String, Object?>{
+        'type': 'FeatureCollection',
+        'features': features,
+      });
+
+      await controller.addPoiGeoJsonLayer(geoJson);
+    } catch (_) {
+      // POI loading is best-effort for test mode.
+    }
   }
 
   Future<void> _persistMapState({
@@ -226,7 +277,9 @@ class _CityMapPageState extends State<CityMapPage> {
                     (mapboxMap) =>
                         unawaited(mapController.onMapCreated(mapboxMap)),
                 onStyleLoadedListener:
-                    (_) => unawaited(mapController.onStyleLoaded()),
+                    (_) => unawaited(
+                      mapController.onStyleLoaded().then((_) => _loadAndShowPois()),
+                    ),
                 onCameraChangeListener: mapController.onCameraChanged,
               ),
               if (mapController.isOutOfCampus)

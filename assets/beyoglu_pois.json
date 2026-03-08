@@ -1,0 +1,226 @@
+{
+  "district": "Beyoğlu",
+  "city": "İstanbul",
+  "places": [
+    {
+      "id": 1,
+      "name": "Galata Kulesi",
+      "type": "tower",
+      "category": "kule",
+      "rarity": "legendary",
+      "lat": 41.02566,
+      "lon": 28.97441,
+      "xp": 500,
+      "stats": { "tarih": 98, "manzara": 99, "gizem": 85 }
+    },
+    {
+      "id": 2,
+      "name": "İstiklal Caddesi",
+      "type": "historic",
+      "category": "cadde",
+      "rarity": "epic",
+      "lat": 41.03305,
+      "lon": 28.97707,
+      "xp": 300,
+      "stats": { "tarih": 90, "manzara": 88, "gizem": 70 }
+    },
+    {
+      "id": 3,
+      "name": "Taksim Meydanı",
+      "type": "historic",
+      "category": "meydan",
+      "rarity": "rare",
+      "lat": 41.03690,
+      "lon": 28.98530,
+      "xp": 180,
+      "stats": { "tarih": 80, "manzara": 85, "gizem": 60 }
+    },
+    {
+      "id": 4,
+      "name": "Pera Müzesi",
+      "type": "museum",
+      "category": "müze",
+      "rarity": "epic",
+      "lat": 41.03090,
+      "lon": 28.97520,
+      "xp": 280,
+      "stats": { "tarih": 88, "manzara": 72, "gizem": 80 }
+    },
+    {
+      "id": 5,
+      "name": "Galata Mevlevihanesi",
+      "type": "museum",
+      "category": "müze_tarihi",
+      "rarity": "epic",
+      "lat": 41.02960,
+      "lon": 28.97380,
+      "xp": 290,
+      "stats": { "tarih": 94, "manzara": 65, "gizem": 92 }
+    },
+    {
+      "id": 6,
+      "name": "İstanbul Modern Sanat Müzesi",
+      "type": "museum",
+      "category": "müze",
+      "rarity": "rare",
+      "lat": 41.02750,
+      "lon": 28.98170,
+      "xp": 220,
+      "stats": { "tarih": 65, "manzara": 90, "gizem": 60 }
+    },
+    {
+      "id": 7,
+      "name": "SALT Galata",
+      "type": "museum",
+      "category": "kültür_merkezi",
+      "rarity": "rare",
+      "lat": 41.02390,
+      "lon": 28.97340,
+      "xp": 190,
+      "stats": { "tarih": 82, "manzara": 70, "gizem": 72 }
+    },
+    {
+      "id": 8,
+      "name": "Çiçek Pasajı",
+      "type": "historic",
+      "category": "pasaj",
+      "rarity": "rare",
+      "lat": 41.03330,
+      "lon": 28.97780,
+      "xp": 160,
+      "stats": { "tarih": 85, "manzara": 78, "gizem": 75 }
+    },
+    {
+      "id": 9,
+      "name": "Kamondo Merdivenleri",
+      "type": "historic",
+      "category": "tarihi_yapı",
+      "rarity": "rare",
+      "lat": 41.02350,
+      "lon": 28.97280,
+      "xp": 150,
+      "stats": { "tarih": 80, "manzara": 82, "gizem": 78 }
+    },
+    {
+      "id": 10,
+      "name": "St. Antuan Katolik Kilisesi",
+      "type": "historic",
+      "category": "kilise",
+      "rarity": "rare",
+      "lat": 41.03270,
+      "lon": 28.97720,
+      "xp": 170,
+      "stats": { "tarih": 87, "manzara": 80, "gizem": 70 }
+    },
+    {
+      "id": 11,
+      "name": "Aya Triada Rum Ortodoks Kilisesi",
+      "type": "historic",
+      "category": "kilise",
+      "rarity": "rare",
+      "lat": 41.03620,
+      "lon": 28.98290,
+      "xp": 180,
+      "stats": { "tarih": 88, "manzara": 68, "gizem": 80 }
+    },
+    {
+      "id": 12,
+      "name": "Galatasaray Hamamı",
+      "type": "historic",
+      "category": "hamam",
+      "rarity": "epic",
+      "lat": 41.03220,
+      "lon": 28.97750,
+      "xp": 250,
+      "stats": { "tarih": 90, "manzara": 55, "gizem": 85 }
+    },
+    {
+      "id": 13,
+      "name": "Tünel",
+      "type": "historic",
+      "category": "tarihi_yapı",
+      "rarity": "rare",
+      "lat": 41.02880,
+      "lon": 28.97430,
+      "xp": 160,
+      "stats": { "tarih": 88, "manzara": 60, "gizem": 80 }
+    },
+    {
+      "id": 14,
+      "name": "Pera Palas Oteli",
+      "type": "historic",
+      "category": "tarihi_yapı",
+      "rarity": "epic",
+      "lat": 41.03000,
+      "lon": 28.97450,
+      "xp": 260,
+      "stats": { "tarih": 92, "manzara": 70, "gizem": 90 }
+    },
+    {
+      "id": 15,
+      "name": "Neve Şalom Sinagogu",
+      "type": "historic",
+      "category": "sinagog",
+      "rarity": "epic",
+      "lat": 41.02540,
+      "lon": 28.97320,
+      "xp": 240,
+      "stats": { "tarih": 88, "manzara": 60, "gizem": 85 }
+    },
+    {
+      "id": 16,
+      "name": "Tophane Çeşmesi",
+      "type": "historic",
+      "category": "tarihi_yapı",
+      "rarity": "rare",
+      "lat": 41.02760,
+      "lon": 28.98150,
+      "xp": 140,
+      "stats": { "tarih": 85, "manzara": 72, "gizem": 68 }
+    },
+    {
+      "id": 17,
+      "name": "Kılıç Ali Paşa Camii",
+      "type": "historic",
+      "category": "cami",
+      "rarity": "rare",
+      "lat": 41.02740,
+      "lon": 28.98130,
+      "xp": 170,
+      "stats": { "tarih": 90, "manzara": 75, "gizem": 72 }
+    },
+    {
+      "id": 18,
+      "name": "Cihangir Semti",
+      "type": "historic",
+      "category": "semt",
+      "rarity": "common",
+      "lat": 41.02960,
+      "lon": 28.98590,
+      "xp": 90,
+      "stats": { "tarih": 70, "manzara": 88, "gizem": 72 }
+    },
+    {
+      "id": 19,
+      "name": "Asmalımescit",
+      "type": "historic",
+      "category": "semt",
+      "rarity": "common",
+      "lat": 41.03030,
+      "lon": 28.97620,
+      "xp": 85,
+      "stats": { "tarih": 72, "manzara": 75, "gizem": 80 }
+    },
+    {
+      "id": 20,
+      "name": "Gezi Parkı",
+      "type": "park",
+      "category": "park",
+      "rarity": "common",
+      "lat": 41.03900,
+      "lon": 28.98620,
+      "xp": 70,
+      "stats": { "tarih": 65, "manzara": 85, "gizem": 55 }
+    }
+  ]
+}

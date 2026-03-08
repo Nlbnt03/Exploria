@@ -5,6 +5,7 @@ import '../../../../app/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../data/services/friends_service.dart';
 import '../../../multi_room/services/multi_room_firestore_service.dart';
+import '../pages/user_profile_page.dart';
 
 class FriendsTab extends StatefulWidget {
   const FriendsTab({
@@ -35,6 +36,7 @@ class _FriendsTabState extends State<FriendsTab> {
   List<AppUserSummary> _searchResults = const <AppUserSummary>[];
   bool _isSearching = false;
   final Set<String> _sendingRequestTo = <String>{};
+  final Set<String> _cancellingRequestTo = <String>{};
   final Set<String> _processingRequests = <String>{};
   final Set<String> _removingFriends = <String>{};
 
@@ -140,6 +142,27 @@ class _FriendsTabState extends State<FriendsTab> {
     } finally {
       if (mounted) {
         setState(() => _sendingRequestTo.remove(toUid));
+      }
+    }
+  }
+
+  Future<void> _cancelRequest(String toUid) async {
+    if (_cancellingRequestTo.contains(toUid)) return;
+
+    setState(() => _cancellingRequestTo.add(toUid));
+    try {
+      await _friendsService.cancelFriendRequest(
+        fromUid: widget.uid,
+        toUid: toUid,
+      );
+      _showMessage('Arkadaşlık isteği geri alındı.');
+    } on FirebaseException catch (e) {
+      _showMessage(_mapError(e));
+    } catch (e) {
+      _showMessage('İstek geri alınamadı: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _cancellingRequestTo.remove(toUid));
       }
     }
   }
@@ -439,25 +462,14 @@ class _FriendsTabState extends State<FriendsTab> {
                             final isSending = _sendingRequestTo.contains(
                               user.uid,
                             );
+                            final isCancelling = _cancellingRequestTo
+                                .contains(user.uid);
                             final isAlreadyRequested = pendingToUids.contains(
                               user.uid,
                             );
                             final isAlreadyFriend = friendUids.contains(
                               user.uid,
                             );
-
-                            final isDisabled =
-                                isSending ||
-                                isAlreadyRequested ||
-                                isAlreadyFriend;
-                            final buttonLabel =
-                                isSending
-                                    ? null
-                                    : (isAlreadyFriend
-                                        ? 'Arkadaşın'
-                                        : (isAlreadyRequested
-                                            ? 'İstek Gönderildi'
-                                            : 'İstek'));
 
                             return Container(
                               margin: const EdgeInsets.only(bottom: 10),
@@ -491,64 +503,130 @@ class _FriendsTabState extends State<FriendsTab> {
                                   ),
                                   const SizedBox(width: 10),
                                   Expanded(
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          user.fullName.isEmpty
-                                              ? user.username
-                                              : user.fullName,
-                                          style: const TextStyle(
-                                            color: AppColors.textMain,
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 15,
+                                    child: GestureDetector(
+                                      onTap: () {
+                                        Navigator.pushNamed(
+                                          context,
+                                          AppRouter.userProfile,
+                                          arguments: UserProfilePageArgs(
+                                            uid: user.uid,
                                           ),
-                                        ),
-                                        const SizedBox(height: 2),
-                                        Text(
-                                          '@${user.username}',
-                                          style: const TextStyle(
-                                            color: AppColors.textMuted,
-                                            fontSize: 13,
+                                        );
+                                      },
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            user.fullName.isEmpty
+                                                ? user.username
+                                                : user.fullName,
+                                            style: const TextStyle(
+                                              color: AppColors.textMain,
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 15,
+                                            ),
                                           ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  ElevatedButton(
-                                    onPressed:
-                                        isDisabled
-                                            ? null
-                                            : () => _sendRequest(user.uid),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor:
-                                          (isAlreadyFriend ||
-                                                  isAlreadyRequested)
-                                              ? AppColors.textMuted.withValues(
-                                                alpha: 0.42,
-                                              )
-                                              : AppColors.primary.withValues(
-                                                alpha: 0.92,
-                                              ),
-                                      foregroundColor: Colors.white,
-                                      minimumSize: const Size(128, 38),
-                                      shape: RoundedRectangleBorder(
-                                        borderRadius: BorderRadius.circular(10),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            '@${user.username}',
+                                            style: const TextStyle(
+                                              color: AppColors.textMuted,
+                                              fontSize: 13,
+                                            ),
+                                          ),
+                                        ],
                                       ),
                                     ),
-                                    child:
-                                        isSending
-                                            ? const SizedBox(
-                                              width: 16,
-                                              height: 16,
-                                              child: CircularProgressIndicator(
-                                                strokeWidth: 2,
-                                                color: Colors.white,
-                                              ),
-                                            )
-                                            : Text(buttonLabel!),
                                   ),
+                                  if (isAlreadyFriend)
+                                    OutlinedButton(
+                                      onPressed: null,
+                                      style: OutlinedButton.styleFrom(
+                                        minimumSize: const Size(56, 30),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 4,
+                                        ),
+                                        foregroundColor: AppColors.textMuted,
+                                        textStyle: const TextStyle(fontSize: 12),
+                                        side: BorderSide(
+                                          color: AppColors.inputBorder
+                                              .withValues(alpha: 0.4),
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                      ),
+                                      child: const Text('Arkadaşın'),
+                                    )
+                                  else if (isAlreadyRequested)
+                                    OutlinedButton(
+                                      onPressed: isCancelling
+                                          ? null
+                                          : () => _cancelRequest(user.uid),
+                                      style: OutlinedButton.styleFrom(
+                                        minimumSize: const Size(56, 30),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 10,
+                                          vertical: 4,
+                                        ),
+                                        foregroundColor: Colors.orangeAccent,
+                                        textStyle: const TextStyle(fontSize: 11),
+                                        side: BorderSide(
+                                          color: Colors.orangeAccent
+                                              .withValues(alpha: 0.5),
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                      ),
+                                      child: isCancelling
+                                          ? const SizedBox(
+                                            width: 12,
+                                            height: 12,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 1.5,
+                                              color: Colors.orangeAccent,
+                                            ),
+                                          )
+                                          : const Text('Gönderildi'),
+                                    )
+                                  else
+                                    ElevatedButton(
+                                      onPressed: isSending
+                                          ? null
+                                          : () => _sendRequest(user.uid),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor:
+                                            AppColors.primary.withValues(
+                                              alpha: 0.92,
+                                            ),
+                                        foregroundColor: Colors.white,
+                                        minimumSize: const Size(56, 30),
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 4,
+                                        ),
+                                        textStyle: const TextStyle(fontSize: 12),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(8),
+                                        ),
+                                      ),
+                                      child: isSending
+                                          ? const SizedBox(
+                                            width: 12,
+                                            height: 12,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 1.5,
+                                              color: Colors.white,
+                                            ),
+                                          )
+                                          : const Text('İstek'),
+                                    ),
                                 ],
                               ),
                             );
@@ -784,32 +862,43 @@ class _FriendsTabState extends State<FriendsTab> {
                         ),
                         const SizedBox(width: 10),
                         Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                friend.fullName.isEmpty
-                                    ? friend.username
-                                    : friend.fullName,
-                                style: const TextStyle(
-                                  color: AppColors.textMain,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 16,
+                          child: GestureDetector(
+                            onTap: () {
+                              Navigator.pushNamed(
+                                context,
+                                AppRouter.userProfile,
+                                arguments: UserProfilePageArgs(
+                                  uid: friend.uid,
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                '@${friend.username}',
-                                style: const TextStyle(
-                                  color: AppColors.textMuted,
-                                  fontSize: 13,
+                              );
+                            },
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  friend.fullName.isEmpty
+                                      ? friend.username
+                                      : friend.fullName,
+                                  style: const TextStyle(
+                                    color: AppColors.textMain,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 16,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
+                                const SizedBox(height: 2),
+                                Text(
+                                  '@${friend.username}',
+                                  style: const TextStyle(
+                                    color: AppColors.textMuted,
+                                    fontSize: 13,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
                           ),
                         ),
                         OutlinedButton(
@@ -818,24 +907,29 @@ class _FriendsTabState extends State<FriendsTab> {
                                   ? null
                                   : () => _removeFriend(friend.uid),
                           style: OutlinedButton.styleFrom(
-                            minimumSize: const Size(78, 38),
+                            minimumSize: const Size(56, 30),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
                             foregroundColor: Colors.white,
+                            textStyle: const TextStyle(fontSize: 12),
                             side: BorderSide(
                               color: AppColors.inputBorder.withValues(
                                 alpha: 0.6,
                               ),
                             ),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
+                              borderRadius: BorderRadius.circular(8),
                             ),
                           ),
                           child:
                               isRemoving
                                   ? const SizedBox(
-                                    width: 14,
-                                    height: 14,
+                                    width: 12,
+                                    height: 12,
                                     child: CircularProgressIndicator(
-                                      strokeWidth: 2,
+                                      strokeWidth: 1.5,
                                       color: Colors.white,
                                     ),
                                   )

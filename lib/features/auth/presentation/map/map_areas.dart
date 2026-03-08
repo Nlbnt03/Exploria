@@ -6,6 +6,8 @@ const String defaultMapStyleUri =
     'mapbox://styles/ynalbant/cmm88zj0i001701sh7fzxcnen';
 const String mapAreaGtu = 'gebze_teknik_universitesi';
 const String mapAreaGebzeKyk = 'gebze_kyk';
+const String mapAreaFatih = 'istanbul_fatih';
+const String mapAreaBeyoglu = 'istanbul_beyoglu';
 const String defaultMapAreaId = mapAreaGtu;
 
 class MapAreaConfig {
@@ -70,6 +72,55 @@ final List<Position> gebzeKykBoundary = <Position>[
   Position(29.489638, 40.789002),
 ];
 
+final Position fatihCenter = Position(28.953576, 41.011997);
+
+final List<Position> fatihBoundary = <Position>[
+  Position(28.946156, 41.035446),
+  Position(28.936507, 41.031611),
+  Position(28.923641, 41.019087),
+  Position(28.921358, 41.014389),
+  Position(28.920113, 40.999434),
+  Position(28.919179, 40.988548),
+  Position(28.927791, 40.992542),
+  Position(28.934224, 40.999982),
+  Position(28.940138, 41.002488),
+  Position(28.948232, 41.001705),
+  Position(28.957363, 41.003819),
+  Position(28.969191, 41.002488),
+  Position(28.976351, 41.001078),
+  Position(28.985066, 41.006011),
+  Position(28.987972, 41.011962),
+  Position(28.985897, 41.017129),
+  Position(28.972719, 41.018069),
+  Position(28.963588, 41.021435),
+  Position(28.958504, 41.027149),
+  Position(28.952278, 41.03028),
+  Position(28.948854, 41.032785),
+  Position(28.946156, 41.035446),
+];
+
+final Position beyogluCenter = Position(28.97900, 41.03150);
+
+final List<Position> beyogluBoundary = <Position>[
+  Position(28.96800, 41.02100),
+  Position(28.97200, 41.02050),
+  Position(28.97800, 41.02000),
+  Position(28.98400, 41.02200),
+  Position(28.98900, 41.02500),
+  Position(28.99100, 41.02900),
+  Position(28.99200, 41.03400),
+  Position(28.99000, 41.03800),
+  Position(28.98800, 41.04100),
+  Position(28.98400, 41.04200),
+  Position(28.97800, 41.04100),
+  Position(28.97200, 41.03900),
+  Position(28.96800, 41.03600),
+  Position(28.96600, 41.03200),
+  Position(28.96600, 41.02700),
+  Position(28.96700, 41.02300),
+  Position(28.96800, 41.02100),
+];
+
 final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
   MapAreaConfig(
     id: mapAreaGtu,
@@ -88,6 +139,24 @@ final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
     center: gebzeKykCenter,
     boundary: gebzeKykBoundary,
     gridSizeMeters: 30,
+  ),
+  MapAreaConfig(
+    id: mapAreaFatih,
+    title: 'İstanbul / Fatih',
+    subtitle: 'Fatih ilçesi sınırları',
+    styleUri: defaultMapStyleUri,
+    center: fatihCenter,
+    boundary: fatihBoundary,
+    gridSizeMeters: 50,
+  ),
+  MapAreaConfig(
+    id: mapAreaBeyoglu,
+    title: 'İstanbul / Beyoğlu',
+    subtitle: 'Beyoğlu ilçesi sınırları',
+    styleUri: defaultMapStyleUri,
+    center: beyogluCenter,
+    boundary: beyogluBoundary,
+    gridSizeMeters: 50,
   ),
 ];
 

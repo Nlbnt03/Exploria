@@ -96,6 +96,28 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
 
     setState(() => _isOpeningMap = true);
     try {
+      // TODO: Test amacli Fatih ve Beyoglu icin tum denetimler devre disi.
+      if (selectedArea.id == mapAreaFatih ||
+          selectedArea.id == mapAreaBeyoglu) {
+        final mapId = await _createMapForSelection(
+          areaId: selectedArea.id,
+          mapName: mapName,
+        );
+        if (mapId == null || !mounted) return;
+
+        await Navigator.pushNamed(
+          context,
+          AppRouter.cityMap,
+          arguments: CityMapPageArgs(
+            areaId: selectedArea.id,
+            mapId: mapId,
+            mapName: mapName,
+            initialUserPosition: selectedArea.center,
+          ),
+        );
+        return;
+      }
+
       final accessResult = await LocationService.requestSinglePosition();
       if (!mounted) return;
 
@@ -296,7 +318,11 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
                           final icon =
                               area.id == mapAreaGtu
                                   ? Icons.school_rounded
-                                  : Icons.apartment_rounded;
+                                  : area.id == mapAreaFatih
+                                      ? Icons.mosque_rounded
+                                      : area.id == mapAreaBeyoglu
+                                          ? Icons.location_city_rounded
+                                          : Icons.apartment_rounded;
                           return InkWell(
                             borderRadius: BorderRadius.circular(16),
                             onTap:

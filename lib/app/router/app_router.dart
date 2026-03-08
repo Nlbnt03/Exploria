@@ -7,6 +7,7 @@ import '../../features/auth/presentation/pages/home_page.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/sign_up_page.dart';
 import '../../features/auth/presentation/pages/startup_splash_page.dart';
+import '../../features/auth/presentation/pages/user_profile_page.dart';
 import '../../features/multi_room/presentation/screens/create_room_screen.dart';
 import '../../features/multi_room/presentation/screens/multi_map_screen.dart';
 import '../../features/multi_room/presentation/screens/pending_invites_screen.dart';
@@ -23,6 +24,7 @@ class AppRouter {
   static const String waitingRoom = '/waiting-room';
   static const String pendingInvites = '/pending-invites';
   static const String multiMap = '/multi-map';
+  static const String userProfile = '/user-profile';
 
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
     switch (settings.name) {
@@ -100,6 +102,13 @@ class AppRouter {
         final roomId = args is MultiMapScreenArgs ? args.roomId : '';
         return MaterialPageRoute<void>(
           builder: (_) => MultiMapScreen(roomId: roomId),
+          settings: settings,
+        );
+      case userProfile:
+        final args = settings.arguments;
+        final uid = args is UserProfilePageArgs ? args.uid : '';
+        return MaterialPageRoute<void>(
+          builder: (_) => UserProfilePage(uid: uid),
           settings: settings,
         );
       default:

@@ -1,0 +1,306 @@
+{
+  "district": "Fatih",
+  "city": "İstanbul",
+  "places": [
+    {
+      "id": 1,
+      "name": "Ayasofya",
+      "type": "historic",
+      "category": "cami_müze",
+      "rarity": "legendary",
+      "lat": 41.00860,
+      "lon": 28.97994,
+      "xp": 500,
+      "stats": {
+        "tarih": 100,
+        "manzara": 95,
+        "gizem": 88
+      }
+    },
+    {
+      "id": 2,
+      "name": "Sultanahmet Camii (Mavi Cami)",
+      "type": "historic",
+      "category": "cami",
+      "rarity": "legendary",
+      "lat": 41.00527,
+      "lon": 28.97696,
+      "xp": 450,
+      "stats": {
+        "tarih": 98,
+        "manzara": 97,
+        "gizem": 80
+      }
+    },
+    {
+      "id": 3,
+      "name": "Topkapı Sarayı",
+      "type": "museum",
+      "category": "saray_müze",
+      "rarity": "legendary",
+      "lat": 41.01163,
+      "lon": 28.98335,
+      "xp": 500,
+      "stats": {
+        "tarih": 100,
+        "manzara": 92,
+        "gizem": 90
+      }
+    },
+    {
+      "id": 4,
+      "name": "Yerebatan Sarnıcı",
+      "type": "museum",
+      "category": "antik_yapı",
+      "rarity": "epic",
+      "lat": 41.00845,
+      "lon": 28.97782,
+      "xp": 350,
+      "stats": {
+        "tarih": 95,
+        "manzara": 70,
+        "gizem": 99
+      }
+    },
+    {
+      "id": 5,
+      "name": "İstanbul Arkeoloji Müzeleri",
+      "type": "museum",
+      "category": "müze",
+      "rarity": "epic",
+      "lat": 41.01200,
+      "lon": 28.98050,
+      "xp": 300,
+      "stats": {
+        "tarih": 99,
+        "manzara": 65,
+        "gizem": 85
+      }
+    },
+    {
+      "id": 6,
+      "name": "Türk ve İslam Eserleri Müzesi",
+      "type": "museum",
+      "category": "müze",
+      "rarity": "rare",
+      "lat": 41.00600,
+      "lon": 28.97650,
+      "xp": 200,
+      "stats": {
+        "tarih": 93,
+        "manzara": 60,
+        "gizem": 75
+      }
+    },
+    {
+      "id": 7,
+      "name": "Süleymaniye Camii",
+      "type": "historic",
+      "category": "cami",
+      "rarity": "legendary",
+      "lat": 41.01609,
+      "lon": 28.96393,
+      "xp": 420,
+      "stats": {
+        "tarih": 97,
+        "manzara": 96,
+        "gizem": 82
+      }
+    },
+    {
+      "id": 8,
+      "name": "Kapalıçarşı",
+      "type": "historic",
+      "category": "çarşı",
+      "rarity": "epic",
+      "lat": 41.01065,
+      "lon": 28.96818,
+      "xp": 280,
+      "stats": {
+        "tarih": 92,
+        "manzara": 70,
+        "gizem": 78
+      }
+    },
+    {
+      "id": 9,
+      "name": "Mısır Çarşısı",
+      "type": "historic",
+      "category": "çarşı",
+      "rarity": "rare",
+      "lat": 41.01672,
+      "lon": 28.97051,
+      "xp": 180,
+      "stats": {
+        "tarih": 88,
+        "manzara": 72,
+        "gizem": 65
+      }
+    },
+    {
+      "id": 10,
+      "name": "Yeni Camii",
+      "type": "historic",
+      "category": "cami",
+      "rarity": "rare",
+      "lat": 41.01722,
+      "lon": 28.97010,
+      "xp": 160,
+      "stats": {
+        "tarih": 87,
+        "manzara": 85,
+        "gizem": 60
+      }
+    },
+    {
+      "id": 11,
+      "name": "Panorama 1453 Tarih Müzesi",
+      "type": "museum",
+      "category": "müze",
+      "rarity": "rare",
+      "lat": 41.01022,
+      "lon": 28.92975,
+      "xp": 220,
+      "stats": {
+        "tarih": 90,
+        "manzara": 75,
+        "gizem": 70
+      }
+    },
+    {
+      "id": 12,
+      "name": "Kariye Camii (Chora Kilisesi)",
+      "type": "historic",
+      "category": "cami_müze",
+      "rarity": "epic",
+      "lat": 41.02877,
+      "lon": 28.93963,
+      "xp": 320,
+      "stats": {
+        "tarih": 96,
+        "manzara": 68,
+        "gizem": 92
+      }
+    },
+    {
+      "id": 13,
+      "name": "Büyük Saray Mozaikleri Müzesi",
+      "type": "museum",
+      "category": "müze",
+      "rarity": "rare",
+      "lat": 41.00540,
+      "lon": 28.97800,
+      "xp": 190,
+      "stats": {
+        "tarih": 94,
+        "manzara": 55,
+        "gizem": 80
+      }
+    },
+    {
+      "id": 14,
+      "name": "Bozdoğan Kemeri (Valens Su Kemeri)",
+      "type": "historic",
+      "category": "antik_yapı",
+      "rarity": "epic",
+      "lat": 41.01640,
+      "lon": 28.95140,
+      "xp": 260,
+      "stats": {
+        "tarih": 95,
+        "manzara": 82,
+        "gizem": 75
+      }
+    },
+    {
+      "id": 15,
+      "name": "Fatih Camii",
+      "type": "historic",
+      "category": "cami",
+      "rarity": "rare",
+      "lat": 41.01987,
+      "lon": 28.95018,
+      "xp": 200,
+      "stats": {
+        "tarih": 92,
+        "manzara": 80,
+        "gizem": 72
+      }
+    },
+    {
+      "id": 16,
+      "name": "Aya İrini Kilisesi",
+      "type": "historic",
+      "category": "kilise",
+      "rarity": "epic",
+      "lat": 41.01163,
+      "lon": 28.98100,
+      "xp": 290,
+      "stats": {
+        "tarih": 98,
+        "manzara": 65,
+        "gizem": 88
+      }
+    },
+    {
+      "id": 17,
+      "name": "Gülhane Parkı",
+      "type": "park",
+      "category": "park",
+      "rarity": "common",
+      "lat": 41.01310,
+      "lon": 28.98060,
+      "xp": 80,
+      "stats": {
+        "tarih": 70,
+        "manzara": 88,
+        "gizem": 50
+      }
+    },
+    {
+      "id": 18,
+      "name": "Balat Semti",
+      "type": "historic",
+      "category": "semt",
+      "rarity": "rare",
+      "lat": 41.02690,
+      "lon": 28.94750,
+      "xp": 170,
+      "stats": {
+        "tarih": 85,
+        "manzara": 80,
+        "gizem": 90
+      }
+    },
+    {
+      "id": 19,
+      "name": "Fener Rum Ortodoks Patrikhanesi",
+      "type": "historic",
+      "category": "kilise",
+      "rarity": "epic",
+      "lat": 41.02920,
+      "lon": 28.94930,
+      "xp": 270,
+      "stats": {
+        "tarih": 95,
+        "manzara": 60,
+        "gizem": 85
+      }
+    },
+    {
+      "id": 20,
+      "name": "Cağaloğlu Hamamı",
+      "type": "historic",
+      "category": "hamam",
+      "rarity": "rare",
+      "lat": 41.01090,
+      "lon": 28.97600,
+      "xp": 150,
+      "stats": {
+        "tarih": 85,
+        "manzara": 55,
+        "gizem": 78
+      }
+    }
+  ]
+}

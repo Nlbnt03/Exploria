@@ -430,6 +430,50 @@ class FriendsService {
     });
   }
 
+  /// Cancel an outgoing friend request (sender withdraws).
+  Future<void> cancelFriendRequest({
+    required String fromUid,
+    required String toUid,
+  }) async {
+    await _refreshAuthTokenBeforeWrite();
+
+    final requestRef = _friendRequests.doc('${fromUid}_$toUid');
+
+    await _firestore.runTransaction((tx) async {
+      final requestSnap = await tx.get(requestRef);
+      if (!requestSnap.exists) {
+        throw FirebaseException(
+          plugin: 'friends_service',
+          code: 'request-not-found',
+          message: 'Arkadaslik istegi bulunamadi.',
+        );
+      }
+
+      final data = requestSnap.data() ?? <String, dynamic>{};
+      final senderUid = (data['fromUid'] as String?)?.trim() ?? '';
+      final status = (data['status'] as String?)?.trim() ?? '';
+      if (senderUid != fromUid) {
+        throw FirebaseException(
+          plugin: 'friends_service',
+          code: 'invalid-request-owner',
+          message: 'Bu istek bu kullaniciya ait degil.',
+        );
+      }
+      if (status != 'pending') {
+        throw FirebaseException(
+          plugin: 'friends_service',
+          code: 'request-closed',
+          message: 'Bu istek zaten sonuclandirilmis.',
+        );
+      }
+
+      tx.set(requestRef, {
+        'status': 'cancelled',
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    });
+  }
+
   Future<void> sendMultiInvite({
     required String fromUid,
     required String toUid,

@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../data/services/badge_service.dart';
 import '../../data/services/map_progress_service.dart';
 import '../../data/services/firestore_user_service.dart';
 import '../../data/services/friends_service.dart';
+import '../../domain/models/badge.dart' show AppBadge;
 import '../../domain/models/user_map_record.dart';
 import '../../../multi_room/presentation/screens/multi_map_screen.dart';
 import '../../../multi_room/services/multi_room_firestore_service.dart';
@@ -16,6 +18,7 @@ import '../map/map_areas.dart';
 import '../widgets/friends_tab.dart';
 import 'city_map_page.dart';
 import 'city_selection_page.dart';
+import 'user_profile_page.dart';
 
 enum TravelMode { solo, multi }
 
@@ -1068,6 +1071,7 @@ class _ProfileTabState extends State<_ProfileTab> {
   static final RegExp _usernamePattern = RegExp(r'^[a-z0-9._-]{3,30}$');
 
   final _firestoreUserService = FirestoreUserService();
+  final _badgeService = BadgeService();
   final _nameController = TextEditingController();
   final _surnameController = TextEditingController();
   final _usernameController = TextEditingController();
@@ -1363,6 +1367,39 @@ class _ProfileTabState extends State<_ProfileTab> {
             ),
           ],
           const SizedBox(height: 22),
+          _buildMyBadgesSection(),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            height: 54,
+            child: OutlinedButton.icon(
+              onPressed: () {
+                Navigator.pushNamed(
+                  context,
+                  AppRouter.userProfile,
+                  arguments: UserProfilePageArgs(uid: widget.uid),
+                );
+              },
+              icon: const Icon(Icons.visibility_rounded),
+              label: const Text(
+                'Profilimi Önizle',
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                ),
+              ),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: AppColors.textMain,
+                side: BorderSide(
+                  color: AppColors.inputBorder.withValues(alpha: 0.7),
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
             height: 56,
@@ -1394,6 +1431,145 @@ class _ProfileTabState extends State<_ProfileTab> {
                 ),
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMyBadgesSection() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.card,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppColors.inputBorder.withValues(alpha: 0.5),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            children: [
+              Icon(
+                Icons.emoji_events_rounded,
+                color: AppColors.primary,
+                size: 22,
+              ),
+              SizedBox(width: 8),
+              Text(
+                'Rozetlerim',
+                style: TextStyle(
+                  color: AppColors.textMain,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          StreamBuilder<List<AppBadge>>(
+            stream: _badgeService.watchBadges(widget.uid),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Center(
+                    child: CircularProgressIndicator(
+                      color: AppColors.primary,
+                    ),
+                  ),
+                );
+              }
+
+              final badges = snapshot.data ?? const <AppBadge>[];
+              if (badges.isEmpty) {
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(vertical: 20),
+                  child: const Column(
+                    children: [
+                      Icon(
+                        Icons.military_tech_outlined,
+                        color: AppColors.textMuted,
+                        size: 36,
+                      ),
+                      SizedBox(height: 8),
+                      Text(
+                        'Henüz rozet kazanmadın',
+                        style: TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }
+
+              return Column(
+                children: badges.map((badge) {
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 10),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppColors.inputFill.withValues(alpha: 0.85),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: AppColors.inputBorder.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withValues(alpha: 0.18),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.emoji_events_rounded,
+                            color: AppColors.primary,
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                badge.name,
+                                style: const TextStyle(
+                                  color: AppColors.textMain,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                ),
+                              ),
+                              if (badge.description.isNotEmpty) ...[
+                                const SizedBox(height: 2),
+                                Text(
+                                  badge.description,
+                                  style: const TextStyle(
+                                    color: AppColors.textMuted,
+                                    fontSize: 13,
+                                  ),
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              );
+            },
           ),
         ],
       ),
