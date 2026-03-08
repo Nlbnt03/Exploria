@@ -34,6 +34,32 @@ class _HomePageState extends State<HomePage> {
   bool _focusIncomingRequests = false;
   int _selectedIndex = 2;
   TravelMode _selectedMode = TravelMode.solo;
+  String? _firestoreName;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFirestoreName();
+  }
+
+  Future<void> _loadFirestoreName() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    try {
+      final data = await FirestoreUserService().fetchUser(uid);
+      final name = (data['name'] as String?)?.trim() ?? '';
+      if (name.isNotEmpty && mounted) {
+        setState(() => _firestoreName = _capitalize(name));
+      }
+    } catch (_) {
+      // Best-effort; falls back to displayName / email.
+    }
+  }
+
+  static String _capitalize(String s) {
+    if (s.isEmpty) return s;
+    return s[0].toUpperCase() + s.substring(1).toLowerCase();
+  }
 
   Future<void> _signOut() async {
     setState(() => _isSigningOut = true);
@@ -65,11 +91,12 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
-    final displayName = (user?.displayName ?? '').trim();
+    final fallbackName = (user?.displayName ?? '').trim();
     final titleName =
-        displayName.isNotEmpty
-            ? displayName
-            : (user?.email?.split('@').first ?? 'Kaşif');
+        _firestoreName ??
+        (fallbackName.isNotEmpty
+            ? fallbackName
+            : (user?.email?.split('@').first ?? 'Kaşif'));
 
     final tabs = <Widget>[
       FriendsTab(
@@ -100,81 +127,84 @@ class _HomePageState extends State<HomePage> {
       ),
     ];
 
-    return Scaffold(
-      backgroundColor: AppColors.bgBottom,
-      body: Container(
-        width: double.infinity,
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [AppColors.bgTop, AppColors.bgBottom],
-          ),
-        ),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            SafeArea(
-              child: IndexedStack(index: _selectedIndex, children: tabs),
+    return PopScope(
+      canPop: false,
+      child: Scaffold(
+        backgroundColor: AppColors.bgBottom,
+        body: Container(
+          width: double.infinity,
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [AppColors.bgTop, AppColors.bgBottom],
             ),
-            Positioned(
-              left: 16,
-              right: 16,
-              bottom: 16,
-              child: SafeArea(
-                top: false,
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: const Color(0xD6190D2A),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(
-                      color: AppColors.inputBorder.withValues(alpha: 0.45),
+          ),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              SafeArea(
+                child: IndexedStack(index: _selectedIndex, children: tabs),
+              ),
+              Positioned(
+                left: 16,
+                right: 16,
+                bottom: 16,
+                child: SafeArea(
+                  top: false,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: const Color(0xD6190D2A),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: AppColors.inputBorder.withValues(alpha: 0.45),
+                      ),
                     ),
-                  ),
-                  child: BottomNavigationBar(
-                    currentIndex: _selectedIndex,
-                    onTap:
-                        (index) => setState(() {
-                          _selectedIndex = index;
-                          if (index != 0) {
-                            _focusIncomingRequests = false;
-                          }
-                        }),
-                    type: BottomNavigationBarType.fixed,
-                    backgroundColor: Colors.transparent,
-                    elevation: 0,
-                    selectedItemColor: AppColors.primary,
-                    unselectedItemColor: AppColors.textMuted,
-                    selectedLabelStyle: const TextStyle(
-                      fontWeight: FontWeight.w700,
+                    child: BottomNavigationBar(
+                      currentIndex: _selectedIndex,
+                      onTap:
+                          (index) => setState(() {
+                            _selectedIndex = index;
+                            if (index != 0) {
+                              _focusIncomingRequests = false;
+                            }
+                          }),
+                      type: BottomNavigationBarType.fixed,
+                      backgroundColor: Colors.transparent,
+                      elevation: 0,
+                      selectedItemColor: AppColors.primary,
+                      unselectedItemColor: AppColors.textMuted,
+                      selectedLabelStyle: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                      ),
+                      items: const [
+                        BottomNavigationBarItem(
+                          icon: Icon(Icons.groups_outlined),
+                          activeIcon: Icon(Icons.groups_rounded),
+                          label: 'Arkadaşlar',
+                        ),
+                        BottomNavigationBarItem(
+                          icon: Icon(Icons.map_outlined),
+                          activeIcon: Icon(Icons.map),
+                          label: 'Geçmiş',
+                        ),
+                        BottomNavigationBarItem(
+                          icon: Icon(Icons.home_outlined),
+                          activeIcon: Icon(Icons.home),
+                          label: 'Ana Sayfa',
+                        ),
+                        BottomNavigationBarItem(
+                          icon: Icon(Icons.person_outline_rounded),
+                          activeIcon: Icon(Icons.person_rounded),
+                          label: 'Profil',
+                        ),
+                      ],
                     ),
-                    items: const [
-                      BottomNavigationBarItem(
-                        icon: Icon(Icons.groups_outlined),
-                        activeIcon: Icon(Icons.groups_rounded),
-                        label: 'Arkadaşlar',
-                      ),
-                      BottomNavigationBarItem(
-                        icon: Icon(Icons.map_outlined),
-                        activeIcon: Icon(Icons.map),
-                        label: 'Geçmiş',
-                      ),
-                      BottomNavigationBarItem(
-                        icon: Icon(Icons.home_outlined),
-                        activeIcon: Icon(Icons.home),
-                        label: 'Ana Sayfa',
-                      ),
-                      BottomNavigationBarItem(
-                        icon: Icon(Icons.person_outline_rounded),
-                        activeIcon: Icon(Icons.person_rounded),
-                        label: 'Profil',
-                      ),
-                    ],
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -943,98 +973,164 @@ class _HistoryTabState extends State<_HistoryTab> {
                   );
                 }
 
-                return Column(
-                  children: records
-                      .map((record) {
-                        final areaTitle = resolveMapArea(record.areaId).title;
-                        final updatedAt = record.updatedAt ?? record.createdAt;
-                        final subtitle =
-                            updatedAt == null
-                                ? areaTitle
-                                : '$areaTitle · ${_formatDateTime(updatedAt)}';
-                        final isDeleting = _deletingMapId == record.mapId;
-                        final isOpening = _openingMapId == record.mapId;
-
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 12),
-                          decoration: BoxDecoration(
-                            color: AppColors.card,
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: AppColors.inputBorder.withValues(
-                                alpha: 0.45,
-                              ),
-                            ),
-                          ),
-                          child: ListTile(
-                            onTap:
-                                (isDeleting || isOpening)
-                                    ? null
-                                    : () => unawaited(_openMap(record)),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 6,
-                            ),
-                            leading: Container(
-                              width: 42,
-                              height: 42,
-                              decoration: BoxDecoration(
-                                color: AppColors.primary.withValues(
-                                  alpha: 0.18,
-                                ),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: const Icon(
-                                Icons.map_rounded,
-                                color: AppColors.primary,
-                              ),
-                            ),
-                            title: Text(
-                              record.mapName,
-                              style: const TextStyle(
-                                color: AppColors.textMain,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            subtitle: Padding(
-                              padding: const EdgeInsets.only(top: 3),
-                              child: Text(
-                                subtitle,
-                                style: const TextStyle(
-                                  color: AppColors.textMuted,
-                                  fontSize: 13,
-                                ),
-                              ),
-                            ),
-                            trailing:
-                                (isDeleting || isOpening)
-                                    ? const SizedBox(
-                                      width: 20,
-                                      height: 20,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        color: AppColors.primary,
-                                      ),
-                                    )
-                                    : IconButton(
-                                      tooltip: 'Haritayı sil',
-                                      onPressed:
-                                          () => unawaited(_deleteMap(record)),
-                                      icon: const Icon(
-                                        Icons.delete_outline_rounded,
-                                        color: AppColors.textMuted,
-                                      ),
-                                    ),
-                          ),
-                        );
-                      })
-                      .toList(growable: false),
+                return _AnimatedHistoryList(
+                  records: records,
+                  openingMapId: _openingMapId,
+                  deletingMapId: _deletingMapId,
+                  onOpen: (record) => unawaited(_openMap(record)),
+                  onDelete: (record) => unawaited(_deleteMap(record)),
                 );
               },
             ),
         ],
       ),
+    );
+  }
+}
+
+class _AnimatedHistoryList extends StatefulWidget {
+  const _AnimatedHistoryList({
+    required this.records,
+    required this.openingMapId,
+    required this.deletingMapId,
+    required this.onOpen,
+    required this.onDelete,
+  });
+
+  final List<UserMapRecord> records;
+  final String? openingMapId;
+  final String? deletingMapId;
+  final ValueChanged<UserMapRecord> onOpen;
+  final ValueChanged<UserMapRecord> onDelete;
+
+  @override
+  State<_AnimatedHistoryList> createState() => _AnimatedHistoryListState();
+}
+
+class _AnimatedHistoryListState extends State<_AnimatedHistoryList>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: Duration(
+        milliseconds: 300 + (widget.records.length * 80).clamp(0, 600),
+      ),
+    )..forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final count = widget.records.length;
+    return Column(
+      children: List.generate(count, (index) {
+        final record = widget.records[index];
+        final areaTitle = resolveMapArea(record.areaId).title;
+        final updatedAt = record.updatedAt ?? record.createdAt;
+        final subtitle =
+            updatedAt == null
+                ? areaTitle
+                : '$areaTitle · ${_formatDateTime(updatedAt)}';
+        final isDeleting = widget.deletingMapId == record.mapId;
+        final isOpening = widget.openingMapId == record.mapId;
+
+        final start = (index / count).clamp(0.0, 1.0);
+        final end = ((index + 1) / count).clamp(0.0, 1.0);
+        final animation = CurvedAnimation(
+          parent: _controller,
+          curve: Interval(start, end, curve: Curves.easeOutCubic),
+        );
+
+        return AnimatedBuilder(
+          animation: animation,
+          builder: (context, child) {
+            return Opacity(
+              opacity: animation.value,
+              child: Transform.translate(
+                offset: Offset(0, 20 * (1 - animation.value)),
+                child: child,
+              ),
+            );
+          },
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: AppColors.card,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: AppColors.inputBorder.withValues(alpha: 0.45),
+              ),
+            ),
+            child: ListTile(
+              onTap:
+                  (isDeleting || isOpening)
+                      ? null
+                      : () => widget.onOpen(record),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 6,
+              ),
+              leading: Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(
+                  Icons.map_rounded,
+                  color: AppColors.primary,
+                ),
+              ),
+              title: Text(
+                record.mapName,
+                style: const TextStyle(
+                  color: AppColors.textMain,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              subtitle: Padding(
+                padding: const EdgeInsets.only(top: 3),
+                child: Text(
+                  subtitle,
+                  style: const TextStyle(
+                    color: AppColors.textMuted,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+              trailing:
+                  (isDeleting || isOpening)
+                      ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.primary,
+                        ),
+                      )
+                      : IconButton(
+                        tooltip: 'Haritayı sil',
+                        onPressed: () => widget.onDelete(record),
+                        icon: const Icon(
+                          Icons.delete_outline_rounded,
+                          color: AppColors.textMuted,
+                        ),
+                      ),
+            ),
+          ),
+        );
+      }),
     );
   }
 

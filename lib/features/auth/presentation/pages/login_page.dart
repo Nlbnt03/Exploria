@@ -143,7 +143,10 @@ class _LoginPageState extends State<LoginPage> {
           Align(
             alignment: Alignment.centerRight,
             child: TextButton(
-              onPressed: () {},
+              onPressed: () => Navigator.pushNamed(
+                context,
+                AppRouter.forgotPassword,
+              ),
               child: const Text(
                 'Şifremi unuttum?',
                 style: TextStyle(

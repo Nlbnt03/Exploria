@@ -165,27 +165,34 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
   }
 
   Future<String?> _askMapName(String areaTitle) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return null;
+
+    setState(() => _isOpeningMap = true);
+    List<String> existingNames = [];
+    try {
+      existingNames = await _mapProgressService.fetchAllMapNames(uid);
+    } catch (_) {
+      // Ignore errors when fetching existing map names
+    } finally {
+      if (mounted) setState(() => _isOpeningMap = false);
+    }
+
+    if (!mounted) return null;
+
     final rawName = await Navigator.of(context).push<String>(
       MaterialPageRoute<String>(
         fullscreenDialog: true,
-        builder: (_) => _MapNameEntryPage(initialName: '$areaTitle Haritası'),
+        builder: (_) => _MapNameEntryPage(
+          initialName: '$areaTitle Haritası',
+          existingNames: existingNames,
+        ),
       ),
     );
 
     if (!mounted || rawName == null) return null;
 
-    final name = rawName.trim();
-    if (name.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Harita adı boş olamaz.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-      return null;
-    }
-
-    return name;
+    return rawName;
   }
 
   Future<String?> _createMapForSelection({
@@ -300,7 +307,7 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
                     ),
                     const SizedBox(height: 22),
                     const Text(
-                      'Kampus Haritalari',
+                      'Mevcut Haritalar',
                       style: TextStyle(
                         color: AppColors.textMain,
                         fontSize: 18,
@@ -644,9 +651,13 @@ class _MapOpeningSplashState extends State<_MapOpeningSplash>
 }
 
 class _MapNameEntryPage extends StatefulWidget {
-  const _MapNameEntryPage({required this.initialName});
+  const _MapNameEntryPage({
+    required this.initialName,
+    required this.existingNames,
+  });
 
   final String initialName;
+  final List<String> existingNames;
 
   @override
   State<_MapNameEntryPage> createState() => _MapNameEntryPageState();
@@ -668,7 +679,29 @@ class _MapNameEntryPageState extends State<_MapNameEntryPage> {
   }
 
   void _submit() {
-    Navigator.pop(context, _controller.text);
+    final name = _controller.text.trim();
+    if (name.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Harita adı boş olamaz.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    final exists = widget.existingNames.contains(name.toLowerCase());
+    if (exists) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Bu isimde bir haritanız zaten var. Lütfen farklı bir isim girin.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
+
+    Navigator.pop(context, name);
   }
 
   @override

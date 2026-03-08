@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 
+import '../../../../core/animations/shimmer_loading.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../data/services/badge_service.dart';
 import '../../domain/models/badge.dart' show AppBadge;
@@ -72,8 +73,7 @@ class _UserProfilePageState extends State<UserProfilePage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.bgBottom,
-      body: Container(
-        width: double.infinity,
+      body: DecoratedBox(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             begin: Alignment.topLeft,
@@ -81,12 +81,12 @@ class _UserProfilePageState extends State<UserProfilePage> {
             colors: [AppColors.bgTop, AppColors.bgBottom],
           ),
         ),
-        child: SafeArea(
-          child: _isLoading
-              ? const Center(
-                  child: CircularProgressIndicator(color: AppColors.primary),
-                )
-              : _buildContent(),
+        child: SizedBox.expand(
+          child: SafeArea(
+            child: _isLoading
+                ? const ProfileShimmer()
+                : _buildContent(),
+          ),
         ),
       ),
     );

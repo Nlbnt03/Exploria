@@ -20,7 +20,8 @@ class CampusMapController extends ChangeNotifier {
     this.testMode = false,
   }) : _lastInsidePosition =
            restoredState?.lastInsidePosition ?? initialUserPosition,
-       _currentZoom = restoredState?.zoom ?? 16.0;
+       _currentZoom = restoredState?.zoom ?? 16.0,
+       visitedPoiIds = restoredState?.visitedPoiIds.toList() ?? <String>[];
 
   static const String _fogSourceId = 'gtu-fog-source';
   static const String _fogLayerId = 'gtu-fog-layer';
@@ -35,7 +36,6 @@ class CampusMapController extends ChangeNotifier {
   final Future<void> Function(CampusMapState state)? onPersistStateRequested;
   final bool testMode;
 
-  MapboxMap? _mapboxMap;
   GeoJsonSource? _fogSource;
   GeoJsonSource? _cloudSource;
   CameraState? _latestCameraState;
@@ -43,11 +43,16 @@ class CampusMapController extends ChangeNotifier {
   Timer? _fogUpdateDebounce;
   Timer? _revealAnimationTicker;
   Timer? _persistDebounce;
+  final _poiTappedController = StreamController<Map<String, dynamic>>.broadcast();
+
+  MapboxMap? _mapboxMap;
   bool _cameraCorrectionInFlight = false;
   bool _persistInFlight = false;
   bool _persistQueued = false;
   bool _isDisposed = false;
   int? _lastPersistFingerprint;
+
+  List<String> visitedPoiIds;
 
   bool _styleReady = false;
   bool _trackingReady = false;
@@ -70,6 +75,8 @@ class CampusMapController extends ChangeNotifier {
 
   double get minZoom => 14.8;
   double get maxZoom => 19.2;
+  
+  Stream<Map<String, dynamic>> get onPoiTapped => _poiTappedController.stream;
 
   Future<void> onMapCreated(MapboxMap mapboxMap) async {
     _mapboxMap = mapboxMap;
@@ -111,6 +118,59 @@ class CampusMapController extends ChangeNotifier {
     }
   }
 
+  void handleMapTap(MapContentGestureContext context) {
+    final map = _mapboxMap;
+    if (map == null || _isOutOfCampus) return;
+
+    final touchPosition = context.touchPosition;
+    unawaited(_queryTappedFeatures(touchPosition));
+  }
+
+  Future<void> _queryTappedFeatures(ScreenCoordinate touchPosition) async {
+    final map = _mapboxMap;
+    if (map == null) return;
+
+    try {
+      final features = await map.queryRenderedFeatures(
+        RenderedQueryGeometry.fromScreenBox(
+          ScreenBox(
+            min: ScreenCoordinate(
+              x: touchPosition.x - 20,
+              y: touchPosition.y - 20,
+            ),
+            max: ScreenCoordinate(
+              x: touchPosition.x + 20,
+              y: touchPosition.y + 20,
+            ),
+          ),
+        ),
+        RenderedQueryOptions(
+          layerIds: ['poi-circle-layer', 'poi-label-layer'],
+          filter: null,
+        ),
+      );
+
+      if (features.isNotEmpty) {
+        final feature = features.first;
+        if (feature == null) return;
+        
+        final queriedFeature = feature.queriedFeature;
+        final properties = queriedFeature.feature['properties'];
+        final id = queriedFeature.feature['id'];
+
+        if (properties is Map) {
+          final payload = Map<String, dynamic>.from(properties);
+          if (id != null) {
+            payload['_feature_id'] = id;
+          }
+          _poiTappedController.add(payload);
+        }
+      }
+    } catch (_) {
+      // Ignore query errors
+    }
+  }
+
   /// Adds POI markers as a circle + symbol layer from raw GeoJSON string.
   Future<void> addPoiGeoJsonLayer(String geoJson) async {
     final map = _mapboxMap;
@@ -136,23 +196,49 @@ class CampusMapController extends ChangeNotifier {
           circleRadiusExpression: <Object>[
             'match',
             <Object>['get', 'rarity'],
+            // New formats
+            'must-see', 14.0,
+            'önerilen', 10.0,
+            // Fallback old formats
             'legendary', 14.0,
             'epic', 11.0,
             'rare', 8.0,
+            // Default size
             6.0,
           ],
           circleColorExpression: <Object>[
             'match',
             <Object>['get', 'poi_type'],
+            // Specific category colors based on new JSON
+            'Cami', '#10B981', // Green
+            'Saray', '#F59E0B', // Amber
+            'Müze', '#3B82F6', // Blue
+            'Tarihi Yapı', '#6B7280', // Gray
+            'Meydan', '#F43F5E', // Rose
+            'Hamam', '#06B6D4', // Cyan
+            'Çarşı & Pazar', '#8B5CF6', // Purple
+            'Park & Bahçe', '#84CC16', // Lime
+            'Semt & Cadde', '#F97316', // Orange
+            'Kule & Tepe', '#EF4444', // Red
+            'Sinagog & Kilise', '#A855F7', // Violet
+            
+            // Fallback old colors
             'historic', '#FFB300',
             'museum', '#42A5F5',
             'park', '#66BB6A',
             'tower', '#EF5350',
+            
+            // Default color
             '#E0E0E0',
           ],
           circleStrokeWidth: 1.5,
           circleStrokeColor: const Color(0xFFFFFFFF).toARGB32(),
-          circleOpacity: 0.92,
+          circleOpacityExpression: <Object>[
+            'case',
+            <Object>['==', <Object>['get', 'visited'], true],
+            0.4,
+            0.92,
+          ],
         ),
       );
     } on PlatformException catch (e) {
@@ -170,6 +256,12 @@ class CampusMapController extends ChangeNotifier {
           textColor: const Color(0xFFFFFFFF).toARGB32(),
           textHaloColor: const Color(0xFF000000).toARGB32(),
           textHaloWidth: 1.5,
+          textOpacityExpression: <Object>[
+            'case',
+            <Object>['==', <Object>['get', 'visited'], true],
+            0.5,
+            1.0,
+          ],
           textOffset: <double>[0, 1.6],
           textMaxWidth: 10.0,
           textAllowOverlap: false,
@@ -232,6 +324,7 @@ class CampusMapController extends ChangeNotifier {
     _fogUpdateDebounce?.cancel();
     _revealAnimationTicker?.cancel();
     await _locationSubscription?.cancel();
+    unawaited(_poiTappedController.close());
     await _persistState(force: true);
     _isDisposed = true;
     await locationService.dispose();
@@ -569,6 +662,7 @@ class CampusMapController extends ChangeNotifier {
   CampusMapState _buildSnapshot() {
     return CampusMapState(
       revealedCellIds: fogManager.snapshotRevealedCellIds(),
+      visitedPoiIds: visitedPoiIds,
       lastInsidePosition: _lastInsidePosition,
       cameraCenter: _latestCameraState?.center.coordinates,
       zoom: _latestCameraState?.zoom ?? _currentZoom,

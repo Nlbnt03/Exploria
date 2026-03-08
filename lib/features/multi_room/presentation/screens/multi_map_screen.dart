@@ -855,6 +855,7 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
         mapName: mapName,
         state: CampusMapState(
           revealedCellIds: fogManager.snapshotRevealedCellIds(),
+          visitedPoiIds: const [],
           lastInsidePosition: _lastInsidePosition,
           cameraCenter: cameraCenter,
           zoom: zoom,

@@ -15,6 +15,27 @@ class MapProgressService {
   CollectionReference<Map<String, dynamic>> get _mapStates =>
       _firestore.collection('userMapStates');
 
+  Future<List<String>> fetchAllMapNames(String uid) async {
+    final doc = await _mapStates.doc(uid).get();
+    final data = doc.data();
+    if (data == null) return const [];
+
+    final mapStatesRaw = data['mapStates'];
+    if (mapStatesRaw is! Map<dynamic, dynamic>) {
+      return const [];
+    }
+
+    final names = <String>[];
+    for (final value in mapStatesRaw.values) {
+      if (value is! Map<dynamic, dynamic>) continue;
+      final mapName = (value['mapName'] as String?)?.trim();
+      if (mapName != null && mapName.isNotEmpty) {
+        names.add(mapName.toLowerCase());
+      }
+    }
+    return names;
+  }
+
   Future<String?> fetchLastOpenedAreaId(String uid) async {
     final doc = await _mapStates.doc(uid).get();
     final data = doc.data();
@@ -60,6 +81,7 @@ class MapProgressService {
           'areaId': areaId,
           'mapName': normalizedName,
           'revealedCellIds': const <String>[],
+          'visitedPoiIds': const <String>[],
           'lastInsidePosition': null,
           'cameraCenter': null,
           'zoom': null,
@@ -148,6 +170,7 @@ class MapProgressService {
           'areaId': areaId,
           'mapName': normalizedName,
           'revealedCellIds': state.revealedCellIds,
+          'visitedPoiIds': state.visitedPoiIds,
           'lastInsidePosition': _positionToMap(state.lastInsidePosition),
           'cameraCenter': _positionToMap(state.cameraCenter),
           'zoom': state.zoom,
@@ -232,7 +255,8 @@ class MapProgressService {
       areaId: areaId,
       mapName: resolvedMapName,
       state: CampusMapState(
-        revealedCellIds: _parseRevealedCellIds(raw['revealedCellIds']),
+        revealedCellIds: _parseStringList(raw['revealedCellIds']),
+        visitedPoiIds: _parseStringList(raw['visitedPoiIds']),
         lastInsidePosition: _parsePosition(raw['lastInsidePosition']),
         cameraCenter: _parsePosition(raw['cameraCenter']),
         zoom: _parseDouble(raw['zoom']),
@@ -268,7 +292,7 @@ class MapProgressService {
     return 'map_${timestamp}_$random';
   }
 
-  List<String> _parseRevealedCellIds(dynamic raw) {
+  List<String> _parseStringList(dynamic raw) {
     if (raw is! List<dynamic>) return const <String>[];
 
     final ids = <String>{};

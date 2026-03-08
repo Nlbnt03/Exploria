@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../auth/presentation/map/map_areas.dart';
 import '../../models/friend_ref.dart';
 import '../../models/member.dart';
 import '../../models/room.dart';
@@ -244,7 +245,7 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Sehir: ${room?.cityId ?? 'istanbul'}',
+                'Harita: ${resolveMapArea(room?.cityId ?? 'istanbul').title}',
                 style: const TextStyle(color: AppColors.textMuted),
               ),
               const SizedBox(height: 4),
@@ -258,7 +259,7 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
               const SizedBox(height: 14),
               if (_members.length < _minPlayers)
                 const Text(
-                  'Oyuncular bekleniyor...',
+                  'Arkadaşlar bekleniyor...',
                   style: TextStyle(
                     color: Color(0xFFFFCC80),
                     fontWeight: FontWeight.w700,
@@ -266,7 +267,7 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
                 ),
               if (_members.length >= _minPlayers)
                 const Text(
-                  'Minimum oyuncu sayisina ulasildi.',
+                  'Minimum arkadaş sayısına ulaşıldı.',
                   style: TextStyle(
                     color: Color(0xFF9AE6B4),
                     fontWeight: FontWeight.w700,

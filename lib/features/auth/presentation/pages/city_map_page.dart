@@ -59,9 +59,13 @@ class _CityMapPageState extends State<CityMapPage> {
   bool _isLoadingSession = true;
   bool _warningShown = false;
   String? _uid;
+  Set<String> _visitedPoiIds = {};
+  int _totalPoiCount = 0;
+  StreamSubscription<Map<String, dynamic>>? _poiTapSub;
+
   bool get _isTestArea =>
-      widget.areaId == 'istanbul_fatih' ||
-      widget.areaId == 'istanbul_beyoglu';
+      widget.areaId == mapAreaFatih ||
+      widget.areaId == mapAreaBeyoglu;
 
   @override
   void initState() {
@@ -139,8 +143,117 @@ class _CityMapPageState extends State<CityMapPage> {
       _initialCenter = restoredCenter;
       _initialZoom = restoredZoom;
       _mapController = mapController;
+      _visitedPoiIds = Set.from(restoredState?.visitedPoiIds ?? []);
       _isLoadingSession = false;
     });
+
+    _poiTapSub = mapController.onPoiTapped.listen(_onPoiTapped);
+  }
+
+  void _onPoiTapped(Map<String, dynamic> payload) {
+    if (!mounted) return;
+    
+    final id = payload['_feature_id']?.toString() ?? payload['name']?.toString() ?? '';
+    if (id.isEmpty) return;
+    
+    final name = payload['name']?.toString() ?? 'Bilinmeyen Mekan';
+    final category = payload['category']?.toString() ?? '';
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bgBottom,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final currentVisited = _visitedPoiIds.contains(id);
+            return Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    style: const TextStyle(
+                      color: AppColors.textMain,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  if (category.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      category,
+                      style: const TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: currentVisited 
+                                ? Colors.red.withValues(alpha: 0.2)
+                                : AppColors.primary,
+                            foregroundColor: currentVisited
+                                ? Colors.red
+                                : Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          onPressed: () {
+                            if (currentVisited) {
+                              _visitedPoiIds.remove(id);
+                            } else {
+                              _visitedPoiIds.add(id);
+                            }
+                            
+                            setSheetState(() {});
+                            setState(() {});
+                            
+                            // Re-render map to update colors
+                            _loadAndShowPois();
+                            
+                            // Save state
+                            unawaited(_persistMapState(
+                              uid: _uid, 
+                              mapState: CampusMapState(
+                                revealedCellIds: _mapController?.fogManager.snapshotRevealedCellIds() ?? [],
+                                visitedPoiIds: _visitedPoiIds.toList(),
+                                lastInsidePosition: _mapController?.restoredState?.lastInsidePosition,
+                                cameraCenter: _initialCenter,
+                                zoom: _initialZoom,
+                              )
+                            ));
+                          },
+                          child: Text(
+                            currentVisited ? 'Gezmedim (İptal Et)' : 'Gezdim',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                ],
+              ),
+            );
+          }
+        );
+      },
+    );
   }
 
   Future<void> _loadAndShowPois() async {
@@ -148,31 +261,57 @@ class _CityMapPageState extends State<CityMapPage> {
     if (controller == null || !_isTestArea) return;
 
     try {
-      final assetName = widget.areaId == 'istanbul_beyoglu'
+      final assetName = widget.areaId == mapAreaBeyoglu
           ? 'assets/beyoglu_pois.json'
           : 'assets/fatih_pois.json';
       final rawJson = await rootBundle.loadString(assetName);
       final decoded = jsonDecode(rawJson) as Map<String, dynamic>;
-      final List<dynamic> pois = decoded['places'] as List<dynamic>;
+      final List<dynamic> pois;
+      if (decoded.containsKey('mekanlar')) {
+        pois = decoded['mekanlar'] as List<dynamic>;
+      } else {
+        pois = decoded['places'] as List<dynamic>;
+      }
 
       final features = <Map<String, Object?>>[];
       for (final poi in pois) {
         final map = poi as Map<String, dynamic>;
+        
+        // Handle both old and new format keys seamlessly
+        final name = map['isim'] as String? ?? map['name'] as String? ?? '';
+        final type = map['kategori'] as String? ?? map['type'] as String? ?? 'unknown';
+        final rarity = map['oncelik'] as String? ?? map['rarity'] as String? ?? 'common';
+        final category = map['alt_kategori'] as String? ?? map['category'] as String? ?? '';
+        final xp = (map['xp'] as num?)?.toInt() ?? 0;
+        
+        double lon = 0;
+        double lat = 0;
+        
+        if (map.containsKey('koordinatlar')) {
+          final coords = map['koordinatlar'] as Map<String, dynamic>;
+          lon = (coords['longitude'] as num).toDouble();
+          lat = (coords['latitude'] as num).toDouble();
+        } else {
+          lon = (map['lon'] as num).toDouble();
+          lat = (map['lat'] as num).toDouble();
+        }
+
+        final featureId = map['id']?.toString() ?? name;
+
         features.add(<String, Object?>{
           'type': 'Feature',
+          'id': featureId,
           'properties': <String, Object?>{
-            'name': map['name'] as String? ?? '',
-            'poi_type': map['type'] as String? ?? 'unknown',
-            'rarity': map['rarity'] as String? ?? 'common',
-            'category': map['category'] as String? ?? '',
-            'xp': (map['xp'] as num?)?.toInt() ?? 0,
+            'name': name,
+            'poi_type': type,
+            'rarity': rarity,
+            'category': category,
+            'xp': xp,
+            'visited': _visitedPoiIds.contains(featureId),
           },
           'geometry': <String, Object?>{
             'type': 'Point',
-            'coordinates': <double>[
-              (map['lon'] as num).toDouble(),
-              (map['lat'] as num).toDouble(),
-            ],
+            'coordinates': <double>[lon, lat],
           },
         });
       }
@@ -182,8 +321,15 @@ class _CityMapPageState extends State<CityMapPage> {
         'features': features,
       });
 
+      if (mounted) {
+        setState(() {
+          _totalPoiCount = features.length;
+        });
+      }
+
       await controller.addPoiGeoJsonLayer(geoJson);
-    } catch (_) {
+    } catch (e, st) {
+      debugPrint('Error loading POIs: $e\n$st');
       // POI loading is best-effort for test mode.
     }
   }
@@ -205,12 +351,40 @@ class _CityMapPageState extends State<CityMapPage> {
 
   @override
   void dispose() {
+    _poiTapSub?.cancel();
     final mapController = _mapController;
     if (mapController != null) {
       mapController.removeListener(_onControllerChanged);
       unawaited(mapController.disposeController());
     }
     super.dispose();
+  }
+
+  Future<bool> _showExitConfirmation() async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppColors.bgBottom,
+          title: const Text('Çıkış', style: TextStyle(color: AppColors.textMain)),
+          content: const Text(
+            'Haritadan çıkmak istediğinize emin misiniz? İlerlemeniz kaydedildi.',
+            style: TextStyle(color: AppColors.textMuted),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('İptal', style: TextStyle(color: AppColors.textMuted)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Çıkış', style: TextStyle(color: AppColors.primary)),
+            ),
+          ],
+        );
+      },
+    );
+    return result ?? false;
   }
 
   void _onControllerChanged() {
@@ -255,8 +429,17 @@ class _CityMapPageState extends State<CityMapPage> {
     return AnimatedBuilder(
       animation: mapController,
       builder: (context, _) {
-        return Scaffold(
-          backgroundColor: AppColors.bgBottom,
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) async {
+            if (didPop) return;
+            final shouldPop = await _showExitConfirmation();
+            if (shouldPop && context.mounted) {
+              Navigator.of(context).pop();
+            }
+          },
+          child: Scaffold(
+            backgroundColor: AppColors.bgBottom,
           appBar: AppBar(
             backgroundColor: AppColors.bgTop,
             foregroundColor: AppColors.textMain,
@@ -276,6 +459,7 @@ class _CityMapPageState extends State<CityMapPage> {
                 onMapCreated:
                     (mapboxMap) =>
                         unawaited(mapController.onMapCreated(mapboxMap)),
+                onTapListener: mapController.handleMapTap,
                 onStyleLoadedListener:
                     (_) => unawaited(
                       mapController.onStyleLoaded().then((_) => _loadAndShowPois()),
@@ -329,8 +513,10 @@ class _CityMapPageState extends State<CityMapPage> {
                       vertical: 10,
                     ),
                     child: Text(
-                      mapController.statusMessage ??
-                          '${_selectedArea.title} fog modu: ${mapController.revealedCellCount}/${mapController.totalCellCount} hucre acildi',
+                      _isTestArea
+                          ? 'Gezilen: ${_visitedPoiIds.length} / $_totalPoiCount'
+                          : mapController.statusMessage ??
+                              '${_selectedArea.title} fog modu: ${mapController.revealedCellCount}/${mapController.totalCellCount} hucre acildi',
                       style: const TextStyle(
                         color: AppColors.textMain,
                         fontWeight: FontWeight.w600,
@@ -356,7 +542,7 @@ class _CityMapPageState extends State<CityMapPage> {
               ),
             ],
           ),
-        );
+        ));
       },
     );
   }
