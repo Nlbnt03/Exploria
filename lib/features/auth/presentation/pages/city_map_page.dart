@@ -4,9 +4,9 @@ import 'dart:math' as math;
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
-
+import '../../data/services/poi_service.dart';
+import '../../../../app/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../data/services/map_progress_service.dart';
 import '../../domain/models/campus_map_state.dart';
@@ -63,9 +63,26 @@ class _CityMapPageState extends State<CityMapPage> {
   int _totalPoiCount = 0;
   StreamSubscription<Map<String, dynamic>>? _poiTapSub;
 
+  // Category filtering
+  List<Map<String, dynamic>> _parsedPois = [];
+  Set<String> _availableCategories = {};
+  Set<String> _activeCategories = {};
+  bool _poisInitiallyLoaded = false;
+
   bool get _isTestArea =>
       widget.areaId == mapAreaFatih ||
-      widget.areaId == mapAreaBeyoglu;
+      widget.areaId == mapAreaBeyoglu ||
+      widget.areaId == mapAreaUskudar ||
+      widget.areaId == mapAreaKadikoy ||
+      widget.areaId == mapAreaAnkara;
+
+  bool get _hasPoiData =>
+      widget.areaId == mapAreaGtu ||
+      widget.areaId == mapAreaFatih ||
+      widget.areaId == mapAreaBeyoglu ||
+      widget.areaId == mapAreaUskudar ||
+      widget.areaId == mapAreaKadikoy ||
+      widget.areaId == mapAreaAnkara;
 
   @override
   void initState() {
@@ -158,57 +175,218 @@ class _CityMapPageState extends State<CityMapPage> {
     
     final name = payload['name']?.toString() ?? 'Bilinmeyen Mekan';
     final category = payload['category']?.toString() ?? '';
+    final poiType = payload['poi_type']?.toString() ?? '';
+    final description = payload['description']?.toString() ?? '';
+    final photoUrl = payload['photo_url']?.toString() ?? '';
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.bgBottom,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) {
         return StatefulBuilder(
           builder: (context, setSheetState) {
             final currentVisited = _visitedPoiIds.contains(id);
-            return Padding(
-              padding: const EdgeInsets.all(24.0),
+            return Container(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.of(context).size.height * 0.7,
+              ),
+              decoration: const BoxDecoration(
+                color: AppColors.bgBottom,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(
-                    name,
-                    style: const TextStyle(
-                      color: AppColors.textMain,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
+                  // Handle bar
+                  Container(
+                    margin: const EdgeInsets.only(top: 12),
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.textMuted.withValues(alpha: 0.3),
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
-                  if (category.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      category,
-                      style: const TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 14,
+
+                  // Photo header
+                  if (photoUrl.isNotEmpty)
+                    Container(
+                      margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                      height: 180,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        color: AppColors.card,
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            Image.network(
+                              photoUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) => Container(
+                                color: AppColors.card,
+                                child: const Icon(
+                                  Icons.image_not_supported_rounded,
+                                  color: AppColors.textMuted,
+                                  size: 40,
+                                ),
+                              ),
+                              loadingBuilder: (_, child, progress) {
+                                if (progress == null) return child;
+                                return Container(
+                                  color: AppColors.card,
+                                  child: const Center(
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: AppColors.primary,
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                            // Bottom gradient for text readability
+                            Positioned(
+                              bottom: 0,
+                              left: 0,
+                              right: 0,
+                              height: 60,
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.bottomCenter,
+                                    end: Alignment.topCenter,
+                                    colors: [
+                                      Colors.black.withValues(alpha: 0.6),
+                                      Colors.transparent,
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            // Category badge on photo
+                            if (poiType.isNotEmpty)
+                              Positioned(
+                                top: 10,
+                                left: 10,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withValues(alpha: 0.55),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: Text(
+                                    poiType,
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
-                  ],
-                  const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      Expanded(
+
+                  // Content section
+                  Flexible(
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                  name,
+                                  style: const TextStyle(
+                                    color: AppColors.textMain,
+                                    fontSize: 22,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                ),
+                              ),
+                              if (currentVisited)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primary.withValues(alpha: 0.15),
+                                    borderRadius: BorderRadius.circular(20),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.check_circle, color: AppColors.primary, size: 14),
+                                      SizedBox(width: 4),
+                                      Text(
+                                        'Gezildi',
+                                        style: TextStyle(
+                                          color: AppColors.primary,
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                            ],
+                          ),
+                          if (category.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Text(
+                              category,
+                              style: const TextStyle(
+                                color: AppColors.textMuted,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ],
+                          if (description.isNotEmpty) ...[
+                            const SizedBox(height: 14),
+                            Text(
+                              description,
+                              style: TextStyle(
+                                color: AppColors.textMain.withValues(alpha: 0.85),
+                                fontSize: 14,
+                                height: 1.5,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  // Bottom button
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                    child: SafeArea(
+                      top: false,
+                      child: SizedBox(
+                        width: double.infinity,
+                        height: 52,
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(
                             backgroundColor: currentVisited 
-                                ? Colors.red.withValues(alpha: 0.2)
+                                ? Colors.red.withValues(alpha: 0.15)
                                 : AppColors.primary,
                             foregroundColor: currentVisited
                                 ? Colors.red
                                 : Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                              borderRadius: BorderRadius.circular(14),
                             ),
+                            elevation: 0,
                           ),
                           onPressed: () {
                             if (currentVisited) {
@@ -220,10 +398,8 @@ class _CityMapPageState extends State<CityMapPage> {
                             setSheetState(() {});
                             setState(() {});
                             
-                            // Re-render map to update colors
                             _loadAndShowPois();
                             
-                            // Save state
                             unawaited(_persistMapState(
                               uid: _uid, 
                               mapState: CampusMapState(
@@ -236,17 +412,16 @@ class _CityMapPageState extends State<CityMapPage> {
                             ));
                           },
                           child: Text(
-                            currentVisited ? 'Gezmedim (İptal Et)' : 'Gezdim',
+                            currentVisited ? 'Gezmedim (İptal Et)' : 'Gezdim ✓',
                             style: const TextStyle(
                               fontSize: 16,
-                              fontWeight: FontWeight.bold,
+                              fontWeight: FontWeight.w700,
                             ),
                           ),
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                  const SizedBox(height: 24),
                 ],
               ),
             );
@@ -256,62 +431,89 @@ class _CityMapPageState extends State<CityMapPage> {
     );
   }
 
-  Future<void> _loadAndShowPois() async {
-    final controller = _mapController;
-    if (controller == null || !_isTestArea) return;
+  /// Parses POI JSON from Firestore once and caches in [_parsedPois].
+  Future<void> _ensurePoisParsed() async {
+    if (_parsedPois.isNotEmpty) return;
 
-    try {
-      final assetName = widget.areaId == mapAreaBeyoglu
-          ? 'assets/beyoglu_pois.json'
-          : 'assets/fatih_pois.json';
-      final rawJson = await rootBundle.loadString(assetName);
-      final decoded = jsonDecode(rawJson) as Map<String, dynamic>;
-      final List<dynamic> pois;
-      if (decoded.containsKey('mekanlar')) {
-        pois = decoded['mekanlar'] as List<dynamic>;
+    final rawList = await PoiService().getPoisForCity(widget.areaId);
+
+    final categories = <String>{};
+    final parsed = <Map<String, dynamic>>[];
+
+    for (final map in rawList) {
+      final name = map['isim'] as String? ?? map['name'] as String? ?? '';
+      final type = map['kategori'] as String? ?? map['type'] as String? ?? 'unknown';
+      final rarity = map['oncelik'] as String? ?? map['rarity'] as String? ?? 'common';
+      final category = map['alt_kategori'] as String? ?? map['category'] as String? ?? '';
+      final xp = (map['xp'] as num?)?.toInt() ?? 0;
+      final description = map['aciklama'] as String? ?? '';
+      final photoUrl = map['foto_url'] as String? ?? '';
+
+      double lon = 0;
+      double lat = 0;
+      if (map.containsKey('koordinatlar')) {
+        final coords = map['koordinatlar'] as Map<String, dynamic>;
+        lon = (coords['longitude'] as num).toDouble();
+        lat = (coords['latitude'] as num).toDouble();
       } else {
-        pois = decoded['places'] as List<dynamic>;
+        lon = (map['lon'] as num).toDouble();
+        lat = (map['lat'] as num).toDouble();
       }
 
+      final featureId = map['id']?.toString() ?? name;
+      categories.add(type);
+
+      parsed.add(<String, dynamic>{
+        'featureId': featureId,
+        'name': name,
+        'type': type,
+        'rarity': rarity,
+        'category': category,
+        'xp': xp,
+        'description': description,
+        'photo_url': photoUrl,
+        'lon': lon,
+        'lat': lat,
+      });
+    }
+
+    _parsedPois = parsed;
+    _availableCategories = categories;
+    if (!_poisInitiallyLoaded) {
+      _activeCategories = Set.from(categories);
+      _poisInitiallyLoaded = true;
+    }
+  }
+
+  Future<void> _loadAndShowPois() async {
+    final controller = _mapController;
+    if (controller == null || !_hasPoiData) return;
+
+    try {
+      await _ensurePoisParsed();
+
       final features = <Map<String, Object?>>[];
-      for (final poi in pois) {
-        final map = poi as Map<String, dynamic>;
-        
-        // Handle both old and new format keys seamlessly
-        final name = map['isim'] as String? ?? map['name'] as String? ?? '';
-        final type = map['kategori'] as String? ?? map['type'] as String? ?? 'unknown';
-        final rarity = map['oncelik'] as String? ?? map['rarity'] as String? ?? 'common';
-        final category = map['alt_kategori'] as String? ?? map['category'] as String? ?? '';
-        final xp = (map['xp'] as num?)?.toInt() ?? 0;
-        
-        double lon = 0;
-        double lat = 0;
-        
-        if (map.containsKey('koordinatlar')) {
-          final coords = map['koordinatlar'] as Map<String, dynamic>;
-          lon = (coords['longitude'] as num).toDouble();
-          lat = (coords['latitude'] as num).toDouble();
-        } else {
-          lon = (map['lon'] as num).toDouble();
-          lat = (map['lat'] as num).toDouble();
-        }
+      for (final poi in _parsedPois) {
+        final type = poi['type'] as String;
+        if (!_activeCategories.contains(type)) continue;
 
-        final featureId = map['id']?.toString() ?? name;
-
+        final featureId = poi['featureId'] as String;
         features.add(<String, Object?>{
           'type': 'Feature',
           'id': featureId,
           'properties': <String, Object?>{
-            'name': name,
+            'name': poi['name'],
             'poi_type': type,
-            'rarity': rarity,
-            'category': category,
-            'xp': xp,
+            'rarity': poi['rarity'],
+            'category': poi['category'],
+            'xp': poi['xp'],
+            'description': poi['description'],
+            'photo_url': poi['photo_url'],
             'visited': _visitedPoiIds.contains(featureId),
           },
           'geometry': <String, Object?>{
             'type': 'Point',
-            'coordinates': <double>[lon, lat],
+            'coordinates': <double>[poi['lon'] as double, poi['lat'] as double],
           },
         });
       }
@@ -323,15 +525,42 @@ class _CityMapPageState extends State<CityMapPage> {
 
       if (mounted) {
         setState(() {
-          _totalPoiCount = features.length;
+          _totalPoiCount = _parsedPois.length;
         });
       }
 
-      await controller.addPoiGeoJsonLayer(geoJson);
+      // First load uses addPoiGeoJsonLayer (creates source + layers).
+      // Subsequent calls update existing source.
+      if (!_poisInitiallyLoaded || !controller.styleReady) {
+        await controller.addPoiGeoJsonLayer(geoJson);
+      } else {
+        await controller.updatePoiGeoJson(geoJson);
+      }
     } catch (e, st) {
       debugPrint('Error loading POIs: $e\n$st');
-      // POI loading is best-effort for test mode.
     }
+  }
+
+  void _toggleCategory(String category) {
+    setState(() {
+      if (_activeCategories.contains(category)) {
+        _activeCategories.remove(category);
+      } else {
+        _activeCategories.add(category);
+      }
+    });
+    _loadAndShowPois();
+  }
+
+  void _toggleAllCategories() {
+    setState(() {
+      if (_activeCategories.length == _availableCategories.length) {
+        _activeCategories.clear();
+      } else {
+        _activeCategories = Set.from(_availableCategories);
+      }
+    });
+    _loadAndShowPois();
   }
 
   Future<void> _persistMapState({
@@ -435,7 +664,9 @@ class _CityMapPageState extends State<CityMapPage> {
             if (didPop) return;
             final shouldPop = await _showExitConfirmation();
             if (shouldPop && context.mounted) {
-              Navigator.of(context).pop();
+              Navigator.of(context).popUntil(
+                (route) => route.settings.name == AppRouter.home,
+              );
             }
           },
           child: Scaffold(
@@ -495,6 +726,56 @@ class _CityMapPageState extends State<CityMapPage> {
                     ),
                   ),
                 ),
+              // ── Category filter chips ──
+              if (_hasPoiData && _availableCategories.isNotEmpty)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: mapController.isOutOfCampus ? 70 : 10,
+                  child: Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 10),
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xCC12091F),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(
+                        color: AppColors.inputBorder.withValues(alpha: 0.35),
+                      ),
+                      boxShadow: const [
+                        BoxShadow(
+                          color: Color(0x55000000),
+                          blurRadius: 12,
+                          offset: Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: SizedBox(
+                      height: 36,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        children: [
+                          _CategoryChip(
+                            label: 'Tümü',
+                            isActive: _activeCategories.length == _availableCategories.length,
+                            onTap: _toggleAllCategories,
+                            showAllIcon: true,
+                          ),
+                          const SizedBox(width: 6),
+                          for (final category in _availableCategories) ...[
+                            _CategoryChip(
+                              label: category,
+                              isActive: _activeCategories.contains(category),
+                              onTap: () => _toggleCategory(category),
+                              categoryColor: _categoryColorMap[category],
+                            ),
+                            const SizedBox(width: 6),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               Positioned(
                 left: 16,
                 right: 16,
@@ -513,10 +794,10 @@ class _CityMapPageState extends State<CityMapPage> {
                       vertical: 10,
                     ),
                     child: Text(
-                      _isTestArea
-                          ? 'Gezilen: ${_visitedPoiIds.length} / $_totalPoiCount'
+                      _hasPoiData
+                          ? 'Gezilen: ${_visitedPoiIds.length} / $_totalPoiCount  |  ${mapController.revealedCellCount}/${mapController.totalCellCount} hücre'
                           : mapController.statusMessage ??
-                              '${_selectedArea.title} fog modu: ${mapController.revealedCellCount}/${mapController.totalCellCount} hucre acildi',
+                              '${_selectedArea.title} fog modu: ${mapController.revealedCellCount}/${mapController.totalCellCount} hücre açıldı',
                       style: const TextStyle(
                         color: AppColors.textMain,
                         fontWeight: FontWeight.w600,
@@ -768,3 +1049,109 @@ class _MapLoadingSplashState extends State<_MapLoadingSplash>
     );
   }
 }
+
+class _CategoryChip extends StatelessWidget {
+  const _CategoryChip({
+    required this.label,
+    required this.isActive,
+    required this.onTap,
+    this.categoryColor,
+    this.showAllIcon = false,
+  });
+
+  final String label;
+  final bool isActive;
+  final VoidCallback onTap;
+  final Color? categoryColor;
+  final bool showAllIcon;
+
+  @override
+  Widget build(BuildContext context) {
+    final dotColor = categoryColor ?? AppColors.primary;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: isActive
+              ? dotColor.withValues(alpha: 0.18)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isActive
+                ? dotColor.withValues(alpha: 0.7)
+                : AppColors.textMuted.withValues(alpha: 0.3),
+            width: isActive ? 1.4 : 0.8,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (showAllIcon) ...[
+              Icon(
+                isActive
+                    ? Icons.grid_view_rounded
+                    : Icons.grid_view_rounded,
+                size: 14,
+                color: isActive ? AppColors.primary : AppColors.textMuted,
+              ),
+            ] else ...[
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isActive
+                      ? dotColor
+                      : dotColor.withValues(alpha: 0.3),
+                  boxShadow: isActive
+                      ? [
+                          BoxShadow(
+                            color: dotColor.withValues(alpha: 0.4),
+                            blurRadius: 6,
+                          ),
+                        ]
+                      : null,
+                ),
+              ),
+            ],
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: isActive
+                    ? AppColors.textMain
+                    : AppColors.textMuted.withValues(alpha: 0.7),
+                fontSize: 12,
+                fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                letterSpacing: 0.2,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Map of category names to their marker colors (matching map_controller.dart).
+const Map<String, Color> _categoryColorMap = {
+  'Cami': Color(0xFF10B981),
+  'Saray': Color(0xFFF59E0B),
+  'Müze': Color(0xFF3B82F6),
+  'Tarihi Yapı': Color(0xFF6B7280),
+  'Meydan': Color(0xFFF43F5E),
+  'Hamam': Color(0xFF06B6D4),
+  'Çarşı & Pazar': Color(0xFF8B5CF6),
+  'Park & Bahçe': Color(0xFF84CC16),
+  'Semt & Cadde': Color(0xFFF97316),
+  'Kule & Tepe': Color(0xFFEF4444),
+  'Sinagog & Kilise': Color(0xFFA855F7),
+  'Eğitim Binası': Color(0xFF3B82F6),
+  'Araştırma Merkezi': Color(0xFFF59E0B),
+  'Spor Tesisleri': Color(0xFF10B981),
+  'Yeme & İçme': Color(0xFFF43F5E),
+};

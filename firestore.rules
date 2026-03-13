@@ -428,6 +428,11 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    match /pois/{poiId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

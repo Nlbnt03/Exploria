@@ -4,6 +4,7 @@ import '../../core/animations/page_transitions.dart';
 import '../../features/auth/presentation/map/map_areas.dart';
 import '../../features/auth/presentation/pages/city_map_page.dart';
 import '../../features/auth/presentation/pages/city_selection_page.dart';
+import '../../features/auth/presentation/pages/map_preview_page.dart';
 import '../../features/auth/presentation/pages/forgot_password_page.dart';
 import '../../features/auth/presentation/pages/home_page.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
@@ -28,6 +29,7 @@ class AppRouter {
   static const String pendingInvites = '/pending-invites';
   static const String multiMap = '/multi-map';
   static const String userProfile = '/user-profile';
+  static const String mapPreview = '/map-preview';
 
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
     switch (settings.name) {
@@ -117,6 +119,14 @@ class AppRouter {
         final uid = args is UserProfilePageArgs ? args.uid : '';
         return SlideUpRoute<void>(
           builder: (_) => UserProfilePage(uid: uid),
+          settings: settings,
+        );
+      case mapPreview:
+        final args = settings.arguments;
+        final areaId = args is MapPreviewPageArgs ? args.areaId : defaultMapAreaId;
+        final mode = args is MapPreviewPageArgs ? args.mode : 'solo';
+        return SlideLeftRoute<void>(
+          builder: (_) => MapPreviewPage(areaId: areaId, mode: mode),
           settings: settings,
         );
       default:

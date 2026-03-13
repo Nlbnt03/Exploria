@@ -28,6 +28,40 @@ class _SignUpPageState extends State<SignUpPage> {
 
   bool _obscurePassword = true;
   bool _isLoading = false;
+  bool _kvkkAccepted = false;
+
+  static const String _kvkkText = '''
+EXPLORIA UYGULAMASI KİŞİSEL VERİLERİN İŞLENMESİNE İLİŞKİN AYDINLATMA METNİ VE AÇIK RIZA BEYANI
+
+1. VERİ SORUMLUSU
+Exploria ("Uygulama"), kişisel verilerinizin 6698 sayılı Kişisel Verilerin Korunması Kanunu ("KVKK") kapsamında veri sorumlusu sıfatıyla işlenmesinden sorumludur.
+
+2. İŞLENEN KİŞİSEL VERİLERİNİZ
+Uygulamamıza kayıt olmanız ve hizmetlerimizi kullanmanız kapsamında aşağıdaki kişisel verileriniz işlenmektedir:
+• Kimlik Bilgileri: Ad, soyad, kullanıcı adı.
+• İletişim Bilgileri: E-posta adresi.
+• Konum Bilgileri: Uygulama içi harita, sis ("fog") mekaniği, çoklu oyuncu (multiplayer) modları ve konum tabanlı görevler için anlık GPS/konum veriniz.
+• İşlem Güvenliği Bilgileri: Şifre, oturum bilgileri (IP adresi, cihaz bilgileri vb.).
+
+3. KİŞİSEL VERİLERİN İŞLENME AMAÇLARI
+Kişisel verileriniz aşağıdaki amaçlarla işlenmektedir:
+• Kullanıcı kaydının oluşturulması ve hesap yönetimi süreçlerinin yürütülmesi,
+• Uygulamanın temel işlevi olan "keşif ve sis açma" mekaniğinin çalışabilmesi için konumunuzun anlık olarak takip edilmesi,
+• Çoklu oda (multiplayer) modlarında, konumunuzun aynı odadaki diğer oyuncularla eş zamanlı olarak paylaşılması,
+• Uygulama içi iletişim, hata tespiti, destek hizmetleri ve güvenliğin sağlanması.
+
+4. KİŞİSEL VERİLERİN AKTARILMASI
+Kişisel verileriniz, yasal zorunluluklar haricinde ve hizmetin gerektirdiği bulut sunucu altyapıları (ör. Firebase) dışında üçüncü şahıslarla paylaşılmamaktadır. Çoklu oda modunu kullandığınızda, anlık konum bilginiz ve kullanıcı adınız yalnızca sizinle aynı odaya katılan diğer kullanıcılarla paylaşılır.
+
+5. KİŞİSEL VERİLERİNİZİN İŞLENMESİNİN HUKUKİ SEBEBİ
+Kişisel verileriniz, KVKK Madde 5/2(c) kapsamında "Bir sözleşmenin kurulması veya ifasıyla doğrudan doğruya ilgili olması" ve KVKK Madde 5/1 kapsamında verdiğiniz "Açık Rıza" hukuki sebeplerine dayalı olarak toplanmakta ve işlenmektedir. Özellikle anlık konum verisi ve diğer kullanıcılarla konum paylaşımı, bu açık rızaya istinaden gerçekleştirilir.
+
+6. HAKLARINIZ
+KVKK'nın 11. maddesi uyarınca; kişisel verilerinizin işlenip işlenmediğini öğrenme, işlenmişse bilgi talep etme, işlenme amacını öğrenme, yurt içinde/yurt dışında aktarıldığı kişileri bilme, eksik/yanlış işlenmişse düzeltilmesini isteme, silinmesini veya yok edilmesini talep etme haklarına sahipsiniz.
+
+AÇIK RIZA BEYANI
+Yukarıda yer alan "Aydınlatma Metni"ni okuduğumu, anladığımı ve Exploria uygulamasının temel mekaniklerinin (harita keşfi ve çoklu oyuncu modu) çalışabilmesi için kimlik, iletişim ve asıl olarak "Anlık Konum" verilerimin işlenmesine, kaydedilmesine ve çoklu odalarda diğer oyuncularla paylaşılmasına özgür irademle açık rıza gösterdiğimi kabul ve beyan ederim.
+''';
 
   @override
   void dispose() {
@@ -54,6 +88,10 @@ class _SignUpPageState extends State<SignUpPage> {
         username.isEmpty ||
         password.isEmpty) {
       _showMessage('Tüm alanlar zorunludur.');
+      return;
+    }
+    if (!_kvkkAccepted) {
+      _showMessage("Kayıt olabilmek için KVKK metnini onaylamanız gerekmektedir.");
       return;
     }
     if (!email.contains('@')) {
@@ -108,6 +146,92 @@ class _SignUpPageState extends State<SignUpPage> {
     showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(content: Text(message)),
+    );
+  }
+
+  void _showKvkkText() {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppColors.bgBottom,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.8,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (context, scrollController) => Column(
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 12, bottom: 20),
+              width: 48,
+              height: 5,
+              decoration: BoxDecoration(
+                color: AppColors.inputBorder,
+                borderRadius: BorderRadius.circular(2.5),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20),
+              child: Text(
+                'KVKK Aydınlatma Metni\nve Açık Rıza Beyanı',
+                style: TextStyle(
+                  color: AppColors.textMain,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  height: 1.3,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ),
+            const SizedBox(height: 20),
+            Expanded(
+              child: Scrollbar(
+                controller: scrollController,
+                child: ListView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                  children: const [
+                    Text(
+                      _kvkkText,
+                      style: TextStyle(
+                        color: AppColors.textMain,
+                        fontSize: 14,
+                        height: 1.6,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.primary,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Anladım, Kapat',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -206,7 +330,63 @@ class _SignUpPageState extends State<SignUpPage> {
               ),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 16),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: Checkbox(
+                  value: _kvkkAccepted,
+                  onChanged:
+                      _isLoading
+                          ? null
+                          : (val) {
+                            setState(() => _kvkkAccepted = val ?? false);
+                          },
+                  activeColor: AppColors.primary,
+                  side: BorderSide(
+                    color: AppColors.textMuted.withValues(alpha: 0.5),
+                    width: 1.5,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: GestureDetector(
+                  onTap: _showKvkkText,
+                  child: Text.rich(
+                    TextSpan(
+                      text: "Kayıt olarak ",
+                      style: TextStyle(
+                        color: AppColors.textMuted.withValues(alpha: 0.9),
+                        fontSize: 13,
+                        height: 1.4,
+                      ),
+                      children: const [
+                        TextSpan(
+                          text: "KVKK Aydınlatma Metni ve Açık Rıza Beyanı'nı",
+                          style: TextStyle(
+                            color: AppColors.primary,
+                            fontWeight: FontWeight.w600,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                        TextSpan(
+                          text: " okuduğumu ve kabul ettiğimi onaylıyorum.",
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
           PrimaryButton(
             text: 'HESAP OLUŞTUR',
             icon: Icons.auto_awesome_outlined,

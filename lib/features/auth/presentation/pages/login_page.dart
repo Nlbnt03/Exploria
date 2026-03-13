@@ -93,7 +93,7 @@ class _LoginPageState extends State<LoginPage> {
       subtitleFontSize: 15,
       footer: AuthFooter(
         text: 'Yolculuğa yeni mi başlıyorsun?',
-        actionText: 'Loncaya Katıl',
+        actionText: 'Kayıt Ol',
         textFontSize: 14,
         actionFontSize: 15,
         onTap: () => Navigator.pushNamed(context, AppRouter.signUp),

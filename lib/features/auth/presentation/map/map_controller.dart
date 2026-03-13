@@ -222,6 +222,12 @@ class CampusMapController extends ChangeNotifier {
             'Kule & Tepe', '#EF4444', // Red
             'Sinagog & Kilise', '#A855F7', // Violet
             
+            // Gebze Teknik campus categories
+            'Eğitim Binası', '#3B82F6', // Blue
+            'Araştırma Merkezi', '#F59E0B', // Amber
+            'Spor Tesisleri', '#10B981', // Green
+            'Yeme & İçme', '#F43F5E', // Rose
+            
             // Fallback old colors
             'historic', '#FFB300',
             'museum', '#42A5F5',
@@ -270,6 +276,23 @@ class CampusMapController extends ChangeNotifier {
       );
     } on PlatformException catch (e) {
       if (!_isAlreadyExistsError(e)) rethrow;
+    }
+  }
+
+  /// Updates the POI source GeoJSON data (e.g. after a category filter change).
+  Future<void> updatePoiGeoJson(String geoJson) async {
+    final map = _mapboxMap;
+    if (map == null) return;
+
+    const sourceId = 'poi-source';
+    try {
+      final existing = await map.style.getSource(sourceId);
+      if (existing is GeoJsonSource) {
+        await existing.updateGeoJSON(geoJson);
+      }
+    } catch (_) {
+      // If source doesn't exist yet, fall back to full add.
+      await addPoiGeoJsonLayer(geoJson);
     }
   }
 
@@ -511,7 +534,7 @@ class CampusMapController extends ChangeNotifier {
   }
 
   void _scheduleFogRefresh({
-    Duration delay = const Duration(milliseconds: 120),
+    Duration delay = const Duration(milliseconds: 250),
   }) {
     _fogUpdateDebounce?.cancel();
     _fogUpdateDebounce = Timer(delay, _refreshFog);

@@ -10,6 +10,7 @@ import '../../data/services/map_progress_service.dart';
 import '../map/map_areas.dart';
 import '../map/location_service.dart';
 import 'city_map_page.dart';
+import 'map_preview_page.dart';
 import '../../../multi_room/presentation/screens/create_room_screen.dart';
 
 class CitySelectionPageArgs {
@@ -32,12 +33,20 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
 
   String _selectedAreaId = defaultMapAreaId;
   bool _isOpeningMap = false;
+  int _expandedGroupIndex = -1;
 
   MapAreaConfig get _selectedArea => resolveMapArea(_selectedAreaId);
 
   @override
   void initState() {
     super.initState();
+    // Auto-expand the group that contains the default area.
+    for (var i = 0; i < selectableMapGroups.length; i++) {
+      if (selectableMapGroups[i].areas.any((a) => a.id == _selectedAreaId)) {
+        _expandedGroupIndex = i;
+        break;
+      }
+    }
     unawaited(_restoreLastOpenedMapSelection());
   }
 
@@ -53,6 +62,17 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
 
       final exists = selectableMapAreas.any((area) => area.id == lastAreaId);
       if (!exists) return;
+
+      // Auto-expand the group containing the restored area.
+      for (var i = 0; i < selectableMapGroups.length; i++) {
+        if (selectableMapGroups[i].areas.any((a) => a.id == lastAreaId)) {
+          setState(() {
+            _selectedAreaId = lastAreaId;
+            _expandedGroupIndex = i;
+          });
+          return;
+        }
+      }
 
       setState(() => _selectedAreaId = lastAreaId);
     } catch (_) {
@@ -73,6 +93,18 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
   Future<void> _openSelectedMap() async {
     if (_isOpeningMap) return;
     final selectedArea = _selectedArea;
+
+    // Show preview first – proceed only if user confirms.
+    final confirmed = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute<bool>(
+        builder: (_) => MapPreviewPage(
+          areaId: selectedArea.id,
+          mode: widget.mode,
+        ),
+      ),
+    );
+    if (confirmed != true || !mounted) return;
 
     if (widget.mode == 'multi') {
       setState(() => _isOpeningMap = true);
@@ -96,9 +128,12 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
 
     setState(() => _isOpeningMap = true);
     try {
-      // TODO: Test amacli Fatih ve Beyoglu icin tum denetimler devre disi.
+      // TODO: Test amacli Fatih, Beyoglu, Uskudar, Kadikoy ve Ankara icin tum denetimler devre disi.
       if (selectedArea.id == mapAreaFatih ||
-          selectedArea.id == mapAreaBeyoglu) {
+          selectedArea.id == mapAreaBeyoglu ||
+          selectedArea.id == mapAreaUskudar ||
+          selectedArea.id == mapAreaKadikoy ||
+          selectedArea.id == mapAreaAnkara) {
         final mapId = await _createMapForSelection(
           areaId: selectedArea.id,
           mapName: mapName,
@@ -135,7 +170,7 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              '${selectedArea.title} icinde degilsin. Haritayi acmak icin secilen alanin icine gir.',
+              '${selectedArea.title} içinde değilsin. Haritayı açmak için seçilen alanın içine gir.',
             ),
             behavior: SnackBarBehavior.floating,
           ),
@@ -244,13 +279,13 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
   void _showGateMessage(LocationAccessStatus status) {
     final message = switch (status) {
       LocationAccessStatus.serviceDisabled =>
-        'Konum servisleri kapali. Haritayi acmak icin konumu etkinlestir.',
+        'Konum servisleri kapalı. Haritayı açmak için konumu etkinleştir.',
       LocationAccessStatus.permissionDenied =>
-        'Konum izni gerekli. Lutfen izin verip tekrar dene.',
+        'Konum izni gerekli. Lütfen izin verip tekrar dene.',
       LocationAccessStatus.permissionDeniedForever =>
-        'Konum izni kalici olarak reddedildi. Ayarlardan izin vermen gerekiyor.',
+        'Konum izni kalıcı olarak reddedildi. Ayarlardan izin vermen gerekiyor.',
       LocationAccessStatus.unavailable =>
-        'Konum bilgisi alinamadi. Uygulamayi yeniden baslatip tekrar dene.',
+        'Konum bilgisi alınamadı. Uygulamayı yeniden başlatıp tekrar dene.',
       LocationAccessStatus.granted => '',
     };
     if (message.isEmpty) return;
@@ -317,172 +352,124 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
                     const SizedBox(height: 12),
                     Expanded(
                       child: ListView.separated(
-                        itemCount: selectableMapAreas.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: 12),
-                        itemBuilder: (context, index) {
-                          final area = selectableMapAreas[index];
-                          final isSelected = area.id == _selectedAreaId;
-                          final icon =
-                              area.id == mapAreaGtu
-                                  ? Icons.school_rounded
-                                  : area.id == mapAreaFatih
-                                      ? Icons.mosque_rounded
-                                      : area.id == mapAreaBeyoglu
-                                          ? Icons.location_city_rounded
-                                          : Icons.apartment_rounded;
-                          return InkWell(
-                            borderRadius: BorderRadius.circular(16),
-                            onTap:
-                                () => setState(() => _selectedAreaId = area.id),
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 180),
-                              width: double.infinity,
-                              padding: const EdgeInsets.all(16),
-                              decoration: BoxDecoration(
-                                color:
-                                    isSelected
-                                        ? AppColors.primary.withValues(
-                                          alpha: 0.16,
-                                        )
-                                        : AppColors.card,
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                  color:
-                                      isSelected
-                                          ? AppColors.primary
-                                          : AppColors.inputBorder.withValues(
-                                            alpha: 0.45,
-                                          ),
-                                  width: isSelected ? 1.5 : 1,
-                                ),
+                        itemCount: selectableMapGroups.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 14),
+                        itemBuilder: (context, groupIndex) {
+                          final group = selectableMapGroups[groupIndex];
+                          final isExpanded = _expandedGroupIndex == groupIndex;
+                          final groupHasSelection = group.areas.any(
+                            (a) => a.id == _selectedAreaId,
+                          );
+
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 220),
+                            decoration: BoxDecoration(
+                              color: isExpanded
+                                  ? AppColors.card
+                                  : AppColors.card.withValues(alpha: 0.5),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: groupHasSelection && isExpanded
+                                    ? AppColors.primary.withValues(alpha: 0.5)
+                                    : AppColors.inputBorder.withValues(alpha: 0.35),
+                                width: groupHasSelection && isExpanded ? 1.3 : 1,
                               ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Container(
-                                        width: 52,
-                                        height: 52,
-                                        decoration: BoxDecoration(
-                                          color: AppColors.primary.withValues(
-                                            alpha: 0.22,
+                            ),
+                            child: Column(
+                              children: [
+                                // ── Group header ──
+                                InkWell(
+                                  borderRadius: BorderRadius.circular(16),
+                                  onTap: () => setState(() {
+                                    _expandedGroupIndex = isExpanded ? -1 : groupIndex;
+                                  }),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 16,
+                                      vertical: 14,
+                                    ),
+                                    child: Row(
+                                      children: [
+                                        Container(
+                                          width: 44,
+                                          height: 44,
+                                          decoration: BoxDecoration(
+                                            color: AppColors.primary.withValues(alpha: 0.18),
+                                            borderRadius: BorderRadius.circular(12),
                                           ),
-                                          borderRadius: BorderRadius.circular(
-                                            12,
+                                          child: Icon(
+                                            IconData(group.icon, fontFamily: 'MaterialIcons'),
+                                            color: AppColors.primary,
+                                            size: 22,
                                           ),
                                         ),
-                                        child: Icon(
-                                          icon,
-                                          color: AppColors.primary,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              area.title,
-                                              style: const TextStyle(
-                                                color: AppColors.textMain,
-                                                fontSize: 18,
-                                                fontWeight: FontWeight.w800,
+                                        const SizedBox(width: 12),
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                group.title,
+                                                style: const TextStyle(
+                                                  color: AppColors.textMain,
+                                                  fontSize: 17,
+                                                  fontWeight: FontWeight.w800,
+                                                ),
                                               ),
-                                            ),
-                                            const SizedBox(height: 2),
-                                            Text(
-                                              area.subtitle,
-                                              style: const TextStyle(
-                                                color: AppColors.textMuted,
-                                                fontSize: 13,
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                '${group.areas.length} harita',
+                                                style: const TextStyle(
+                                                  color: AppColors.textMuted,
+                                                  fontSize: 12,
+                                                ),
                                               ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      Icon(
-                                        isSelected
-                                            ? Icons.check_circle_rounded
-                                            : Icons
-                                                .radio_button_unchecked_rounded,
-                                        color:
-                                            isSelected
-                                                ? AppColors.primary
-                                                : AppColors.textMuted,
-                                      ),
-                                    ],
-                                  ),
-                                  const SizedBox(height: 14),
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(12),
-                                    child: SizedBox(
-                                      height: 180,
-                                      width: double.infinity,
-                                      child: Container(
-                                        decoration: const BoxDecoration(
-                                          gradient: LinearGradient(
-                                            begin: Alignment.topLeft,
-                                            end: Alignment.bottomRight,
-                                            colors: [
-                                              Color(0xFF1B1A2F),
-                                              Color(0xFF0E0D1A),
                                             ],
                                           ),
                                         ),
-                                        child: Stack(
-                                          fit: StackFit.expand,
-                                          children: [
-                                            Positioned(
-                                              right: -26,
-                                              top: -30,
-                                              child: Container(
-                                                width: 140,
-                                                height: 140,
-                                                decoration: BoxDecoration(
-                                                  shape: BoxShape.circle,
-                                                  color: AppColors.primary
-                                                      .withValues(alpha: 0.16),
-                                                ),
-                                              ),
-                                            ),
-                                            Positioned(
-                                              left: 14,
-                                              right: 14,
-                                              bottom: 14,
-                                              child: Row(
-                                                children: [
-                                                  const Icon(
-                                                    Icons.map_rounded,
-                                                    color: AppColors.primary,
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  Expanded(
-                                                    child: Text(
-                                                      area.subtitle,
-                                                      style: const TextStyle(
-                                                        color:
-                                                            AppColors.textMain,
-                                                        fontSize: 13,
-                                                        fontWeight:
-                                                            FontWeight.w600,
-                                                      ),
-                                                      maxLines: 1,
-                                                      overflow:
-                                                          TextOverflow.ellipsis,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ],
+                                        AnimatedRotation(
+                                          turns: isExpanded ? 0.5 : 0,
+                                          duration: const Duration(milliseconds: 220),
+                                          child: Icon(
+                                            Icons.keyboard_arrow_down_rounded,
+                                            color: isExpanded
+                                                ? AppColors.primary
+                                                : AppColors.textMuted,
+                                            size: 26,
+                                          ),
                                         ),
-                                      ),
+                                      ],
                                     ),
                                   ),
-                                ],
-                              ),
+                                ),
+
+                                // ── Expandable children ──
+                                AnimatedCrossFade(
+                                  firstChild: const SizedBox.shrink(),
+                                  secondChild: Column(
+                                    children: [
+                                      Container(
+                                        margin: const EdgeInsets.symmetric(horizontal: 16),
+                                        height: 1,
+                                        color: AppColors.inputBorder.withValues(alpha: 0.25),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      for (final area in group.areas)
+                                        _AreaTile(
+                                          area: area,
+                                          isSelected: area.id == _selectedAreaId,
+                                          onTap: () => setState(() => _selectedAreaId = area.id),
+                                        ),
+                                      const SizedBox(height: 8),
+                                    ],
+                                  ),
+                                  crossFadeState: isExpanded
+                                      ? CrossFadeState.showSecond
+                                      : CrossFadeState.showFirst,
+                                  duration: const Duration(milliseconds: 220),
+                                  sizeCurve: Curves.easeInOut,
+                                ),
+                              ],
                             ),
                           );
                         },
@@ -522,9 +509,7 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
                                     ),
                                   )
                                   : Text(
-                                    widget.mode == 'multi'
-                                        ? 'Coklu Oda Olustur'
-                                        : '${_selectedArea.title} Haritasini Ac',
+                                    '${_selectedArea.title} Ön İzleme',
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 16,
@@ -794,6 +779,84 @@ class _MapNameEntryPageState extends State<_MapNameEntryPage> {
               ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AreaTile extends StatelessWidget {
+  const _AreaTile({
+    required this.area,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  final MapAreaConfig area;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppColors.primary.withValues(alpha: 0.14)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected
+                ? AppColors.primary.withValues(alpha: 0.6)
+                : Colors.transparent,
+            width: isSelected ? 1.2 : 0,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              Icons.map_rounded,
+              color: isSelected ? AppColors.primary : AppColors.textMuted,
+              size: 20,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    area.title,
+                    style: TextStyle(
+                      color: isSelected
+                          ? AppColors.textMain
+                          : AppColors.textMain.withValues(alpha: 0.85),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    area.subtitle,
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              isSelected
+                  ? Icons.check_circle_rounded
+                  : Icons.radio_button_unchecked_rounded,
+              color: isSelected ? AppColors.primary : AppColors.textMuted,
+              size: 22,
+            ),
+          ],
         ),
       ),
     );

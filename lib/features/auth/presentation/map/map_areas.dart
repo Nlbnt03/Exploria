@@ -8,6 +8,12 @@ const String mapAreaGtu = 'gebze_teknik_universitesi';
 const String mapAreaGebzeKyk = 'gebze_kyk';
 const String mapAreaFatih = 'istanbul_fatih';
 const String mapAreaBeyoglu = 'istanbul_beyoglu';
+const String mapAreaUskudar = 'istanbul_uskudar';
+const String mapAreaKadikoy = 'istanbul_kadikoy';
+
+const String mapGroupAnkara = 'ankara';
+const String mapAreaAnkara = 'ankara_merkez';
+
 const String defaultMapAreaId = mapAreaGtu;
 
 class MapAreaConfig {
@@ -121,11 +127,41 @@ final List<Position> beyogluBoundary = <Position>[
   Position(28.96800, 41.02100),
 ];
 
+final Position uskudarCenter = Position(29.0300, 41.0250);
+
+final List<Position> uskudarBoundary = <Position>[
+  Position(29.0000, 41.0000),
+  Position(29.0800, 41.0000),
+  Position(29.0800, 41.0600),
+  Position(29.0000, 41.0600),
+  Position(29.0000, 41.0000),
+];
+
+final Position kadikoyCenter = Position(29.0250, 40.9850);
+
+final List<Position> kadikoyBoundary = <Position>[
+  Position(28.9800, 40.9500),
+  Position(29.1000, 40.9500),
+  Position(29.1000, 41.0100),
+  Position(28.9800, 41.0100),
+  Position(28.9800, 40.9500),
+];
+
+final Position ankaraCenter = Position(32.8597, 39.9250);
+
+final List<Position> ankaraBoundary = <Position>[
+  Position(32.5000, 39.7000),
+  Position(33.1000, 39.7000),
+  Position(33.1000, 40.2000),
+  Position(32.5000, 40.2000),
+  Position(32.5000, 39.7000),
+];
+
 final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
   MapAreaConfig(
     id: mapAreaGtu,
-    title: 'Gebze Teknik Universitesi',
-    subtitle: 'Sadece GTU kampus sinirlari',
+    title: 'Gebze Teknik Üniversitesi',
+    subtitle: 'GTÜ kampüs sınırları',
     styleUri: defaultMapStyleUri,
     center: gebzeTeknikCenter,
     boundary: gebzeTeknikBoundary,
@@ -134,7 +170,7 @@ final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
   MapAreaConfig(
     id: mapAreaGebzeKyk,
     title: 'Gebze KYK',
-    subtitle: 'Gebze ogrenci yurdu sinirlari',
+    subtitle: 'Gebze öğrenci yurdu sınırları',
     styleUri: defaultMapStyleUri,
     center: gebzeKykCenter,
     boundary: gebzeKykBoundary,
@@ -157,6 +193,73 @@ final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
     center: beyogluCenter,
     boundary: beyogluBoundary,
     gridSizeMeters: 50,
+  ),
+  MapAreaConfig(
+    id: mapAreaUskudar,
+    title: 'İstanbul / Üsküdar',
+    subtitle: 'Üsküdar ilçesi sınırları',
+    styleUri: defaultMapStyleUri,
+    center: uskudarCenter,
+    boundary: uskudarBoundary,
+    gridSizeMeters: 50,
+  ),
+  MapAreaConfig(
+    id: mapAreaKadikoy,
+    title: 'İstanbul / Kadıköy',
+    subtitle: 'Kadıköy ilçesi ve Moda sahili',
+    styleUri: defaultMapStyleUri,
+    center: kadikoyCenter,
+    boundary: kadikoyBoundary,
+    gridSizeMeters: 50,
+  ),
+  MapAreaConfig(
+    id: mapAreaAnkara,
+    title: 'Ankara',
+    subtitle: 'Başkent ve çevresi',
+    styleUri: defaultMapStyleUri,
+    center: ankaraCenter,
+    boundary: ankaraBoundary,
+    gridSizeMeters: 50,
+  ),
+];
+
+class MapAreaGroup {
+  const MapAreaGroup({
+    required this.title,
+    required this.icon,
+    required this.areas,
+  });
+
+  final String title;
+  final int icon; // IconData.codePoint (to keep const)
+  final List<MapAreaConfig> areas;
+}
+
+final List<MapAreaGroup> selectableMapGroups = <MapAreaGroup>[
+  MapAreaGroup(
+    title: 'İstanbul Haritaları',
+    icon: 0xe3ab, // Icons.location_city_rounded
+    areas: [
+      selectableMapAreas.firstWhere((a) => a.id == mapAreaFatih),
+      selectableMapAreas.firstWhere((a) => a.id == mapAreaBeyoglu),
+      selectableMapAreas.firstWhere((a) => a.id == mapAreaUskudar),
+      selectableMapAreas.firstWhere((a) => a.id == mapAreaKadikoy),
+    ],
+  ),
+  MapAreaGroup(
+    title: 'Gebze Haritaları',
+    icon: 0xe559, // Icons.school_rounded
+    areas: [
+      selectableMapAreas.firstWhere((a) => a.id == mapAreaGtu),
+      selectableMapAreas.firstWhere((a) => a.id == mapAreaGebzeKyk),
+    ],
+  ),
+  MapAreaGroup(
+    title: 'Ankara Haritaları',
+    icon: 0xe3ab, // Icons.location_city_rounded
+    areas: [
+      selectableMapAreas.firstWhere((a) => a.id == mapAreaAnkara),
+    ],
   ),
 ];
 

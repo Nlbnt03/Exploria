@@ -12,6 +12,7 @@ import '../../../auth/data/services/map_progress_service.dart';
 import '../../../auth/domain/models/campus_map_state.dart';
 import '../../../auth/presentation/map/fog_manager.dart';
 import '../../../auth/presentation/map/map_areas.dart';
+import '../../../auth/data/services/poi_service.dart';
 import '../../models/live_location.dart';
 import '../../models/member.dart';
 import '../../models/room.dart';
@@ -60,6 +61,9 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
   final Map<String, LiveLocation> _locationByUid = <String, LiveLocation>{};
   final Set<String> _inMapUids = <String>{};
   final Set<String> _presenceJoinNotifiedUids = <String>{};
+  
+  Set<String> _visitedPoiIds = {};
+  int _totalPoiCount = 0;
 
   Room? _room;
   Position? _lastInsidePosition;
@@ -76,6 +80,7 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
   bool _fogRefreshQueued = false;
   bool _historyMarked = false;
   bool _allMembersReadyToExplore = false;
+  double _initialZoom = 16.0;
 
   String? _historyMapId;
   String? _historyAreaId;
@@ -296,6 +301,16 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
     final areaId = _resolveAreaIdForRoom(room);
     final mapName = _historyMapNameForRoom(room);
 
+    CampusMapState? restoredState;
+    try {
+      restoredState = await _mapProgressService.fetchMapState(
+        uid: uid,
+        mapId: mapId,
+      );
+    } catch (_) {
+      // Best effort
+    }
+
     try {
       await _mapProgressService.markMapOpened(
         uid: uid,
@@ -307,6 +322,14 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
       _historyMapId = mapId;
       _historyAreaId = areaId;
       _historyMapName = mapName;
+      
+      if (restoredState != null) {
+        _lastInsidePosition = restoredState.lastInsidePosition;
+        _initialZoom = (restoredState.zoom ?? 16.0).clamp(14.8, 19.2).toDouble();
+        _visitedPoiIds = Set.from(restoredState.visitedPoiIds);
+        _fogManager?.restoreRevealedCells(restoredState.revealedCellIds);
+      }
+      
       _schedulePersistMapState(delay: const Duration(milliseconds: 700));
     } catch (_) {
       // Room map history registration is best-effort.
@@ -318,6 +341,13 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
       return;
     }
     if (!_allMembersReadyToExplore || !(_room?.isActive ?? false)) {
+      return;
+    }
+
+    final areaId = _historyAreaId ?? _room?.cityId ?? _resolveAreaForRoom(_room).id;
+    final isTestArea = areaId == mapAreaFatih || areaId == mapAreaBeyoglu || areaId == mapAreaUskudar || areaId == mapAreaKadikoy || areaId == mapAreaAnkara;
+    if (isTestArea) {
+      // Test areas do not use GPS
       return;
     }
 
@@ -465,6 +495,297 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
     _mapboxMap = mapboxMap;
   }
 
+  void _onPoiTapped(Map<String, dynamic> payload) {
+    if (!mounted) return;
+    
+    final id = payload['_feature_id']?.toString() ?? payload['name']?.toString() ?? '';
+    if (id.isEmpty) return;
+    
+    final name = payload['name']?.toString() ?? 'Bilinmeyen Mekan';
+    final category = payload['category']?.toString() ?? '';
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bgBottom,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            final currentVisited = _visitedPoiIds.contains(id);
+            return Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    style: const TextStyle(
+                      color: AppColors.textMain,
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  if (category.isNotEmpty) ...[
+                    const SizedBox(height: 4),
+                    Text(
+                      category,
+                      style: const TextStyle(
+                        color: AppColors.textMuted,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: currentVisited 
+                                ? Colors.red.withValues(alpha: 0.2)
+                                : AppColors.primary,
+                            foregroundColor: currentVisited
+                                ? Colors.red
+                                : Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                          ),
+                          onPressed: () {
+                            if (currentVisited) {
+                              _visitedPoiIds.remove(id);
+                            } else {
+                              _visitedPoiIds.add(id);
+                            }
+                            
+                            setSheetState(() {});
+                            setState(() {});
+                            
+                            // Re-render map to update colors
+                            _loadAndShowPois();
+                            
+                            // Save state
+                            unawaited(_persistMapState());
+                          },
+                          child: Text(
+                            currentVisited ? 'Gezmedim (İptal Et)' : 'Gezdim',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                ],
+              ),
+            );
+          }
+        );
+      },
+    );
+  }
+
+  Future<void> _loadAndShowPois() async {
+    final map = _mapboxMap;
+    final areaId = _historyAreaId ?? _room?.cityId ?? _resolveAreaForRoom(_room).id;
+    final hasPoiData = areaId == mapAreaGtu || areaId == mapAreaFatih || areaId == mapAreaBeyoglu || areaId == mapAreaUskudar || areaId == mapAreaKadikoy || areaId == mapAreaAnkara;
+    
+    if (map == null || !hasPoiData) return;
+
+    try {
+      final List<dynamic> pois = await PoiService().getPoisForCity(areaId);
+
+      final features = <Map<String, Object?>>[];
+      for (final poi in pois) {
+        final poiMap = poi as Map<String, dynamic>;
+        
+        final name = poiMap['isim'] as String? ?? poiMap['name'] as String? ?? '';
+        final type = poiMap['kategori'] as String? ?? poiMap['type'] as String? ?? 'unknown';
+        final rarity = poiMap['oncelik'] as String? ?? poiMap['rarity'] as String? ?? 'common';
+        final category = poiMap['alt_kategori'] as String? ?? poiMap['category'] as String? ?? '';
+        final xp = (poiMap['xp'] as num?)?.toInt() ?? 0;
+        
+        double lon = 0;
+        double lat = 0;
+        
+        if (poiMap.containsKey('koordinatlar')) {
+          final coords = poiMap['koordinatlar'] as Map<String, dynamic>;
+          lon = (coords['longitude'] as num).toDouble();
+          lat = (coords['latitude'] as num).toDouble();
+        } else {
+          lon = (poiMap['lon'] as num).toDouble();
+          lat = (poiMap['lat'] as num).toDouble();
+        }
+
+        final featureId = poiMap['id']?.toString() ?? name;
+
+        features.add(<String, Object?>{
+          'type': 'Feature',
+          'id': featureId,
+          'properties': <String, Object?>{
+            'name': name,
+            'poi_type': type,
+            'rarity': rarity,
+            'category': category,
+            'xp': xp,
+            'visited': _visitedPoiIds.contains(featureId),
+          },
+          'geometry': <String, Object?>{
+            'type': 'Point',
+            'coordinates': <double>[lon, lat],
+          },
+        });
+      }
+
+      final geoJson = jsonEncode(<String, Object?>{
+        'type': 'FeatureCollection',
+        'features': features,
+      });
+
+      if (mounted) {
+        setState(() {
+          _totalPoiCount = features.length;
+        });
+      }
+
+      const sourceId = 'poi-source';
+      const circleLayerId = 'poi-circle-layer';
+      const labelLayerId = 'poi-label-layer';
+
+      final source = GeoJsonSource(id: sourceId, data: geoJson);
+      try {
+        await map.style.addSource(source);
+      } on PlatformException catch (e) {
+        if (!_isAlreadyExistsError(e)) rethrow;
+      }
+
+      try {
+        await map.style.addLayer(
+          CircleLayer(
+            id: circleLayerId,
+            sourceId: sourceId,
+            circleRadiusExpression: <Object>[
+              'match',
+              <Object>['get', 'rarity'],
+              'must-see', 14.0, 'önerilen', 10.0,
+              'legendary', 14.0, 'epic', 11.0, 'rare', 8.0,
+              6.0,
+            ],
+            circleColorExpression: <Object>[
+              'match',
+              <Object>['get', 'poi_type'],
+              'Cami', '#10B981', 'Saray', '#F59E0B', 'Müze', '#3B82F6',
+              'Tarihi Yapı', '#6B7280', 'Meydan', '#F43F5E', 'Hamam', '#06B6D4',
+              'Çarşı & Pazar', '#8B5CF6', 'Park & Bahçe', '#84CC16',
+              'Semt & Cadde', '#F97316', 'Kule & Tepe', '#EF4444',
+              'Sinagog & Kilise', '#A855F7',
+              'Eğitim Binası', '#3B82F6', 'Araştırma Merkezi', '#F59E0B',
+              'Spor Tesisleri', '#10B981', 'Yeme & İçme', '#F43F5E',
+              'historic', '#FFB300', 'museum', '#42A5F5', 'park', '#66BB6A', 'tower', '#EF5350',
+              '#E0E0E0',
+            ],
+            circleStrokeWidth: 1.5,
+            circleStrokeColor: const Color(0xFFFFFFFF).toARGB32(),
+            circleOpacityExpression: <Object>[
+              'case',
+              <Object>['==', <Object>['get', 'visited'], true],
+              0.4, 0.92,
+            ],
+          ),
+        );
+      } on PlatformException catch (e) {
+        if (!_isAlreadyExistsError(e)) rethrow;
+      }
+
+      try {
+        await map.style.addLayer(
+          SymbolLayer(
+            id: labelLayerId,
+            sourceId: sourceId,
+            textFieldExpression: <Object>['get', 'name'],
+            textSize: 12.0,
+            textColor: const Color(0xFFFFFFFF).toARGB32(),
+            textHaloColor: const Color(0xFF000000).toARGB32(),
+            textHaloWidth: 1.5,
+            textOpacityExpression: <Object>[
+              'case',
+              <Object>['==', <Object>['get', 'visited'], true],
+              0.5, 1.0,
+            ],
+            textOffset: <double>[0, 1.6],
+            textMaxWidth: 10.0,
+            textAllowOverlap: false,
+            iconAllowOverlap: false,
+          ),
+        );
+      } on PlatformException catch (e) {
+        if (!_isAlreadyExistsError(e)) rethrow;
+      }
+
+    } catch (e, st) {
+      debugPrint('Error loading POIs: $e\n$st');
+    }
+  }
+
+  void _handleMapTap(MapContentGestureContext context) {
+    if (_mapboxMap == null) return;
+
+    final touchPosition = context.touchPosition;
+    unawaited(_queryTappedFeatures(touchPosition));
+  }
+
+  Future<void> _queryTappedFeatures(ScreenCoordinate touchPosition) async {
+    final map = _mapboxMap;
+    if (map == null) return;
+
+    try {
+      final features = await map.queryRenderedFeatures(
+        RenderedQueryGeometry.fromScreenBox(
+          ScreenBox(
+            min: ScreenCoordinate(
+              x: touchPosition.x - 20,
+              y: touchPosition.y - 20,
+            ),
+            max: ScreenCoordinate(
+              x: touchPosition.x + 20,
+              y: touchPosition.y + 20,
+            ),
+          ),
+        ),
+        RenderedQueryOptions(
+          layerIds: ['poi-circle-layer', 'poi-label-layer'],
+          filter: null,
+        ),
+      );
+
+      if (features.isNotEmpty) {
+        final feature = features.first;
+        if (feature == null) return;
+        
+        final queriedFeature = feature.queriedFeature;
+        final properties = queriedFeature.feature['properties'];
+        final id = queriedFeature.feature['id'];
+
+        if (properties is Map) {
+          final payload = Map<String, dynamic>.from(properties);
+          if (id != null) {
+            payload['_feature_id'] = id;
+          }
+          _onPoiTapped(payload);
+        }
+      }
+    } catch (_) {
+      // Ignore query errors
+    }
+  }
+
   Future<void> _onStyleLoaded() async {
     _styleReady = false;
     await _prepareFogLayer();
@@ -472,6 +793,7 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
     _latestCameraState = await _mapboxMap?.getCameraState();
     _styleReady = true;
     await _refreshLocationSource();
+    await _loadAndShowPois();
     _scheduleFogRefresh(delay: const Duration(milliseconds: 120));
   }
 
@@ -713,18 +1035,17 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
       final firstCoords = features.first['geometry'] as Map<String, Object?>;
       final values =
           (firstCoords['coordinates'] as List<Object?>).cast<double>();
-      await _mapboxMap!.easeTo(
+      await _mapboxMap!.setCamera(
         CameraOptions(
           center: Point(coordinates: Position(values[0], values[1])),
-          zoom: 15,
+          zoom: _initialZoom > 14.8 ? _initialZoom : 16.0,
         ),
-        MapAnimationOptions(duration: 900, startDelay: 0),
       );
     }
   }
 
   void _scheduleFogRefresh({
-    Duration delay = const Duration(milliseconds: 100),
+    Duration delay = const Duration(milliseconds: 250),
   }) {
     _fogRefreshDebounce?.cancel();
     _fogRefreshDebounce = Timer(delay, _refreshFog);
@@ -855,7 +1176,7 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
         mapName: mapName,
         state: CampusMapState(
           revealedCellIds: fogManager.snapshotRevealedCellIds(),
-          visitedPoiIds: const [],
+          visitedPoiIds: _visitedPoiIds.toList(),
           lastInsidePosition: _lastInsidePosition,
           cameraCenter: cameraCenter,
           zoom: zoom,
@@ -915,10 +1236,15 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
         .take(3)
         .join(', ');
     final fogManager = _fogManager;
-    final fogSummary =
-        fogManager == null
-            ? 'Sis hazirlaniyor...'
-            : 'Sis acilan hucre: ${fogManager.revealedCount}/${fogManager.totalCount}';
+    final hasPoiData = area.id == mapAreaGtu || area.id == mapAreaFatih || area.id == mapAreaBeyoglu || area.id == mapAreaUskudar || area.id == mapAreaKadikoy || area.id == mapAreaAnkara;
+    final String fogSummary;
+    if (fogManager == null) {
+      fogSummary = 'Sis hazirlaniyor...';
+    } else if (hasPoiData) {
+      fogSummary = 'Gezilen: ${_visitedPoiIds.length} / $_totalPoiCount  |  ${fogManager.revealedCount}/${fogManager.totalCount} hücre';
+    } else {
+      fogSummary = 'Sis acilan hucre: ${fogManager.revealedCount}/${fogManager.totalCount}';
+    }
 
     return Scaffold(
       backgroundColor: AppColors.bgBottom,
@@ -948,12 +1274,13 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
               key: ValueKey('multi-map-${widget.roomId}-${area.id}'),
               styleUri: area.styleUri,
               cameraOptions: CameraOptions(
-                center: Point(coordinates: area.center),
-                zoom: 14.8,
+                center: Point(coordinates: _lastInsidePosition ?? area.center),
+                zoom: _initialZoom,
                 bearing: 0,
                 pitch: 0,
               ),
               onMapCreated: (mapboxMap) => unawaited(_onMapCreated(mapboxMap)),
+              onTapListener: _handleMapTap,
               onStyleLoadedListener: (_) => unawaited(_onStyleLoaded()),
               onCameraChangeListener: _onCameraChanged,
             ),
