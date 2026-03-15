@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -19,17 +20,19 @@ import '../widgets/friends_tab.dart';
 import 'city_map_page.dart';
 import 'city_selection_page.dart';
 import 'user_profile_page.dart';
+import '../../../../screens/quests_screen.dart';
+import '../../../../providers/game_provider.dart';
 
 enum TravelMode { solo, multi }
 
-class HomePage extends StatefulWidget {
+class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key});
 
   @override
-  State<HomePage> createState() => _HomePageState();
+  ConsumerState<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage> {
+class _HomePageState extends ConsumerState<HomePage> {
   bool _isSigningOut = false;
   bool _focusIncomingRequests = false;
   int _selectedIndex = 2;
@@ -98,6 +101,9 @@ class _HomePageState extends State<HomePage> {
             ? fallbackName
             : (user?.email?.split('@').first ?? 'Kaşif'));
 
+    final userXPStr = ref.watch(gameProvider);
+    final hasIncompleteQuests = userXPStr.valueOrNull?.weeklyQuests.hasAnyIncomplete ?? false;
+
     final tabs = <Widget>[
       FriendsTab(
         uid: user?.uid ?? '',
@@ -117,7 +123,12 @@ class _HomePageState extends State<HomePage> {
         onModeChanged: (mode) => setState(() => _selectedMode = mode),
         onOpenIncomingRequests: _openIncomingRequests,
         onStartJourney: _startJourney,
+        onGoToQuests: () => setState(() {
+          _selectedIndex = 3;
+          _focusIncomingRequests = false;
+        }),
       ),
+      const QuestsScreen(),
       _ProfileTab(
         uid: user?.uid ?? '',
         titleName: titleName,
@@ -176,24 +187,52 @@ class _HomePageState extends State<HomePage> {
                       unselectedItemColor: AppColors.textMuted,
                       selectedLabelStyle: const TextStyle(
                         fontWeight: FontWeight.w700,
+                        fontSize: 10,
                       ),
-                      items: const [
-                        BottomNavigationBarItem(
+                      unselectedLabelStyle: const TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 10,
+                      ),
+                      items: [
+                        const BottomNavigationBarItem(
                           icon: Icon(Icons.groups_outlined),
                           activeIcon: Icon(Icons.groups_rounded),
                           label: 'Arkadaşlar',
                         ),
-                        BottomNavigationBarItem(
+                        const BottomNavigationBarItem(
                           icon: Icon(Icons.map_outlined),
                           activeIcon: Icon(Icons.map),
                           label: 'Geçmiş',
                         ),
-                        BottomNavigationBarItem(
+                        const BottomNavigationBarItem(
                           icon: Icon(Icons.home_outlined),
                           activeIcon: Icon(Icons.home),
                           label: 'Ana Sayfa',
                         ),
                         BottomNavigationBarItem(
+                          icon: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              const Icon(Icons.emoji_events_outlined),
+                              if (hasIncompleteQuests)
+                                Positioned(
+                                  right: -2,
+                                  top: -2,
+                                  child: Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: const BoxDecoration(
+                                      color: Colors.red,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                          activeIcon: const Icon(Icons.emoji_events),
+                          label: 'Görevler',
+                        ),
+                        const BottomNavigationBarItem(
                           icon: Icon(Icons.person_outline_rounded),
                           activeIcon: Icon(Icons.person_rounded),
                           label: 'Profil',
@@ -233,6 +272,7 @@ class _HomeTab extends StatelessWidget {
     required this.onModeChanged,
     required this.onOpenIncomingRequests,
     required this.onStartJourney,
+    required this.onGoToQuests,
   });
 
   final String uid;
@@ -241,6 +281,7 @@ class _HomeTab extends StatelessWidget {
   final ValueChanged<TravelMode> onModeChanged;
   final VoidCallback onOpenIncomingRequests;
   final VoidCallback onStartJourney;
+  final VoidCallback onGoToQuests;
 
   @override
   Widget build(BuildContext context) {
@@ -264,10 +305,10 @@ class _HomeTab extends StatelessWidget {
           Row(
             children: [
               Container(
-                width: 68,
-                height: 68,
+                width: 54,
+                height: 54,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(18),
+                  borderRadius: BorderRadius.circular(16),
                   gradient: const LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
@@ -277,24 +318,26 @@ class _HomeTab extends StatelessWidget {
                 child: const Icon(
                   Icons.explore_rounded,
                   color: Colors.white,
-                  size: 32,
+                  size: 26,
                 ),
               ),
               const Spacer(),
               _IncomingRequestsBell(uid: uid, onTap: onOpenIncomingRequests),
             ],
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
           Text(
             'Hoş geldin, $titleName',
             style: const TextStyle(
               color: AppColors.textMain,
-              fontSize: 32,
+              fontSize: 28,
               fontWeight: FontWeight.w800,
               height: 1.1,
             ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
+          _HomePageWeeklyQuestsSummary(onTap: onGoToQuests),
+          const SizedBox(height: 14),
           Row(
             children: [
               Expanded(
@@ -316,7 +359,7 @@ class _HomeTab extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
           _JourneyModeCard(
             title: title,
             subtitle: subtitle,
@@ -506,50 +549,50 @@ class _JourneyModeCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: AppColors.card,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: AppColors.primary.withValues(alpha: 0.8)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
-            width: 52,
-            height: 52,
+            width: 42,
+            height: 42,
             decoration: BoxDecoration(
               color: AppColors.primary.withValues(alpha: 0.24),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(icon, color: AppColors.primary, size: 30),
+            child: Icon(icon, color: AppColors.primary, size: 24),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
           Text(
             title,
             style: const TextStyle(
               color: AppColors.textMain,
-              fontSize: 35,
+              fontSize: 28,
               fontWeight: FontWeight.w800,
               height: 1,
             ),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 6),
           Text(
             subtitle,
             style: const TextStyle(
               color: AppColors.textMuted,
-              fontSize: 16,
+              fontSize: 13,
               height: 1.4,
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           ClipRRect(
             borderRadius: BorderRadius.circular(14),
             child: Stack(
               children: [
                 AspectRatio(
-                  aspectRatio: 16 / 9,
+                  aspectRatio: 24 / 9,
                   child: Image.network(
                     imageUrl,
                     fit: BoxFit.cover,
@@ -1730,6 +1773,125 @@ class _ProfileInputField extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
+  const _HomePageWeeklyQuestsSummary({required this.onTap});
+  
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final userXPAsync = ref.watch(gameProvider);
+
+    return userXPAsync.when(
+      data: (userXP) {
+        final quests = userXP.weeklyQuests;
+        int maxXP = 50 + 100 + 75 + 100 + 100 + 75 + 300;
+        int earnedXP = 0;
+        
+        if (quests.ilkAdim.done) earnedXP += 50;
+        if (quests.kasifRuhu.done) earnedXP += 100;
+        if (quests.cesitliKasif.done) earnedXP += 75;
+        if (quests.takimOyuncusu.done) earnedXP += 100;
+        if (quests.takimKasifi.done) earnedXP += 100;
+        if (quests.duzenliGezgin.done) earnedXP += 75;
+        if (quests.tamHafta.done) earnedXP += 300;
+
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            borderRadius: BorderRadius.circular(16),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E1040),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFF7B2FBE).withValues(alpha: 0.3)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Text(
+                        '🏆',
+                        style: TextStyle(fontSize: 20),
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Haftalık Görevler',
+                        style: TextStyle(
+                          color: Color(0xFF7B2FBE),
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const Spacer(),
+                      const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white70, size: 14),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  TweenAnimationBuilder<double>(
+                    tween: Tween<double>(begin: 0, end: earnedXP / maxXP),
+                    duration: const Duration(milliseconds: 1200),
+                    curve: Curves.easeOutCubic,
+                    builder: (context, value, child) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: LinearProgressIndicator(
+                              value: value.isNaN ? 0 : value,
+                              minHeight: 8,
+                              backgroundColor: Colors.white.withValues(alpha: 0.1),
+                              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF7B2FBE)),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text(
+                                'İlerleme Özeti',
+                                style: TextStyle(
+                                  color: Colors.white70,
+                                  fontSize: 12,
+                                ),
+                              ),
+                              Text(
+                                '$earnedXP / $maxXP XP',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+      loading: () => Container(
+        height: 80,
+        decoration: BoxDecoration(
+          color: const Color(0xFF1E1040),
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: const Center(child: CircularProgressIndicator()),
+      ),
+      error: (_, __) => const SizedBox(),
     );
   }
 }

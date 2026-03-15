@@ -104,6 +104,8 @@ service cloud.firestore {
         && request.resource.data.friendsCount is int
         && request.resource.data.friendsCount == 0;
 
+      allow update: if isOwner(uid);
+
       allow update: if isVerified() && (
         (
           isOwner(uid)

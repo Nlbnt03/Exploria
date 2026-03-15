@@ -14,6 +14,10 @@ import '../map/fog_manager.dart';
 import '../map/map_areas.dart';
 import '../map/location_service.dart';
 import '../map/map_controller.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../providers/game_provider.dart';
+import '../../../../widgets/xp_popup.dart';
+import '../../../../widgets/level_up_dialog.dart';
 
 class CityMapPageArgs {
   const CityMapPageArgs({
@@ -29,7 +33,7 @@ class CityMapPageArgs {
   final Position? initialUserPosition;
 }
 
-class CityMapPage extends StatefulWidget {
+class CityMapPage extends ConsumerStatefulWidget {
   const CityMapPage({
     super.key,
     required this.areaId,
@@ -44,10 +48,10 @@ class CityMapPage extends StatefulWidget {
   final Position? initialUserPosition;
 
   @override
-  State<CityMapPage> createState() => _CityMapPageState();
+  ConsumerState<CityMapPage> createState() => _CityMapPageState();
 }
 
-class _CityMapPageState extends State<CityMapPage> {
+class _CityMapPageState extends ConsumerState<CityMapPage> {
   final MapProgressService _mapProgressService = MapProgressService();
 
   CampusMapController? _mapController;
@@ -374,50 +378,85 @@ class _CityMapPageState extends State<CityMapPage> {
                       child: SizedBox(
                         width: double.infinity,
                         height: 52,
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: currentVisited 
-                                ? Colors.red.withValues(alpha: 0.15)
-                                : AppColors.primary,
-                            foregroundColor: currentVisited
-                                ? Colors.red
-                                : Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            SizedBox(
+                              width: double.infinity,
+                              height: double.infinity,
+                              child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: currentVisited 
+                                      ? Colors.red.withValues(alpha: 0.15)
+                                      : AppColors.primary,
+                                  foregroundColor: currentVisited
+                                      ? Colors.red
+                                      : Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 14),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14),
+                                  ),
+                                  elevation: 0,
+                                ),
+                                onPressed: () async {
+                                  bool showPopup = false;
+                                  if (currentVisited) {
+                                    _visitedPoiIds.remove(id);
+                                  } else {
+                                    _visitedPoiIds.add(id);
+                                    showPopup = true;
+                                  }
+                                  
+                                  setSheetState(() {});
+                                  setState(() {});
+                                  
+                                  if (!context.mounted) return;
+                                  if (showPopup) {
+                                    final isLevelUp = await ref.read(gameProvider.notifier).onPlaceVisited(id, category, false);
+                                    if (context.mounted && isLevelUp) {
+                                      final userXP = ref.read(gameProvider).valueOrNull;
+                                      if (userXP != null) {
+                                        LevelUpDialog.show(context, userXP.currentTitle);
+                                      }
+                                    }
+                                  }
+                                  
+                                  _loadAndShowPois();
+                                  
+                                  unawaited(_persistMapState(
+                                    uid: _uid, 
+                                    mapState: CampusMapState(
+                                      revealedCellIds: _mapController?.fogManager.snapshotRevealedCellIds() ?? [],
+                                      visitedPoiIds: _visitedPoiIds.toList(),
+                                      lastInsidePosition: _mapController?.restoredState?.lastInsidePosition,
+                                      cameraCenter: _initialCenter,
+                                      zoom: _initialZoom,
+                                    )
+                                  ));
+                                },
+                                child: Text(
+                                  currentVisited ? 'Gezmedim (İptal Et)' : 'Gezdim ✓',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                              ),
                             ),
-                            elevation: 0,
-                          ),
-                          onPressed: () {
-                            if (currentVisited) {
-                              _visitedPoiIds.remove(id);
-                            } else {
-                              _visitedPoiIds.add(id);
-                            }
-                            
-                            setSheetState(() {});
-                            setState(() {});
-                            
-                            _loadAndShowPois();
-                            
-                            unawaited(_persistMapState(
-                              uid: _uid, 
-                              mapState: CampusMapState(
-                                revealedCellIds: _mapController?.fogManager.snapshotRevealedCellIds() ?? [],
-                                visitedPoiIds: _visitedPoiIds.toList(),
-                                lastInsidePosition: _mapController?.restoredState?.lastInsidePosition,
-                                cameraCenter: _initialCenter,
-                                zoom: _initialZoom,
-                              )
-                            ));
-                          },
-                          child: Text(
-                            currentVisited ? 'Gezmedim (İptal Et)' : 'Gezdim ✓',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
+                            if (currentVisited && !(_visitedPoiIds.contains(id) == false))
+                              Positioned(
+                                top: -20,
+                                left: 0,
+                                right: 0,
+                                child: Center(
+                                  child: XPPopup(
+                                    key: UniqueKey(), // Force rebuild on each tap
+                                    xpAmount: 50,
+                                    onComplete: () {},
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     ),

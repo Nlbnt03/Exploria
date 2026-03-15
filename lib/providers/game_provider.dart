@@ -1,0 +1,231 @@
+import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/user_xp.dart';
+import '../models/weekly_quest.dart';
+import 'package:flutter/material.dart';
+
+// Callback for title change
+typedef OnTitleChanged = void Function(UserTitle newTitle);
+
+final gameProvider = AsyncNotifierProvider<GameNotifier, UserXP>(() {
+  return GameNotifier();
+});
+
+class GameNotifier extends AsyncNotifier<UserXP> {
+  UserTitle? _previousTitle;
+  StreamSubscription? _sub;
+  OnTitleChanged? onTitleChanged;
+
+  @override
+  FutureOr<UserXP> build() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) {
+      return UserXP(currentXP: 0, weeklyQuests: WeeklyQuests.empty());
+    }
+
+    final docRef = FirebaseFirestore.instance.collection('users').doc(uid);
+
+    ref.onDispose(() {
+      _sub?.cancel();
+    });
+
+    // Inital fetch
+    final doc = await docRef.get();
+    final userXP = _parseUserXP(doc);
+    _previousTitle = userXP.currentTitle;
+
+    // Listen to changes
+    _sub?.cancel();
+    _sub = docRef.snapshots().listen((snapshot) {
+      if (!snapshot.exists) return; // Prevent creating if user is deleted somehow
+      
+      final newXP = _parseUserXP(snapshot);
+      
+      // Check for title change
+      if (_previousTitle != null && newXP.currentTitle != _previousTitle) {
+        onTitleChanged?.call(newXP.currentTitle);
+      }
+      _previousTitle = newXP.currentTitle;
+      
+      // We check if weekStart is outdated, if so we update firestore (which will trigger another snapshot)
+      final defaultStart = WeeklyQuests.getWeekStart(DateTime.now());
+      if (newXP.weeklyQuests.weekStart != defaultStart) {
+        // Reset quests in firestore
+        docRef.set({
+          'weeklyQuests': WeeklyQuests.empty().toMap()
+        }, SetOptions(merge: true));
+        return; // the next snapshot will handle state
+      }
+
+      state = AsyncValue.data(newXP);
+    });
+
+    return userXP;
+  }
+
+  UserXP _parseUserXP(DocumentSnapshot<Map<String, dynamic>> snapshot) {
+    if (!snapshot.exists || snapshot.data() == null) {
+      return UserXP(currentXP: 0, weeklyQuests: WeeklyQuests.empty());
+    }
+    final data = snapshot.data()!;
+    final xp = (data['xp'] as num?)?.toInt() ?? 0;
+    final questsMap = data['weeklyQuests'] as Map<String, dynamic>?;
+    final quests = WeeklyQuests.fromMap(questsMap);
+    return UserXP(currentXP: xp, weeklyQuests: quests);
+  }
+
+  Future<bool> addXP(int amount) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return false;
+
+    try {
+      bool isLevelUp = false;
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final docRef = FirebaseFirestore.instance.collection('users').doc(uid);
+        final snapshot = await transaction.get(docRef);
+        
+        int currentXP = 0;
+        if (snapshot.exists) {
+          currentXP = (snapshot.data()?['xp'] as num?)?.toInt() ?? 0;
+        }
+        
+        final newXP = currentXP + amount;
+        final oldTitle = UserXP(currentXP: currentXP, weeklyQuests: WeeklyQuests.empty()).currentTitle;
+        final newTitle = UserXP(currentXP: newXP, weeklyQuests: WeeklyQuests.empty()).currentTitle;
+        
+        if (newTitle != oldTitle) {
+          isLevelUp = true;
+        }
+
+        transaction.set(docRef, {'xp': newXP}, SetOptions(merge: true));
+      });
+      return isLevelUp;
+    } catch (e) {
+      debugPrint('Error saving XP: $e');
+      return false;
+    }
+  }
+
+  Future<void> onMapFirstEntered() async {
+    await addXP(100);
+  }
+
+  Future<bool> onPlaceVisited(String placeId, String category, bool isCoop) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return false;
+    
+    // Calculate new quest state and XP to add inside a transaction
+    try {
+      bool isLevelUp = false;
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final docRef = FirebaseFirestore.instance.collection('users').doc(uid);
+        final snapshot = await transaction.get(docRef);
+        final data = snapshot.data();
+
+        int currentXP = (data?['xp'] as num?)?.toInt() ?? 0;
+        final questsMap = data?['weeklyQuests'] as Map<String, dynamic>?;
+        
+        // Parse current quests
+        var quests = WeeklyQuests.fromMap(questsMap);
+        
+        int xpToAdd = isCoop ? 75 : 50;
+        String today = "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}";
+
+        WeeklyQuestItem ilkAdim = quests.ilkAdim;
+        if (!ilkAdim.done) {
+          ilkAdim = ilkAdim.copyWith(current: 1, done: true);
+          xpToAdd += 50;
+        }
+
+        WeeklyQuestItem kasifRuhu = quests.kasifRuhu;
+        if (!kasifRuhu.done) {
+          int newCurrent = kasifRuhu.current + 1;
+          bool newDone = newCurrent >= kasifRuhu.target;
+          kasifRuhu = kasifRuhu.copyWith(current: newCurrent, done: newDone);
+          if (newDone) xpToAdd += 100;
+        }
+
+        WeeklyQuestItem cesitliKasif = quests.cesitliKasif;
+        if (!cesitliKasif.done && category.isNotEmpty) {
+          List<String> updatedCategories = List.from(cesitliKasif.categories);
+          if (!updatedCategories.contains(category)) {
+            updatedCategories.add(category);
+          }
+          bool newDone = updatedCategories.length >= cesitliKasif.target;
+          cesitliKasif = cesitliKasif.copyWith(categories: updatedCategories, done: newDone);
+          if (newDone) xpToAdd += 75;
+        }
+
+        WeeklyQuestItem duzenliGezgin = quests.duzenliGezgin;
+        if (!duzenliGezgin.done) {
+          List<String> updatedDays = List.from(duzenliGezgin.activeDays);
+          if (!updatedDays.contains(today)) {
+            updatedDays.add(today);
+          }
+          bool newDone = updatedDays.length >= duzenliGezgin.target;
+          duzenliGezgin = duzenliGezgin.copyWith(activeDays: updatedDays, done: newDone);
+          if (newDone) xpToAdd += 75;
+        }
+
+        WeeklyQuestItem takimOyuncusu = quests.takimOyuncusu;
+        WeeklyQuestItem takimKasifi = quests.takimKasifi;
+        
+        if (isCoop) {
+          if (!takimOyuncusu.done) {
+            takimOyuncusu = takimOyuncusu.copyWith(current: 1, done: true);
+            xpToAdd += 100;
+          }
+          if (!takimKasifi.done) {
+            int newCurrent = takimKasifi.current + 1;
+            bool newDone = newCurrent >= takimKasifi.target;
+            takimKasifi = takimKasifi.copyWith(current: newCurrent, done: newDone);
+            if (newDone) xpToAdd += 100;
+          }
+        }
+
+        WeeklyQuestItem tamHafta = quests.tamHafta;
+        if (!tamHafta.done) {
+          List<String> updatedDays = List.from(tamHafta.activeDays);
+          if (!updatedDays.contains(today)) {
+            updatedDays.add(today);
+          }
+          bool newDone = updatedDays.length >= tamHafta.target;
+          tamHafta = tamHafta.copyWith(activeDays: updatedDays, done: newDone);
+          if (newDone) xpToAdd += 300;
+        }
+
+        // New total XP
+        final finalXP = currentXP + xpToAdd;
+
+        final oldTitle = UserXP(currentXP: currentXP, weeklyQuests: WeeklyQuests.empty()).currentTitle;
+        final newTitle = UserXP(currentXP: finalXP, weeklyQuests: WeeklyQuests.empty()).currentTitle;
+        if (newTitle != oldTitle) {
+          isLevelUp = true;
+        }
+
+        // Apply
+        final newQuests = WeeklyQuests(
+          weekStart: quests.weekStart,
+          ilkAdim: ilkAdim,
+          kasifRuhu: kasifRuhu,
+          cesitliKasif: cesitliKasif,
+          duzenliGezgin: duzenliGezgin,
+          takimOyuncusu: takimOyuncusu,
+          takimKasifi: takimKasifi,
+          tamHafta: tamHafta,
+        );
+
+        transaction.set(docRef, {
+          'xp': finalXP,
+          'weeklyQuests': newQuests.toMap(),
+        }, SetOptions(merge: true));
+      });
+      return isLevelUp;
+    } catch (e) {
+      debugPrint('Error updating quests and xp: $e');
+      return false;
+    }
+  }
+}

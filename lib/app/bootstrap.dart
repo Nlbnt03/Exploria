@@ -1,6 +1,7 @@
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/widgets.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../firebase_options.dart';
@@ -21,7 +22,11 @@ Future<void> bootstrap() async {
       defaultValue: _defaultMapboxAccessToken,
     ),
   );
-  runApp(const ExploriaApp());
+  runApp(
+    const ProviderScope(
+      child: ExploriaApp(),
+    ),
+  );
 }
 
 Future<void> ensureFirebaseInitialized() {

@@ -17,6 +17,10 @@ import '../../models/live_location.dart';
 import '../../models/member.dart';
 import '../../models/room.dart';
 import '../../services/multi_room_firestore_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../providers/game_provider.dart';
+import '../../../../widgets/xp_popup.dart';
+import '../../../../widgets/level_up_dialog.dart';
 
 class MultiMapScreenArgs {
   const MultiMapScreenArgs({required this.roomId});
@@ -24,16 +28,16 @@ class MultiMapScreenArgs {
   final String roomId;
 }
 
-class MultiMapScreen extends StatefulWidget {
+class MultiMapScreen extends ConsumerStatefulWidget {
   const MultiMapScreen({super.key, required this.roomId});
 
   final String roomId;
 
   @override
-  State<MultiMapScreen> createState() => _MultiMapScreenState();
+  ConsumerState<MultiMapScreen> createState() => _MultiMapScreenState();
 }
 
-class _MultiMapScreenState extends State<MultiMapScreen> {
+class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
   static const String _locationSourceId = 'multi-room-locations-source';
   static const String _circleLayerId = 'multi-room-locations-circle';
   static const String _labelLayerId = 'multi-room-locations-label';
@@ -542,42 +546,76 @@ class _MultiMapScreenState extends State<MultiMapScreen> {
                   Row(
                     children: [
                       Expanded(
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: currentVisited 
-                                ? Colors.red.withValues(alpha: 0.2)
-                                : AppColors.primary,
-                            foregroundColor: currentVisited
-                                ? Colors.red
-                                : Colors.white,
-                            padding: const EdgeInsets.symmetric(vertical: 16),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12),
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: currentVisited 
+                                      ? Colors.red.withValues(alpha: 0.2)
+                                      : AppColors.primary,
+                                  foregroundColor: currentVisited
+                                      ? Colors.red
+                                      : Colors.white,
+                                  padding: const EdgeInsets.symmetric(vertical: 16),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
+                                onPressed: () async {
+                                  bool showPopup = false;
+                                  if (currentVisited) {
+                                    _visitedPoiIds.remove(id);
+                                  } else {
+                                    _visitedPoiIds.add(id);
+                                    showPopup = true;
+                                  }
+                                  
+                                  setSheetState(() {});
+                                  setState(() {});
+                                  
+                                  if (!context.mounted) return;
+                                  if (showPopup) {
+                                    final isLevelUp = await ref.read(gameProvider.notifier).onPlaceVisited(id, category, true);
+                                    if (context.mounted && isLevelUp) {
+                                      final userXP = ref.read(gameProvider).valueOrNull;
+                                      if (userXP != null) {
+                                        LevelUpDialog.show(context, userXP.currentTitle);
+                                      }
+                                    }
+                                  }
+                                  
+                                  // Re-render map to update colors
+                                  _loadAndShowPois();
+                                  
+                                  // Save state
+                                  unawaited(_persistMapState());
+                                },
+                                child: Text(
+                                  currentVisited ? 'Gezmedim (İptal Et)' : 'Gezdim',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
                             ),
-                          ),
-                          onPressed: () {
-                            if (currentVisited) {
-                              _visitedPoiIds.remove(id);
-                            } else {
-                              _visitedPoiIds.add(id);
-                            }
-                            
-                            setSheetState(() {});
-                            setState(() {});
-                            
-                            // Re-render map to update colors
-                            _loadAndShowPois();
-                            
-                            // Save state
-                            unawaited(_persistMapState());
-                          },
-                          child: Text(
-                            currentVisited ? 'Gezmedim (İptal Et)' : 'Gezdim',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                            if (currentVisited && !(_visitedPoiIds.contains(id) == false))
+                              Positioned(
+                                top: -30,
+                                left: 0,
+                                right: 0,
+                                child: Center(
+                                  child: XPPopup(
+                                    key: UniqueKey(), // Force rebuild on each tap
+                                    xpAmount: 75,
+                                    onComplete: () {},
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     ],

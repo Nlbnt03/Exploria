@@ -1,8 +1,13 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/animations/shimmer_loading.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../models/user_xp.dart';
+import '../../../../models/weekly_quest.dart';
+import '../../../../widgets/xp_card.dart';
 import '../../data/services/badge_service.dart';
 import '../../domain/models/badge.dart' show AppBadge;
 
@@ -11,16 +16,16 @@ class UserProfilePageArgs {
   final String uid;
 }
 
-class UserProfilePage extends StatefulWidget {
+class UserProfilePage extends ConsumerStatefulWidget {
   const UserProfilePage({super.key, required this.uid});
 
   final String uid;
 
   @override
-  State<UserProfilePage> createState() => _UserProfilePageState();
+  ConsumerState<UserProfilePage> createState() => _UserProfilePageState();
 }
 
-class _UserProfilePageState extends State<UserProfilePage> {
+class _UserProfilePageState extends ConsumerState<UserProfilePage> {
   final BadgeService _badgeService = BadgeService();
 
   Map<String, dynamic>? _userData;
@@ -93,6 +98,9 @@ class _UserProfilePageState extends State<UserProfilePage> {
   }
 
   Widget _buildContent() {
+    final currentUserUid = FirebaseAuth.instance.currentUser?.uid;
+    final bool isCurrentUser = widget.uid == currentUserUid;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(24, 12, 24, 40),
       child: Column(
@@ -104,11 +112,19 @@ class _UserProfilePageState extends State<UserProfilePage> {
           const SizedBox(height: 24),
           _buildInfoSection(),
           const SizedBox(height: 24),
+          if (isCurrentUser) ...[
+            const XPCard(),
+            const SizedBox(height: 24),
+          ] else ...[
+            _buildTitleSection(),
+            const SizedBox(height: 24),
+          ],
           _buildBadgesSection(),
         ],
       ),
     );
   }
+
 
   Widget _buildAppBar() {
     return Row(
@@ -242,6 +258,43 @@ class _UserProfilePageState extends State<UserProfilePage> {
                 icon: Icons.emoji_events_rounded,
               );
             },
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTitleSection() {
+    final currentXP = (_userData?['xp'] as num?)?.toInt() ?? 0;
+    final questsMap = _userData?['weeklyQuests'] as Map<String, dynamic>?;
+    final quests = questsMap != null ? WeeklyQuests.fromMap(questsMap) : WeeklyQuests.empty();
+    final userXP = UserXP(currentXP: currentXP, weeklyQuests: quests);
+    
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 18),
+      decoration: BoxDecoration(
+        color: userXP.titleColor.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: userXP.titleColor.withValues(alpha: 0.4),
+        ),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            userXP.titleEmoji,
+            style: const TextStyle(fontSize: 22),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            userXP.titleName,
+            style: TextStyle(
+              color: userXP.titleColor,
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ],
       ),
