@@ -3,7 +3,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/user_xp.dart';
+import '../models/leaderboard_entry.dart';
 import '../models/weekly_quest.dart';
+import '../features/auth/data/services/leaderboard_service.dart';
 import 'package:flutter/material.dart';
 
 // Callback for title change
@@ -36,6 +38,23 @@ class GameNotifier extends AsyncNotifier<UserXP> {
     final userXP = _parseUserXP(doc);
     _previousTitle = userXP.currentTitle;
 
+    // Ensure leaderboard entry exists so the user appears for friends even with 0 XP
+    final data = doc.data();
+    if (data != null) {
+      final username = (data['username'] as String?)?.trim() ?? '';
+      if (username.isNotEmpty) {
+        final weeklyXP = (data['weeklyXP'] as num?)?.toInt() ?? 0;
+        LeaderboardService().ensureLeaderboardEntry(
+          uid: uid,
+          username: username,
+          title: userXP.titleName,
+          titleColorHex: LeaderboardEntry.colorToHex(userXP.titleColor),
+          totalXP: userXP.currentXP,
+          weeklyXP: weeklyXP,
+        );
+      }
+    }
+
     // Listen to changes
     _sub?.cancel();
     _sub = docRef.snapshots().listen((snapshot) {
@@ -52,10 +71,14 @@ class GameNotifier extends AsyncNotifier<UserXP> {
       // We check if weekStart is outdated, if so we update firestore (which will trigger another snapshot)
       final defaultStart = WeeklyQuests.getWeekStart(DateTime.now());
       if (newXP.weeklyQuests.weekStart != defaultStart) {
-        // Reset quests in firestore
+        // Reset quests and weeklyXP in firestore
         docRef.set({
-          'weeklyQuests': WeeklyQuests.empty().toMap()
+          'weeklyQuests': WeeklyQuests.empty().toMap(),
+          'weeklyXP': 0,
+          'weeklyXPUpdatedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true));
+        // Also reset leaderboard entry
+        LeaderboardService().resetWeeklyXP(uid);
         return; // the next snapshot will handle state
       }
 
@@ -82,24 +105,42 @@ class GameNotifier extends AsyncNotifier<UserXP> {
 
     try {
       bool isLevelUp = false;
+      final leaderboardService = LeaderboardService();
       await FirebaseFirestore.instance.runTransaction((transaction) async {
         final docRef = FirebaseFirestore.instance.collection('users').doc(uid);
         final snapshot = await transaction.get(docRef);
+        final data = snapshot.data() ?? <String, dynamic>{};
         
-        int currentXP = 0;
-        if (snapshot.exists) {
-          currentXP = (snapshot.data()?['xp'] as num?)?.toInt() ?? 0;
-        }
+        int currentXP = (data['xp'] as num?)?.toInt() ?? 0;
+        int currentWeeklyXP = (data['weeklyXP'] as num?)?.toInt() ?? 0;
+        final username = (data['username'] as String?)?.trim() ?? '';
         
         final newXP = currentXP + amount;
+        final newWeeklyXP = currentWeeklyXP + amount;
         final oldTitle = UserXP(currentXP: currentXP, weeklyQuests: WeeklyQuests.empty()).currentTitle;
-        final newTitle = UserXP(currentXP: newXP, weeklyQuests: WeeklyQuests.empty()).currentTitle;
+        final newUserXP = UserXP(currentXP: newXP, weeklyQuests: WeeklyQuests.empty());
+        final newTitle = newUserXP.currentTitle;
         
         if (newTitle != oldTitle) {
           isLevelUp = true;
         }
 
-        transaction.set(docRef, {'xp': newXP}, SetOptions(merge: true));
+        transaction.set(docRef, {
+          'xp': newXP,
+          'weeklyXP': newWeeklyXP,
+          'weeklyXPUpdatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+        // Sync leaderboard atomically
+        leaderboardService.syncLeaderboardInTransaction(
+          transaction: transaction,
+          uid: uid,
+          totalXP: newXP,
+          weeklyXP: newWeeklyXP,
+          username: username,
+          title: newUserXP.titleName,
+          titleColorHex: LeaderboardEntry.colorToHex(newUserXP.titleColor),
+        );
       });
       return isLevelUp;
     } catch (e) {
@@ -112,6 +153,50 @@ class GameNotifier extends AsyncNotifier<UserXP> {
     await addXP(100);
   }
 
+  /// İptal edilen mekan ziyareti için XP düşür
+  Future<void> removeXP(int amount) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+
+    try {
+      final leaderboardService = LeaderboardService();
+      await FirebaseFirestore.instance.runTransaction((transaction) async {
+        final docRef = FirebaseFirestore.instance.collection('users').doc(uid);
+        final snapshot = await transaction.get(docRef);
+        final data = snapshot.data() ?? <String, dynamic>{};
+        
+        int currentXP = (data['xp'] as num?)?.toInt() ?? 0;
+        int currentWeeklyXP = (data['weeklyXP'] as num?)?.toInt() ?? 0;
+        final username = (data['username'] as String?)?.trim() ?? '';
+        
+        final newXP = (currentXP - amount).clamp(0, 999999);
+        final newWeeklyXP = (currentWeeklyXP - amount).clamp(0, 999999);
+
+        final newUserXP = UserXP(currentXP: newXP, weeklyQuests: WeeklyQuests.empty());
+
+        transaction.set(docRef, {
+          'xp': newXP,
+          'weeklyXP': newWeeklyXP,
+          'weeklyXPUpdatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+        // Sync leaderboard atomically
+        leaderboardService.syncLeaderboardInTransaction(
+          transaction: transaction,
+          uid: uid,
+          totalXP: newXP,
+          weeklyXP: newWeeklyXP,
+          username: username,
+          title: newUserXP.titleName,
+          titleColorHex: LeaderboardEntry.colorToHex(newUserXP.titleColor),
+        );
+      });
+      ref.invalidateSelf();
+    } catch (e) {
+      debugPrint('Error removing XP: $e');
+    }
+  }
+
   Future<bool> onPlaceVisited(String placeId, String category, bool isCoop) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return false;
@@ -119,13 +204,16 @@ class GameNotifier extends AsyncNotifier<UserXP> {
     // Calculate new quest state and XP to add inside a transaction
     try {
       bool isLevelUp = false;
+      final leaderboardService = LeaderboardService();
       await FirebaseFirestore.instance.runTransaction((transaction) async {
         final docRef = FirebaseFirestore.instance.collection('users').doc(uid);
         final snapshot = await transaction.get(docRef);
-        final data = snapshot.data();
+        final data = snapshot.data() ?? <String, dynamic>{};
 
-        int currentXP = (data?['xp'] as num?)?.toInt() ?? 0;
-        final questsMap = data?['weeklyQuests'] as Map<String, dynamic>?;
+        int currentXP = (data['xp'] as num?)?.toInt() ?? 0;
+        int currentWeeklyXP = (data['weeklyXP'] as num?)?.toInt() ?? 0;
+        final username = (data['username'] as String?)?.trim() ?? '';
+        final questsMap = data['weeklyQuests'] as Map<String, dynamic>?;
         
         // Parse current quests
         var quests = WeeklyQuests.fromMap(questsMap);
@@ -198,9 +286,11 @@ class GameNotifier extends AsyncNotifier<UserXP> {
 
         // New total XP
         final finalXP = currentXP + xpToAdd;
+        final finalWeeklyXP = currentWeeklyXP + xpToAdd;
 
         final oldTitle = UserXP(currentXP: currentXP, weeklyQuests: WeeklyQuests.empty()).currentTitle;
-        final newTitle = UserXP(currentXP: finalXP, weeklyQuests: WeeklyQuests.empty()).currentTitle;
+        final newUserXP = UserXP(currentXP: finalXP, weeklyQuests: WeeklyQuests.empty());
+        final newTitle = newUserXP.currentTitle;
         if (newTitle != oldTitle) {
           isLevelUp = true;
         }
@@ -219,8 +309,21 @@ class GameNotifier extends AsyncNotifier<UserXP> {
 
         transaction.set(docRef, {
           'xp': finalXP,
+          'weeklyXP': finalWeeklyXP,
+          'weeklyXPUpdatedAt': FieldValue.serverTimestamp(),
           'weeklyQuests': newQuests.toMap(),
         }, SetOptions(merge: true));
+
+        // Sync leaderboard atomically
+        leaderboardService.syncLeaderboardInTransaction(
+          transaction: transaction,
+          uid: uid,
+          totalXP: finalXP,
+          weeklyXP: finalWeeklyXP,
+          username: username,
+          title: newUserXP.titleName,
+          titleColorHex: LeaderboardEntry.colorToHex(newUserXP.titleColor),
+        );
       });
       return isLevelUp;
     } catch (e) {

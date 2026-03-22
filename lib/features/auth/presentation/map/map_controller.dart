@@ -51,6 +51,8 @@ class CampusMapController extends ChangeNotifier {
   bool _persistQueued = false;
   bool _isDisposed = false;
   int? _lastPersistFingerprint;
+  int _cellCountAtLastPersist = 0;
+  static const int _batchCellThreshold = 10;
 
   List<String> visitedPoiIds;
 
@@ -342,6 +344,13 @@ class CampusMapController extends ChangeNotifier {
     );
   }
 
+  /// Force-flush pending state to Firestore immediately.
+  /// Called by lifecycle observers on app pause/inactive.
+  Future<void> flushPersist() async {
+    _persistDebounce?.cancel();
+    await _persistState(force: true);
+  }
+
   Future<void> disposeController() async {
     _persistDebounce?.cancel();
     _fogUpdateDebounce?.cancel();
@@ -494,7 +503,14 @@ class CampusMapController extends ChangeNotifier {
     if (revealed) {
       _startRevealAnimationTicker();
       _scheduleFogRefresh(delay: const Duration(milliseconds: 16));
-      _schedulePersist(delay: const Duration(milliseconds: 600));
+
+      // Batch threshold: >= 10 new cells → immediate persist
+      final newCellsSinceLastPersist = fogManager.revealedCount - _cellCountAtLastPersist;
+      if (newCellsSinceLastPersist >= _batchCellThreshold) {
+        _schedulePersist(delay: Duration.zero);
+      } else {
+        _schedulePersist(delay: const Duration(milliseconds: 600));
+      }
       notifyListeners();
     } else if (fogManager.hasPendingRevealAnimation) {
       _startRevealAnimationTicker();
@@ -671,6 +687,7 @@ class CampusMapController extends ChangeNotifier {
     try {
       await persistCallback(snapshot);
       _lastPersistFingerprint = fingerprint;
+      _cellCountAtLastPersist = fogManager.revealedCount;
     } catch (_) {
       // Persistence failures should not block the map experience.
     } finally {
@@ -698,6 +715,7 @@ class CampusMapController extends ChangeNotifier {
       _positionFingerprint(snapshot.cameraCenter),
       snapshot.zoom?.toStringAsFixed(3),
       Object.hashAll(snapshot.revealedCellIds),
+      Object.hashAll(snapshot.visitedPoiIds),
     );
   }
 

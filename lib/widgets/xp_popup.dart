@@ -50,6 +50,10 @@ class _XPPopupState extends State<XPPopup> with SingleTickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
+    final isNegative = widget.xpAmount < 0;
+    final displayColor = isNegative ? const Color(0xFFE53935) : const Color(0xFF7B2FBE);
+    final prefix = isNegative ? '' : '+';
+    
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
@@ -58,12 +62,12 @@ class _XPPopupState extends State<XPPopup> with SingleTickerProviderStateMixin {
           child: Opacity(
             opacity: _opacity.value,
             child: Text(
-              '+${widget.xpAmount} XP',
-              style: const TextStyle(
-                color: Color(0xFF7B2FBE), // App Main Purple or fallback
+              '$prefix${widget.xpAmount} XP',
+              style: TextStyle(
+                color: displayColor,
                 fontSize: 28,
                 fontWeight: FontWeight.w900,
-                shadows: [
+                shadows: const [
                   Shadow(
                     color: Colors.white,
                     blurRadius: 10,

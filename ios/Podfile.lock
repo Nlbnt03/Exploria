@@ -1198,6 +1198,12 @@ PODS:
     - Firebase/Firestore (= 12.5.0)
     - firebase_core
     - Flutter
+  - cloud_functions (6.0.7):
+    - Firebase/Functions (= 12.5.0)
+    - firebase_core
+    - Flutter
+  - connectivity_plus (0.0.1):
+    - Flutter
   - Firebase/Auth (12.5.0):
     - Firebase/CoreOnly
     - FirebaseAuth (~> 12.5.0)
@@ -1206,11 +1212,14 @@ PODS:
   - Firebase/Firestore (12.5.0):
     - Firebase/CoreOnly
     - FirebaseFirestore (~> 12.5.0)
+  - Firebase/Functions (12.5.0):
+    - Firebase/CoreOnly
+    - FirebaseFunctions (~> 12.5.0)
   - firebase_auth (6.1.4):
     - Firebase/Auth (= 12.5.0)
     - firebase_core
     - Flutter
-  - firebase_core (4.4.0):
+  - firebase_core (4.5.0):
     - Firebase/CoreOnly (= 12.5.0)
     - Flutter
   - FirebaseAppCheckInterop (12.5.0)
@@ -1252,6 +1261,15 @@ PODS:
     - gRPC-Core (~> 1.69.0)
     - leveldb-library (~> 1.22)
     - nanopb (~> 3.30910.0)
+  - FirebaseFunctions (12.5.0):
+    - FirebaseAppCheckInterop (~> 12.5.0)
+    - FirebaseAuthInterop (~> 12.5.0)
+    - FirebaseCore (~> 12.5.0)
+    - FirebaseCoreExtension (~> 12.5.0)
+    - FirebaseMessagingInterop (~> 12.5.0)
+    - FirebaseSharedSwift (~> 12.5.0)
+    - GTMSessionFetcher/Core (< 6.0, >= 3.4)
+  - FirebaseMessagingInterop (12.5.0)
   - FirebaseSharedSwift (12.5.0)
   - Flutter (1.0.0)
   - geolocator_apple (1.2.0):
@@ -1399,6 +1417,8 @@ PODS:
 
 DEPENDENCIES:
   - cloud_firestore (from `.symlinks/plugins/cloud_firestore/ios`)
+  - cloud_functions (from `.symlinks/plugins/cloud_functions/ios`)
+  - connectivity_plus (from `.symlinks/plugins/connectivity_plus/ios`)
   - firebase_auth (from `.symlinks/plugins/firebase_auth/ios`)
   - firebase_core (from `.symlinks/plugins/firebase_core/ios`)
   - Flutter (from `Flutter`)
@@ -1420,6 +1440,8 @@ SPEC REPOS:
     - FirebaseCoreInternal
     - FirebaseFirestore
     - FirebaseFirestoreInternal
+    - FirebaseFunctions
+    - FirebaseMessagingInterop
     - FirebaseSharedSwift
     - GoogleUtilities
     - "gRPC-C++"
@@ -1436,6 +1458,10 @@ SPEC REPOS:
 EXTERNAL SOURCES:
   cloud_firestore:
     :path: ".symlinks/plugins/cloud_firestore/ios"
+  cloud_functions:
+    :path: ".symlinks/plugins/cloud_functions/ios"
+  connectivity_plus:
+    :path: ".symlinks/plugins/connectivity_plus/ios"
   firebase_auth:
     :path: ".symlinks/plugins/firebase_auth/ios"
   firebase_core:
@@ -1455,9 +1481,11 @@ SPEC CHECKSUMS:
   abseil: a05cc83bf02079535e17169a73c5be5ba47f714b
   BoringSSL-GRPC: dded2a44897e45f28f08ae87a55ee4bcd19bc508
   cloud_firestore: 69c247bb5f14f490a63b7420d014af8dc4a09d0a
+  cloud_functions: 61ac3f908683946fe065dbc705427b333302cbb0
+  connectivity_plus: cb623214f4e1f6ef8fe7403d580fdad517d2f7dd
   Firebase: f51524e7ea4aa63c6fdaa32543f4c2e8c0cda770
   firebase_auth: e60871b5a76d80bb707f17b1f878e7a3ad4d8f11
-  firebase_core: 6d4b7a46c58eba3ee966a6f542abe5b577525c3f
+  firebase_core: 500ddbcdbb07acb6187c40f3c7b6b3037d6f6397
   FirebaseAppCheckInterop: 263b97ab0773bf4728dc1b346a953e1ade84f931
   FirebaseAuth: f1ca4b4d56639af209fb5489d02e15734322b974
   FirebaseAuthInterop: cc80feab9e032d38cb269c4c558002ce177c8c32
@@ -1466,6 +1494,8 @@ SPEC CHECKSUMS:
   FirebaseCoreInternal: 67715d38ba28c92c10750de9367f4f2120d763cf
   FirebaseFirestore: 204f998fee87e5596f904a5a39441fd0494cda09
   FirebaseFirestoreInternal: 158cbece835a715e748be345c9575e5b999f3c76
+  FirebaseFunctions: 105db2763737925c8170ee147d1f2d6851686127
+  FirebaseMessagingInterop: df5f396516c947df5ac9d9ecc0658f4a4471bb3d
   FirebaseSharedSwift: 9a96c0a083dad9cf12b9b2787a1fc9dda6470860
   Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
   geolocator_apple: ab36aa0e8b7d7a2d7639b3b4e48308394e8cef5e

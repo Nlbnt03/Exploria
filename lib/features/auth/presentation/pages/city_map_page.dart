@@ -14,10 +14,12 @@ import '../map/fog_manager.dart';
 import '../map/map_areas.dart';
 import '../map/location_service.dart';
 import '../map/map_controller.dart';
+import '../../../check_in/presentation/widgets/gezdim_button.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../providers/game_provider.dart';
 import '../../../../widgets/xp_popup.dart';
 import '../../../../widgets/level_up_dialog.dart';
+import '../../../../widgets/map_completed_dialog.dart';
 
 class CityMapPageArgs {
   const CityMapPageArgs({
@@ -51,7 +53,8 @@ class CityMapPage extends ConsumerStatefulWidget {
   ConsumerState<CityMapPage> createState() => _CityMapPageState();
 }
 
-class _CityMapPageState extends ConsumerState<CityMapPage> {
+class _CityMapPageState extends ConsumerState<CityMapPage>
+    with WidgetsBindingObserver {
   final MapProgressService _mapProgressService = MapProgressService();
 
   CampusMapController? _mapController;
@@ -91,6 +94,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _selectedArea = resolveMapArea(widget.areaId);
     _mapId = widget.mapId.trim().isEmpty ? widget.areaId : widget.mapId.trim();
     _mapName =
@@ -112,8 +116,9 @@ class _CityMapPageState extends ConsumerState<CityMapPage> {
           uid: uid,
           mapId: _mapId,
         );
-      } catch (_) {
-        // Loading persisted state is best-effort.
+        debugPrint('[Restore] uid=$uid, mapId=$_mapId, visitedPois=${restoredState?.visitedPoiIds.length ?? 0}, revealedCells=${restoredState?.revealedCellIds.length ?? 0}');
+      } catch (e) {
+        debugPrint('[Restore] Hata: $e');
       }
 
       try {
@@ -182,6 +187,8 @@ class _CityMapPageState extends ConsumerState<CityMapPage> {
     final poiType = payload['poi_type']?.toString() ?? '';
     final description = payload['description']?.toString() ?? '';
     final photoUrl = payload['photo_url']?.toString() ?? '';
+    final lat = (payload['lat'] as num?)?.toDouble() ?? 0.0;
+    final lon = (payload['lon'] as num?)?.toDouble() ?? 0.0;
 
     showModalBottomSheet(
       context: context,
@@ -191,9 +198,11 @@ class _CityMapPageState extends ConsumerState<CityMapPage> {
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       builder: (context) {
+        int? xpAnimAmount; // Closure scope — survives setSheetState rebuilds
         return StatefulBuilder(
           builder: (context, setSheetState) {
             final currentVisited = _visitedPoiIds.contains(id);
+
             return Container(
               constraints: BoxConstraints(
                 maxHeight: MediaQuery.of(context).size.height * 0.7,
@@ -370,96 +379,111 @@ class _CityMapPageState extends ConsumerState<CityMapPage> {
                     ),
                   ),
 
-                  // Bottom button
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
-                    child: SafeArea(
-                      top: false,
-                      child: SizedBox(
-                        width: double.infinity,
-                        height: 52,
-                        child: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            SizedBox(
-                              width: double.infinity,
-                              height: double.infinity,
-                              child: ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: currentVisited 
-                                      ? Colors.red.withValues(alpha: 0.15)
-                                      : AppColors.primary,
-                                  foregroundColor: currentVisited
-                                      ? Colors.red
-                                      : Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 14),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(14),
-                                  ),
-                                  elevation: 0,
-                                ),
-                                onPressed: () async {
-                                  bool showPopup = false;
-                                  if (currentVisited) {
-                                    _visitedPoiIds.remove(id);
-                                  } else {
-                                    _visitedPoiIds.add(id);
-                                    showPopup = true;
-                                  }
-                                  
-                                  setSheetState(() {});
-                                  setState(() {});
-                                  
-                                  if (!context.mounted) return;
-                                  if (showPopup) {
-                                    final isLevelUp = await ref.read(gameProvider.notifier).onPlaceVisited(id, category, false);
-                                    if (context.mounted && isLevelUp) {
-                                      final userXP = ref.read(gameProvider).valueOrNull;
-                                      if (userXP != null) {
-                                        LevelUpDialog.show(context, userXP.currentTitle);
-                                      }
+                  // Bottom button area wrapped in a Stack to allow XPPopup to overflow without clipping
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                        child: SafeArea(
+                          top: false,
+                          child: SizedBox(
+                            width: double.infinity,
+                            child: GezdimButton(
+                              venueId: id,
+                              mapId: _mapId,
+                              venueLat: lat,
+                              venueLng: lon,
+                              currentVisited: currentVisited,
+                              onCheckInSuccess: () async {
+                                _visitedPoiIds.add(id);
+                                _mapController?.visitedPoiIds = _visitedPoiIds.toList();
+                                xpAnimAmount = 50;
+                                debugPrint('[Gezdim] CheckIn başarılı: poi=$id, visited=${_visitedPoiIds.length}/$_totalPoiCount, uid=$_uid');
+                                setSheetState(() {});
+                                setState(() {});
+                                
+                                if (!context.mounted) return;
+                                debugPrint('[Gezdim] onPlaceVisited çağrılıyor...');
+                                try {
+                                  final isLevelUp = await ref.read(gameProvider.notifier).onPlaceVisited(id, category, false);
+                                  debugPrint('[Gezdim] onPlaceVisited tamamlandı, isLevelUp=$isLevelUp');
+                                  if (context.mounted && isLevelUp) {
+                                    final userXP = ref.read(gameProvider).valueOrNull;
+                                    if (userXP != null) {
+                                      LevelUpDialog.show(context, userXP.currentTitle);
                                     }
                                   }
-                                  
-                                  _loadAndShowPois();
-                                  
-                                  unawaited(_persistMapState(
-                                    uid: _uid, 
-                                    mapState: CampusMapState(
-                                      revealedCellIds: _mapController?.fogManager.snapshotRevealedCellIds() ?? [],
-                                      visitedPoiIds: _visitedPoiIds.toList(),
-                                      lastInsidePosition: _mapController?.restoredState?.lastInsidePosition,
-                                      cameraCenter: _initialCenter,
-                                      zoom: _initialZoom,
-                                    )
-                                  ));
-                                },
-                                child: Text(
-                                  currentVisited ? 'Gezmedim (İptal Et)' : 'Gezdim ✓',
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w700,
-                                  ),
-                                ),
-                              ),
+                                } catch (e) {
+                                  debugPrint('[Gezdim] onPlaceVisited HATA: $e');
+                                }
+                                _loadAndShowPois();
+                                
+                                // Harita tamamlandı mı kontrol et
+                                if (_totalPoiCount > 0 && _visitedPoiIds.length >= _totalPoiCount) {
+                                  if (context.mounted) {
+                                    MapCompletedDialog.show(context, _mapName);
+                                  }
+                                }
+                                
+                                unawaited(_persistMapState(
+                                  uid: _uid, 
+                                  mapState: CampusMapState(
+                                    revealedCellIds: _mapController?.fogManager.snapshotRevealedCellIds() ?? [],
+                                    visitedPoiIds: _visitedPoiIds.toList(),
+                                    lastInsidePosition: _mapController?.restoredState?.lastInsidePosition,
+                                    cameraCenter: _initialCenter,
+                                    zoom: _initialZoom,
+                                  )
+                                ));
+                              },
+                              onCancelVisit: () async {
+                                _visitedPoiIds.remove(id);
+                                _mapController?.visitedPoiIds = _visitedPoiIds.toList();
+                                xpAnimAmount = -50;
+                                debugPrint('[Gezdim] İptal: poi=$id, visited=${_visitedPoiIds.length}/$_totalPoiCount, uid=$_uid');
+                                setSheetState(() {});
+                                setState(() {});
+                                _loadAndShowPois();
+                                
+                                // XP düşür
+                                debugPrint('[Gezdim] removeXP çağrılıyor...');
+                                try {
+                                  await ref.read(gameProvider.notifier).removeXP(50);
+                                  debugPrint('[Gezdim] removeXP tamamlandı');
+                                } catch (e) {
+                                  debugPrint('[Gezdim] removeXP HATA: $e');
+                                }
+                                
+                                unawaited(_persistMapState(
+                                  uid: _uid, 
+                                  mapState: CampusMapState(
+                                    revealedCellIds: _mapController?.fogManager.snapshotRevealedCellIds() ?? [],
+                                    visitedPoiIds: _visitedPoiIds.toList(),
+                                    lastInsidePosition: _mapController?.restoredState?.lastInsidePosition,
+                                    cameraCenter: _initialCenter,
+                                    zoom: _initialZoom,
+                                  )
+                                ));
+                              },
                             ),
-                            if (currentVisited && !(_visitedPoiIds.contains(id) == false))
-                              Positioned(
-                                top: -20,
-                                left: 0,
-                                right: 0,
-                                child: Center(
-                                  child: XPPopup(
-                                    key: UniqueKey(), // Force rebuild on each tap
-                                    xpAmount: 50,
-                                    onComplete: () {},
-                                  ),
-                                ),
-                              ),
-                          ],
+                          ),
                         ),
                       ),
-                    ),
+                      if (xpAnimAmount != null)
+                        Positioned(
+                          top: -30,
+                          left: 0,
+                          right: 0,
+                          child: Center(
+                            child: XPPopup(
+                              key: UniqueKey(),
+                              xpAmount: xpAnimAmount!,
+                              onComplete: () {},
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ],
               ),
@@ -549,6 +573,8 @@ class _CityMapPageState extends ConsumerState<CityMapPage> {
             'description': poi['description'],
             'photo_url': poi['photo_url'],
             'visited': _visitedPoiIds.contains(featureId),
+            'lat': poi['lat'],
+            'lon': poi['lon'],
           },
           'geometry': <String, Object?>{
             'type': 'Point',
@@ -606,8 +632,12 @@ class _CityMapPageState extends ConsumerState<CityMapPage> {
     required String? uid,
     required CampusMapState mapState,
   }) async {
-    if (uid == null) return;
+    if (uid == null) {
+      debugPrint('[Persist] uid null — kaydetme atlandı!');
+      return;
+    }
 
+    debugPrint('[Persist] Kaydediliyor: uid=$uid, mapId=$_mapId, visited=${mapState.visitedPoiIds.length}');
     await _mapProgressService.saveMapState(
       uid: uid,
       mapId: _mapId,
@@ -615,10 +645,20 @@ class _CityMapPageState extends ConsumerState<CityMapPage> {
       mapName: _mapName,
       state: mapState,
     );
+    debugPrint('[Persist] Kayıt tamamlandı.');
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      _mapController?.flushPersist();
+    }
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _poiTapSub?.cancel();
     final mapController = _mapController;
     if (mapController != null) {

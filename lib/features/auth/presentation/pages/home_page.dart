@@ -7,7 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../app/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../data/services/badge_service.dart';
-import '../../data/services/map_progress_service.dart';
 import '../../data/services/firestore_user_service.dart';
 import '../../data/services/friends_service.dart';
 import '../../domain/models/badge.dart' show AppBadge;
@@ -15,13 +14,13 @@ import '../../domain/models/user_map_record.dart';
 import '../../../multi_room/presentation/screens/multi_map_screen.dart';
 import '../../../multi_room/services/multi_room_firestore_service.dart';
 import '../../../multi_room/presentation/screens/waiting_room_screen.dart';
-import '../map/map_areas.dart';
-import '../widgets/friends_tab.dart';
-import 'city_map_page.dart';
 import 'city_selection_page.dart';
 import 'user_profile_page.dart';
 import '../../../../screens/quests_screen.dart';
+import '../../../../screens/social_page.dart';
 import '../../../../providers/game_provider.dart';
+import '../../../../models/user_xp.dart';
+import '../../../../screens/history_page.dart';
 
 enum TravelMode { solo, multi }
 
@@ -35,7 +34,7 @@ class HomePage extends ConsumerStatefulWidget {
 class _HomePageState extends ConsumerState<HomePage> {
   bool _isSigningOut = false;
   bool _focusIncomingRequests = false;
-  int _selectedIndex = 2;
+  int _selectedIndex = 0;
   TravelMode _selectedMode = TravelMode.solo;
   String? _firestoreName;
 
@@ -86,7 +85,7 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   void _openIncomingRequests() {
     setState(() {
-      _selectedIndex = 0;
+      _selectedIndex = 2;
       _focusIncomingRequests = true;
     });
   }
@@ -105,17 +104,7 @@ class _HomePageState extends ConsumerState<HomePage> {
     final hasIncompleteQuests = userXPStr.valueOrNull?.weeklyQuests.hasAnyIncomplete ?? false;
 
     final tabs = <Widget>[
-      FriendsTab(
-        uid: user?.uid ?? '',
-        focusIncomingRequests: _focusIncomingRequests,
-        onFocusHandled: () {
-          if (!mounted || !_focusIncomingRequests) {
-            return;
-          }
-          setState(() => _focusIncomingRequests = false);
-        },
-      ),
-      _HistoryTab(uid: user?.uid ?? ''),
+      // 0: Ana Sayfa
       _HomeTab(
         uid: user?.uid ?? '',
         titleName: titleName,
@@ -124,11 +113,25 @@ class _HomePageState extends ConsumerState<HomePage> {
         onOpenIncomingRequests: _openIncomingRequests,
         onStartJourney: _startJourney,
         onGoToQuests: () => setState(() {
-          _selectedIndex = 3;
+          _selectedIndex = 1;
           _focusIncomingRequests = false;
         }),
       ),
+      // 1: Görevler
       const QuestsScreen(),
+      // 2: Sosyal (Arkadaşlar + Liderlik)
+      SocialPage(
+        uid: user?.uid ?? '',
+        focusIncomingRequests: _focusIncomingRequests,
+        onFocusHandled: () {
+          if (!mounted || !_focusIncomingRequests) {
+            return;
+          }
+          setState(() => _focusIncomingRequests = false);
+        },
+        onAddFriends: null, // already on the same page
+      ),
+      // 3: Profil (+ Geçmiş)
       _ProfileTab(
         uid: user?.uid ?? '',
         titleName: titleName,
@@ -176,7 +179,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                       onTap:
                           (index) => setState(() {
                             _selectedIndex = index;
-                            if (index != 0) {
+                            if (index != 2) {
                               _focusIncomingRequests = false;
                             }
                           }),
@@ -194,16 +197,6 @@ class _HomePageState extends ConsumerState<HomePage> {
                         fontSize: 10,
                       ),
                       items: [
-                        const BottomNavigationBarItem(
-                          icon: Icon(Icons.groups_outlined),
-                          activeIcon: Icon(Icons.groups_rounded),
-                          label: 'Arkadaşlar',
-                        ),
-                        const BottomNavigationBarItem(
-                          icon: Icon(Icons.map_outlined),
-                          activeIcon: Icon(Icons.map),
-                          label: 'Geçmiş',
-                        ),
                         const BottomNavigationBarItem(
                           icon: Icon(Icons.home_outlined),
                           activeIcon: Icon(Icons.home),
@@ -231,6 +224,11 @@ class _HomePageState extends ConsumerState<HomePage> {
                           ),
                           activeIcon: const Icon(Icons.emoji_events),
                           label: 'Görevler',
+                        ),
+                        const BottomNavigationBarItem(
+                          icon: Icon(Icons.groups_outlined),
+                          activeIcon: Icon(Icons.groups_rounded),
+                          label: 'Sosyal',
                         ),
                         const BottomNavigationBarItem(
                           icon: Icon(Icons.person_outline_rounded),
@@ -322,6 +320,8 @@ class _HomeTab extends StatelessWidget {
                 ),
               ),
               const Spacer(),
+              _HistoryIcon(uid: uid),
+              const SizedBox(width: 8),
               _IncomingRequestsBell(uid: uid, onTap: onOpenIncomingRequests),
             ],
           ),
@@ -369,6 +369,46 @@ class _HomeTab extends StatelessWidget {
             onTap: onStartJourney,
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _HistoryIcon extends StatelessWidget {
+  const _HistoryIcon({required this.uid});
+
+  final String uid;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => HistoryPage(uid: uid)),
+          );
+        },
+        child: Ink(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: AppColors.card,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: AppColors.inputBorder.withValues(alpha: 0.45),
+            ),
+          ),
+          child: const Center(
+            child: Icon(
+              Icons.history,
+              color: AppColors.textMain,
+              size: 24,
+            ),
+          ),
+        ),
       ),
     );
   }
@@ -662,528 +702,6 @@ class _JourneyModeCard extends StatelessWidget {
         ],
       ),
     );
-  }
-}
-
-class _HistoryTab extends StatefulWidget {
-  const _HistoryTab({required this.uid});
-
-  final String uid;
-
-  @override
-  State<_HistoryTab> createState() => _HistoryTabState();
-}
-
-class _HistoryTabState extends State<_HistoryTab> {
-  final MapProgressService _mapProgressService = MapProgressService();
-  final MultiRoomFirestoreService _multiRoomService =
-      MultiRoomFirestoreService();
-  String? _deletingMapId;
-  String? _openingMapId;
-
-  Future<void> _openMap(UserMapRecord record) async {
-    if (_openingMapId != null) {
-      return;
-    }
-
-    setState(() => _openingMapId = record.mapId);
-    try {
-      if (_isMultiHistoryRecord(record)) {
-        await _openMultiMapFromHistory(record);
-        return;
-      }
-
-      await Navigator.pushNamed(
-        context,
-        AppRouter.cityMap,
-        arguments: CityMapPageArgs(
-          areaId: record.areaId,
-          mapId: record.mapId,
-          mapName: record.mapName,
-        ),
-      );
-    } on FirebaseException catch (e) {
-      if (!mounted) return;
-      final message =
-          e.code == 'unauthenticated'
-              ? 'Oturum bulunamadi. Lutfen tekrar giris yap.'
-              : 'Harita acilamadi: ${e.message ?? e.code}';
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Harita acilamadi: $e'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _openingMapId = null);
-      }
-    }
-  }
-
-  Future<void> _openMultiMapFromHistory(UserMapRecord record) async {
-    final roomId = _extractRoomIdFromHistory(record.mapId);
-    if (roomId == null) {
-      await _openFinishedMultiMapSnapshot(record);
-      return;
-    }
-
-    try {
-      var room = await _multiRoomService.fetchRoom(roomId);
-
-      if (room == null) {
-        if (!mounted) {
-          return;
-        }
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Oda bulunamadi. Kayitli harita ozeti aciliyor.'),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        await _openFinishedMultiMapSnapshot(record);
-        return;
-      }
-
-      if (!(room.isWaiting || room.isActive)) {
-        await _openFinishedMultiMapSnapshot(record);
-        return;
-      }
-
-      try {
-        await _multiRoomService.ensureRoomMembership(room.id);
-      } on FirebaseException catch (_) {
-        // Membership set is best-effort. We can still try to continue.
-      }
-
-      room = await _multiRoomService.fetchRoom(room.id);
-      if (room == null || room.isFinished) {
-        await _openFinishedMultiMapSnapshot(record);
-        return;
-      }
-
-      if (!mounted) {
-        return;
-      }
-
-      if (room.isActive) {
-        await Navigator.pushNamed(
-          context,
-          AppRouter.multiMap,
-          arguments: MultiMapScreenArgs(roomId: room.id),
-        );
-        return;
-      }
-
-      await Navigator.pushNamed(
-        context,
-        AppRouter.waitingRoom,
-        arguments: WaitingRoomScreenArgs(roomId: room.id),
-      );
-    } on FirebaseException catch (e) {
-      if (!mounted) {
-        return;
-      }
-      if (e.code == 'permission-denied') {
-        try {
-          await _multiRoomService.ensureRoomMembership(roomId);
-          final room = await _multiRoomService.fetchRoom(roomId);
-          if (room != null) {
-            if (room.isActive) {
-              if (!mounted) {
-                return;
-              }
-              await Navigator.pushNamed(
-                context,
-                AppRouter.multiMap,
-                arguments: MultiMapScreenArgs(roomId: room.id),
-              );
-              return;
-            }
-            if (room.isWaiting) {
-              if (!mounted) {
-                return;
-              }
-              await Navigator.pushNamed(
-                context,
-                AppRouter.waitingRoom,
-                arguments: WaitingRoomScreenArgs(roomId: room.id),
-              );
-              return;
-            }
-          }
-        } on FirebaseException catch (_) {
-          // Ignore and fallback to snapshot.
-        }
-
-        if (!mounted) {
-          return;
-        }
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Bu odaya tekrar katilma yetkin yok. Kayitli harita ozeti aciliyor.',
-            ),
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-        await _openFinishedMultiMapSnapshot(record);
-        return;
-      }
-      rethrow;
-    }
-  }
-
-  bool _isMultiHistoryRecord(UserMapRecord record) {
-    final mapId = record.mapId.trim().toLowerCase();
-    if (mapId.startsWith('multi_')) {
-      return true;
-    }
-
-    final mapName = record.mapName.trim().toLowerCase();
-    return mapName.contains('(coklu)') || mapName.contains('(çoklu)');
-  }
-
-  String? _extractRoomIdFromHistory(String mapId) {
-    final normalized = mapId.trim();
-    const prefix = 'multi_';
-    if (!normalized.startsWith(prefix) || normalized.length <= prefix.length) {
-      return null;
-    }
-    return normalized.substring(prefix.length);
-  }
-
-  Future<void> _openFinishedMultiMapSnapshot(UserMapRecord record) async {
-    final resolvedAreaId = resolveMapArea(record.areaId).id;
-    if (!mounted) {
-      return;
-    }
-
-    await Navigator.pushNamed(
-      context,
-      AppRouter.cityMap,
-      arguments: CityMapPageArgs(
-        areaId: resolvedAreaId,
-        mapId: record.mapId,
-        mapName: record.mapName,
-      ),
-    );
-  }
-
-  Future<void> _deleteMap(UserMapRecord record) async {
-    final shouldDelete = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) {
-        return AlertDialog(
-          backgroundColor: AppColors.card,
-          title: const Text(
-            'Haritayı Sil',
-            style: TextStyle(color: AppColors.textMain),
-          ),
-          content: Text(
-            '"${record.mapName}" haritası geçmişten silinsin mi?',
-            style: const TextStyle(color: AppColors.textMuted),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Vazgeç'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Sil'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (!mounted || shouldDelete != true) return;
-
-    setState(() => _deletingMapId = record.mapId);
-    try {
-      await _mapProgressService.deleteMap(uid: widget.uid, mapId: record.mapId);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Harita silindi.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Harita silinemedi, lütfen tekrar dene.'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } finally {
-      if (mounted) {
-        setState(() => _deletingMapId = null);
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return _PageShell(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Geçmiş Haritalar',
-            style: TextStyle(
-              color: AppColors.textMain,
-              fontSize: 32,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 20),
-          if (widget.uid.isEmpty)
-            const Text(
-              'Geçmişi görmek için oturum açmalısın.',
-              style: TextStyle(color: AppColors.textMuted, fontSize: 15),
-            )
-          else
-            StreamBuilder<List<UserMapRecord>>(
-              stream: _mapProgressService.watchMapHistory(widget.uid),
-              builder: (context, snapshot) {
-                if (snapshot.hasError) {
-                  final error = snapshot.error;
-                  final message =
-                      error is FirebaseException &&
-                              error.code == 'permission-denied'
-                          ? 'Geçmiş için yetki hatası: Firestore kurallarını deploy et.'
-                          : 'Geçmiş yüklenemedi: $error';
-                  return Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: AppColors.card,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: AppColors.inputBorder.withValues(alpha: 0.45),
-                      ),
-                    ),
-                    child: Text(
-                      message,
-                      style: const TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 14,
-                        height: 1.4,
-                      ),
-                    ),
-                  );
-                }
-
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Padding(
-                    padding: EdgeInsets.symmetric(vertical: 32),
-                    child: Center(
-                      child: CircularProgressIndicator(
-                        color: AppColors.primary,
-                      ),
-                    ),
-                  );
-                }
-
-                final records = snapshot.data ?? const <UserMapRecord>[];
-                if (records.isEmpty) {
-                  return Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: AppColors.card,
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: AppColors.inputBorder.withValues(alpha: 0.45),
-                      ),
-                    ),
-                    child: const Text(
-                      'Henüz kayıtlı harita yok. Harita açarken isim verip oluşturabilirsin.',
-                      style: TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 15,
-                        height: 1.4,
-                      ),
-                    ),
-                  );
-                }
-
-                return _AnimatedHistoryList(
-                  records: records,
-                  openingMapId: _openingMapId,
-                  deletingMapId: _deletingMapId,
-                  onOpen: (record) => unawaited(_openMap(record)),
-                  onDelete: (record) => unawaited(_deleteMap(record)),
-                );
-              },
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AnimatedHistoryList extends StatefulWidget {
-  const _AnimatedHistoryList({
-    required this.records,
-    required this.openingMapId,
-    required this.deletingMapId,
-    required this.onOpen,
-    required this.onDelete,
-  });
-
-  final List<UserMapRecord> records;
-  final String? openingMapId;
-  final String? deletingMapId;
-  final ValueChanged<UserMapRecord> onOpen;
-  final ValueChanged<UserMapRecord> onDelete;
-
-  @override
-  State<_AnimatedHistoryList> createState() => _AnimatedHistoryListState();
-}
-
-class _AnimatedHistoryListState extends State<_AnimatedHistoryList>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: Duration(
-        milliseconds: 300 + (widget.records.length * 80).clamp(0, 600),
-      ),
-    )..forward();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final count = widget.records.length;
-    return Column(
-      children: List.generate(count, (index) {
-        final record = widget.records[index];
-        final areaTitle = resolveMapArea(record.areaId).title;
-        final updatedAt = record.updatedAt ?? record.createdAt;
-        final subtitle =
-            updatedAt == null
-                ? areaTitle
-                : '$areaTitle · ${_formatDateTime(updatedAt)}';
-        final isDeleting = widget.deletingMapId == record.mapId;
-        final isOpening = widget.openingMapId == record.mapId;
-
-        final start = (index / count).clamp(0.0, 1.0);
-        final end = ((index + 1) / count).clamp(0.0, 1.0);
-        final animation = CurvedAnimation(
-          parent: _controller,
-          curve: Interval(start, end, curve: Curves.easeOutCubic),
-        );
-
-        return AnimatedBuilder(
-          animation: animation,
-          builder: (context, child) {
-            return Opacity(
-              opacity: animation.value,
-              child: Transform.translate(
-                offset: Offset(0, 20 * (1 - animation.value)),
-                child: child,
-              ),
-            );
-          },
-          child: Container(
-            margin: const EdgeInsets.only(bottom: 12),
-            decoration: BoxDecoration(
-              color: AppColors.card,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: AppColors.inputBorder.withValues(alpha: 0.45),
-              ),
-            ),
-            child: ListTile(
-              onTap:
-                  (isDeleting || isOpening)
-                      ? null
-                      : () => widget.onOpen(record),
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 14,
-                vertical: 6,
-              ),
-              leading: Container(
-                width: 42,
-                height: 42,
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(
-                  Icons.map_rounded,
-                  color: AppColors.primary,
-                ),
-              ),
-              title: Text(
-                record.mapName,
-                style: const TextStyle(
-                  color: AppColors.textMain,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              subtitle: Padding(
-                padding: const EdgeInsets.only(top: 3),
-                child: Text(
-                  subtitle,
-                  style: const TextStyle(
-                    color: AppColors.textMuted,
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-              trailing:
-                  (isDeleting || isOpening)
-                      ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppColors.primary,
-                        ),
-                      )
-                      : IconButton(
-                        tooltip: 'Haritayı sil',
-                        onPressed: () => widget.onDelete(record),
-                        icon: const Icon(
-                          Icons.delete_outline_rounded,
-                          color: AppColors.textMuted,
-                        ),
-                      ),
-            ),
-          ),
-        );
-      }),
-    );
-  }
-
-  String _formatDateTime(DateTime dateTime) {
-    final day = dateTime.day.toString().padLeft(2, '0');
-    final month = dateTime.month.toString().padLeft(2, '0');
-    final year = dateTime.year.toString();
-    final hour = dateTime.hour.toString().padLeft(2, '0');
-    final minute = dateTime.minute.toString().padLeft(2, '0');
-    return '$day.$month.$year $hour:$minute';
   }
 }
 
@@ -1507,7 +1025,6 @@ class _ProfileTabState extends State<_ProfileTab> {
           ],
           const SizedBox(height: 22),
           _buildMyBadgesSection(),
-          const SizedBox(height: 16),
           SizedBox(
             width: double.infinity,
             height: 54,
@@ -1789,102 +1306,229 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
     return userXPAsync.when(
       data: (userXP) {
         final quests = userXP.weeklyQuests;
-        int maxXP = 50 + 100 + 75 + 100 + 100 + 75 + 300;
-        int earnedXP = 0;
+        const int maxQuestXP = 50 + 100 + 75 + 100 + 100 + 75 + 300;
+        int earnedQuestXP = 0;
+        int completedCount = 0;
+        const int totalQuests = 7;
         
-        if (quests.ilkAdim.done) earnedXP += 50;
-        if (quests.kasifRuhu.done) earnedXP += 100;
-        if (quests.cesitliKasif.done) earnedXP += 75;
-        if (quests.takimOyuncusu.done) earnedXP += 100;
-        if (quests.takimKasifi.done) earnedXP += 100;
-        if (quests.duzenliGezgin.done) earnedXP += 75;
-        if (quests.tamHafta.done) earnedXP += 300;
+        if (quests.ilkAdim.done) { earnedQuestXP += 50; completedCount++; }
+        if (quests.kasifRuhu.done) { earnedQuestXP += 100; completedCount++; }
+        if (quests.cesitliKasif.done) { earnedQuestXP += 75; completedCount++; }
+        if (quests.takimOyuncusu.done) { earnedQuestXP += 100; completedCount++; }
+        if (quests.takimKasifi.done) { earnedQuestXP += 100; completedCount++; }
+        if (quests.duzenliGezgin.done) { earnedQuestXP += 75; completedCount++; }
+        if (quests.tamHafta.done) { earnedQuestXP += 300; completedCount++; }
 
-        return Material(
-          color: Colors.transparent,
-          child: InkWell(
-            onTap: onTap,
+        final questProgress = maxQuestXP > 0 ? (earnedQuestXP / maxQuestXP) : 0.0;
+
+        return Container(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                const Color(0xFF1E1040),
+                userXP.titleColor.withValues(alpha: 0.15),
+              ],
+            ),
             borderRadius: BorderRadius.circular(16),
-            child: Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1E1040),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFF7B2FBE).withValues(alpha: 0.3)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Text(
-                        '🏆',
-                        style: TextStyle(fontSize: 20),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text(
-                        'Haftalık Görevler',
-                        style: TextStyle(
-                          color: Color(0xFF7B2FBE),
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const Spacer(),
-                      const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white70, size: 14),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TweenAnimationBuilder<double>(
-                    tween: Tween<double>(begin: 0, end: earnedXP / maxXP),
-                    duration: const Duration(milliseconds: 1200),
-                    curve: Curves.easeOutCubic,
-                    builder: (context, value, child) {
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(6),
-                            child: LinearProgressIndicator(
-                              value: value.isNaN ? 0 : value,
-                              minHeight: 8,
-                              backgroundColor: Colors.white.withValues(alpha: 0.1),
-                              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF7B2FBE)),
+            border: Border.all(
+              color: userXP.titleColor.withValues(alpha: 0.35),
+            ),
+          ),
+          child: Column(
+            children: [
+              // ── Level / XP Section ──
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: userXP.titleColor.withValues(alpha: 0.2),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Center(
+                            child: Text(
+                              userXP.titleEmoji,
+                              style: const TextStyle(fontSize: 22),
                             ),
                           ),
-                          const SizedBox(height: 8),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text(
-                                'İlerleme Özeti',
+                              Text(
+                                userXP.titleName,
                                 style: TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
+                                  color: userXP.titleColor,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
                                 ),
                               ),
+                              const SizedBox(height: 1),
                               Text(
-                                '$earnedXP / $maxXP XP',
-                                style: const TextStyle(
-                                  color: Colors.white,
+                                '${userXP.currentXP} XP',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.7),
+                                  fontSize: 13,
                                   fontWeight: FontWeight.w600,
-                                  fontSize: 14,
                                 ),
                               ),
                             ],
                           ),
-                        ],
-                      );
-                    },
-                  ),
-                ],
+                        ),
+                        if (userXP.currentTitle != UserTitle.efsane)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.08),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              '${userXP.xpToNext} XP kaldı',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.7),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          )
+                        else
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: Colors.amber.withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Text(
+                              '⭐ MAX',
+                              style: TextStyle(
+                                color: Colors.amber,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    TweenAnimationBuilder<double>(
+                      tween: Tween<double>(begin: 0, end: userXP.progressPercentage),
+                      duration: const Duration(milliseconds: 1200),
+                      curve: Curves.easeOutCubic,
+                      builder: (context, value, child) {
+                        return ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: LinearProgressIndicator(
+                            value: value,
+                            minHeight: 8,
+                            backgroundColor: Colors.white.withValues(alpha: 0.08),
+                            valueColor: AlwaysStoppedAnimation<Color>(userXP.titleColor),
+                          ),
+                        );
+                      },
+                    ),
+                  ],
+                ),
               ),
-            ),
+              // ── Divider ──
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16),
+                height: 1,
+                color: Colors.white.withValues(alpha: 0.08),
+              ),
+              // ── Weekly Quests Section ──
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: onTap,
+                  borderRadius: const BorderRadius.only(
+                    bottomLeft: Radius.circular(16),
+                    bottomRight: Radius.circular(16),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Text(
+                              '🏆',
+                              style: TextStyle(fontSize: 18),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Haftalık Görevler',
+                              style: TextStyle(
+                                color: userXP.titleColor,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const Spacer(),
+                            Text(
+                              '$completedCount/$totalQuests',
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.7),
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            Icon(
+                              Icons.arrow_forward_ios_rounded,
+                              color: Colors.white.withValues(alpha: 0.4),
+                              size: 12,
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        TweenAnimationBuilder<double>(
+                          tween: Tween<double>(begin: 0, end: questProgress),
+                          duration: const Duration(milliseconds: 1200),
+                          curve: Curves.easeOutCubic,
+                          builder: (context, value, child) {
+                            return ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: LinearProgressIndicator(
+                                value: value.isNaN ? 0 : value,
+                                minHeight: 6,
+                                backgroundColor: Colors.white.withValues(alpha: 0.08),
+                                valueColor: AlwaysStoppedAnimation<Color>(userXP.titleColor.withValues(alpha: 0.7)),
+                              ),
+                            );
+                          },
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          earnedQuestXP > 0 
+                            ? 'Bu hafta görevlerden +$earnedQuestXP XP' 
+                            : 'Görevlere tıklayarak detay gör',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.5),
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         );
       },
       loading: () => Container(
-        height: 80,
+        height: 130,
         decoration: BoxDecoration(
           color: const Color(0xFF1E1040),
           borderRadius: BorderRadius.circular(16),
@@ -1895,3 +1539,4 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
     );
   }
 }
+

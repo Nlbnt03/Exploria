@@ -8,6 +8,7 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../models/user_xp.dart';
 import '../../../../models/weekly_quest.dart';
 import '../../../../widgets/xp_card.dart';
+import '../../data/services/friends_service.dart';
 import '../../data/services/badge_service.dart';
 import '../../domain/models/badge.dart' show AppBadge;
 
@@ -27,6 +28,10 @@ class UserProfilePage extends ConsumerStatefulWidget {
 
 class _UserProfilePageState extends ConsumerState<UserProfilePage> {
   final BadgeService _badgeService = BadgeService();
+  final FriendsService _friendsService = FriendsService();
+
+  bool _sendingRequest = false;
+  bool _cancellingRequest = false;
 
   Map<String, dynamic>? _userData;
   bool _isLoading = true;
@@ -40,10 +45,11 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
   Future<void> _loadUser() async {
     setState(() => _isLoading = true);
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.uid)
-          .get();
+      final doc =
+          await FirebaseFirestore.instance
+              .collection('users')
+              .doc(widget.uid)
+              .get();
       if (!mounted) return;
       setState(() {
         _userData = doc.data() ?? <String, dynamic>{};
@@ -88,9 +94,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
         ),
         child: SizedBox.expand(
           child: SafeArea(
-            child: _isLoading
-                ? const ProfileShimmer()
-                : _buildContent(),
+            child: _isLoading ? const ProfileShimmer() : _buildContent(),
           ),
         ),
       ),
@@ -109,6 +113,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
           _buildAppBar(),
           const SizedBox(height: 24),
           _buildProfileHeader(),
+          if (!isCurrentUser) _buildFriendActionButton(currentUserUid ?? ''),
           const SizedBox(height: 24),
           _buildInfoSection(),
           const SizedBox(height: 24),
@@ -125,6 +130,226 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
     );
   }
 
+  Future<void> _sendRequest() async {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUid == null) return;
+    setState(() => _sendingRequest = true);
+    try {
+      await _friendsService.sendFriendRequest(
+        fromUid: currentUid,
+        toUid: widget.uid,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Arkadaşlık isteği gönderildi'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Bir hata oluştu.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sendingRequest = false);
+    }
+  }
+
+  Future<void> _cancelRequest() async {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUid == null) return;
+    setState(() => _cancellingRequest = true);
+    try {
+      await _friendsService.cancelFriendRequest(
+        fromUid: currentUid,
+        toUid: widget.uid,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('İstek iptal edildi'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Bir hata oluştu.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _cancellingRequest = false);
+    }
+  }
+
+  Future<void> _showRemoveFriendDialog() async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          backgroundColor: AppColors.card,
+          title: const Text(
+            'Arkadaşlıktan Çıkar',
+            style: TextStyle(color: AppColors.textMain),
+          ),
+          content: Text(
+            '${_displayName.isNotEmpty ? _displayName : _username} adlı kullanıcıyı arkadaşlıktan çıkarmak istediğine emin misin?',
+            style: const TextStyle(color: AppColors.textMuted),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text(
+                'Vazgeç',
+                style: TextStyle(color: AppColors.textMuted),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text(
+                'Çıkar',
+                style: TextStyle(color: Colors.redAccent),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirm == true && mounted) {
+      _removeFriend();
+    }
+  }
+
+  Future<void> _removeFriend() async {
+    final currentUid = FirebaseAuth.instance.currentUser?.uid;
+    if (currentUid == null) return;
+    try {
+      await _friendsService.removeFriend(
+        currentUid: currentUid,
+        friendUid: widget.uid,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Arkadaşlıktan çıkarıldı'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Bir hata oluştu.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  Widget _loadingIcon() => const SizedBox(
+    width: 20,
+    height: 20,
+    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+  );
+
+  Widget _buildFriendActionButton(String currentUserUid) {
+    if (currentUserUid.isEmpty) return const SizedBox();
+
+    return StreamBuilder<Set<String>>(
+      stream: _friendsService.watchOutgoingPendingRequestToUids(currentUserUid),
+      builder: (context, pendingSnapshot) {
+        final pendingToUids = pendingSnapshot.data ?? <String>{};
+
+        return StreamBuilder<Set<String>>(
+          stream: _friendsService.watchFriendUids(currentUserUid),
+          builder: (context, friendSnapshot) {
+            final friendUids = friendSnapshot.data ?? <String>{};
+
+            final isAlreadyRequested = pendingToUids.contains(widget.uid);
+            final isAlreadyFriend = friendUids.contains(widget.uid);
+            final isSending = _sendingRequest;
+            final isCancelling = _cancellingRequest;
+
+            Widget button;
+
+            if (isAlreadyFriend) {
+              button = ElevatedButton.icon(
+                onPressed: () => _showRemoveFriendDialog(),
+                icon: const Icon(Icons.person_remove_rounded, size: 20,color : Colors.white),
+                label: const Text('Arkadaş'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.card,
+                  foregroundColor: AppColors.textMain,
+                  minimumSize: const Size.fromHeight(50),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  side: BorderSide(
+                    color: AppColors.inputBorder.withValues(alpha: 0.5),
+                  ),
+                ),
+              );
+            } else if (isAlreadyRequested) {
+              button = ElevatedButton.icon(
+                onPressed: isCancelling ? null : _cancelRequest,
+                icon:
+                    isCancelling
+                        ? _loadingIcon()
+                        : const Icon(Icons.close_rounded, size: 20,color : Colors.white),
+                label: const Text('İstek Gönderildi'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orangeAccent.withValues(alpha: 0.15),
+                  foregroundColor: Colors.orangeAccent,
+                  minimumSize: const Size.fromHeight(50),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  side: BorderSide(
+                    color: Colors.orangeAccent.withValues(alpha: 0.5),
+                  ),
+                ),
+              );
+            } else {
+              button = ElevatedButton.icon(
+                onPressed: isSending ? null : _sendRequest,
+                icon:
+                    isSending
+                        ? _loadingIcon()
+                        : const Icon(Icons.person_add_rounded, size: 20,color : Colors.white),
+                label: const Text('İstek Gönder'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size.fromHeight(50),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+              );
+            }
+
+            return Padding(
+              padding: const EdgeInsets.only(top: 24),
+              child: button,
+            );
+          },
+        );
+      },
+    );
+  }
 
   Widget _buildAppBar() {
     return Row(
@@ -209,10 +434,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
             const SizedBox(height: 4),
             Text(
               '@$_username',
-              style: const TextStyle(
-                color: AppColors.textMuted,
-                fontSize: 16,
-              ),
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 16),
               textAlign: TextAlign.center,
             ),
           ],
@@ -222,8 +444,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
   }
 
   Widget _buildInfoSection() {
-    final friendsCount =
-        (_userData?['friendsCount'] as num?)?.toInt() ?? 0;
+    final friendsCount = (_userData?['friendsCount'] as num?)?.toInt() ?? 0;
 
     return Container(
       width: double.infinity,
@@ -267,26 +488,24 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
   Widget _buildTitleSection() {
     final currentXP = (_userData?['xp'] as num?)?.toInt() ?? 0;
     final questsMap = _userData?['weeklyQuests'] as Map<String, dynamic>?;
-    final quests = questsMap != null ? WeeklyQuests.fromMap(questsMap) : WeeklyQuests.empty();
+    final quests =
+        questsMap != null
+            ? WeeklyQuests.fromMap(questsMap)
+            : WeeklyQuests.empty();
     final userXP = UserXP(currentXP: currentXP, weeklyQuests: quests);
-    
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 18),
       decoration: BoxDecoration(
         color: userXP.titleColor.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: userXP.titleColor.withValues(alpha: 0.4),
-        ),
+        border: Border.all(color: userXP.titleColor.withValues(alpha: 0.4)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(
-            userXP.titleEmoji,
-            style: const TextStyle(fontSize: 22),
-          ),
+          Text(userXP.titleEmoji, style: const TextStyle(fontSize: 22)),
           const SizedBox(width: 8),
           Text(
             userXP.titleName,
@@ -341,9 +560,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
                 return const Padding(
                   padding: EdgeInsets.symmetric(vertical: 16),
                   child: Center(
-                    child: CircularProgressIndicator(
-                      color: AppColors.primary,
-                    ),
+                    child: CircularProgressIndicator(color: AppColors.primary),
                   ),
                 );
               }
@@ -374,7 +591,8 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
               }
 
               return Column(
-                children: badges.map((badge) => _BadgeCard(badge: badge)).toList(),
+                children:
+                    badges.map((badge) => _BadgeCard(badge: badge)).toList(),
               );
             },
           ),
@@ -412,10 +630,7 @@ class _StatItem extends StatelessWidget {
         const SizedBox(height: 2),
         Text(
           label,
-          style: const TextStyle(
-            color: AppColors.textMuted,
-            fontSize: 13,
-          ),
+          style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
         ),
       ],
     );

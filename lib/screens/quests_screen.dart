@@ -71,7 +71,11 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
           return ListView(
             padding: const EdgeInsets.all(16),
             children: [
-              _XPSummary(quests: quests, timeRemaining: _timeRemaining),
+              _XPSummary(
+                quests: quests,
+                timeRemaining: _timeRemaining,
+                titleColor: userXP.titleColor,
+              ),
               const SizedBox(height: 24),
               const _SectionHeader(title: 'Keşif Görevleri', icon: Icons.explore),
               const SizedBox(height: 12),
@@ -173,8 +177,13 @@ class _SectionHeader extends StatelessWidget {
 class _XPSummary extends StatelessWidget {
   final dynamic quests;
   final String timeRemaining;
+  final Color titleColor;
 
-  const _XPSummary({required this.quests, required this.timeRemaining});
+  const _XPSummary({
+    required this.quests,
+    required this.timeRemaining,
+    required this.titleColor,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -192,25 +201,24 @@ class _XPSummary extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF7B2FBE), Color(0xFFEF9F27)],
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
+          colors: [
+            const Color(0xFF1E1040),
+            titleColor.withValues(alpha: 0.15),
+          ],
         ),
         borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: const Color(0xFF7B2FBE).withValues(alpha: 0.3),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
-          ),
-        ],
+        border: Border.all(
+          color: titleColor.withValues(alpha: 0.35),
+        ),
       ),
       child: Column(
         children: [
-          const Text(
+          Text(
             'Haftalık XP Özeti',
-            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+            style: TextStyle(color: titleColor, fontSize: 16, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 12),
           Row(
@@ -236,21 +244,24 @@ class _XPSummary extends StatelessWidget {
             child: LinearProgressIndicator(
               value: earnedXP / maxXP,
               minHeight: 8,
-              backgroundColor: Colors.black26,
-              valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+              backgroundColor: Colors.white.withValues(alpha: 0.08),
+              valueColor: AlwaysStoppedAnimation<Color>(titleColor),
             ),
           ),
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
             decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.2),
+              color: Colors.white.withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: titleColor.withValues(alpha: 0.2),
+              ),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.schedule_rounded, color: Colors.white, size: 18),
+                const Icon(Icons.schedule_rounded, color: Colors.white70, size: 18),
                 const SizedBox(width: 8),
                 const Text(
                   'Yenilenmeye Kalan:',
