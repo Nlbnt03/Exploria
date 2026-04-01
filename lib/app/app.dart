@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/services/notification_service.dart';
 import '../core/theme/app_theme.dart';
 import 'router/app_router.dart';
 
@@ -12,6 +13,7 @@ class ExploriaApp extends StatelessWidget {
       title: 'Exploria',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark,
+      navigatorKey: NotificationService.navigatorKey,
       initialRoute: AppRouter.startup,
       onGenerateRoute: AppRouter.onGenerateRoute,
     );

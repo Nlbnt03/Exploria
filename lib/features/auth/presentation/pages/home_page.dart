@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,22 +11,27 @@ import '../../data/services/badge_service.dart';
 import '../../data/services/firestore_user_service.dart';
 import '../../data/services/friends_service.dart';
 import '../../domain/models/badge.dart' show AppBadge;
+import '../../../badges/domain/badge_definitions.dart';
+import '../../../badges/presentation/widgets/badge_hexagon.dart';
+import '../../../badges/presentation/pages/badge_showcase_page.dart';
 import '../../domain/models/user_map_record.dart';
 import '../../../multi_room/presentation/screens/multi_map_screen.dart';
 import '../../../multi_room/services/multi_room_firestore_service.dart';
 import '../../../multi_room/presentation/screens/waiting_room_screen.dart';
 import 'city_selection_page.dart';
 import 'user_profile_page.dart';
+import '../../../../models/user_xp.dart';
+import '../../../../providers/game_provider.dart';
+import '../../../../providers/leaderboard_provider.dart';
+import '../../../../screens/history_page.dart';
 import '../../../../screens/quests_screen.dart';
 import '../../../../screens/social_page.dart';
-import '../../../../providers/game_provider.dart';
-import '../../../../models/user_xp.dart';
-import '../../../../screens/history_page.dart';
 
 enum TravelMode { solo, multi }
-
 class HomePage extends ConsumerStatefulWidget {
-  const HomePage({super.key});
+  const HomePage({super.key, this.openFriendRequests = false});
+
+  final bool openFriendRequests;
 
   @override
   ConsumerState<HomePage> createState() => _HomePageState();
@@ -42,6 +48,10 @@ class _HomePageState extends ConsumerState<HomePage> {
   void initState() {
     super.initState();
     _loadFirestoreName();
+    if (widget.openFriendRequests) {
+      _selectedIndex = 2;
+      _focusIncomingRequests = true;
+    }
   }
 
   Future<void> _loadFirestoreName() async {
@@ -66,6 +76,8 @@ class _HomePageState extends ConsumerState<HomePage> {
   Future<void> _signOut() async {
     setState(() => _isSigningOut = true);
     await FirebaseAuth.instance.signOut();
+    ref.invalidate(gameProvider);
+    ref.invalidate(leaderboardProvider);
     if (!mounted) return;
     Navigator.pushNamedAndRemoveUntil(
       context,
@@ -1094,6 +1106,7 @@ class _ProfileTabState extends State<_ProfileTab> {
   }
 
   Widget _buildMyBadgesSection() {
+    if (widget.uid.isEmpty) return const SizedBox.shrink();
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
@@ -1107,123 +1120,151 @@ class _ProfileTabState extends State<_ProfileTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Icon(
-                Icons.emoji_events_rounded,
-                color: AppColors.primary,
-                size: 22,
+              const Row(
+                children: [
+                  Icon(
+                    Icons.emoji_events_rounded,
+                    color: AppColors.primary,
+                    size: 22,
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    'Rozetler',
+                    style: TextStyle(
+                      color: AppColors.textMain,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
-              SizedBox(width: 8),
-              Text(
-                'Rozetlerim',
-                style: TextStyle(
-                  color: AppColors.textMain,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
+              TextButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => BadgeShowcasePage(
+                        uid: widget.uid,
+                        isCurrentUser: true,
+                      ),
+                    ),
+                  );
+                },
+                style: TextButton.styleFrom(
+                  minimumSize: Size.zero,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text(
+                  'Tümünü Gör >',
+                  style: TextStyle(
+                    color: AppColors.primary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 14),
-          StreamBuilder<List<AppBadge>>(
-            stream: _badgeService.watchBadges(widget.uid),
-            builder: (context, snapshot) {
-              if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 16),
-                  child: Center(
-                    child: CircularProgressIndicator(
-                      color: AppColors.primary,
-                    ),
-                  ),
-                );
+          StreamBuilder<DocumentSnapshot>(
+            stream: FirebaseFirestore.instance.collection('users').doc(widget.uid).snapshots(),
+            builder: (context, userSnapshot) {
+              List<String> featuredBadgeIds = [];
+              if (userSnapshot.hasData && userSnapshot.data?.data() != null) {
+                final data = userSnapshot.data!.data() as Map<String, dynamic>;
+                if (data.containsKey('featuredBadges')) {
+                  featuredBadgeIds = (data['featuredBadges'] as List).map((e) => e.toString()).toList();
+                }
               }
 
-              final badges = snapshot.data ?? const <AppBadge>[];
-              if (badges.isEmpty) {
-                return Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.symmetric(vertical: 20),
-                  child: const Column(
-                    children: [
-                      Icon(
-                        Icons.military_tech_outlined,
-                        color: AppColors.textMuted,
-                        size: 36,
-                      ),
-                      SizedBox(height: 8),
-                      Text(
-                        'Henüz rozet kazanmadın',
-                        style: TextStyle(
-                          color: AppColors.textMuted,
-                          fontSize: 14,
+              return StreamBuilder<List<AppBadge>>(
+                stream: _badgeService.watchBadges(widget.uid),
+                builder: (context, snapshot) {
+                  if (snapshot.connectionState == ConnectionState.waiting) {
+                    return const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          color: AppColors.primary,
                         ),
                       ),
-                    ],
-                  ),
-                );
-              }
+                    );
+                  }
 
-              return Column(
-                children: badges.map((badge) {
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: AppColors.inputFill.withValues(alpha: 0.85),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: AppColors.inputBorder.withValues(alpha: 0.35),
+                  final earnedList = snapshot.data ?? const <AppBadge>[];
+                  final earnedIds = earnedList.map((e) => e.id).toSet();
+                  
+                  if (earnedList.isEmpty) {
+                    return Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 20),
+                      child: const Column(
+                        children: [
+                          Icon(
+                            Icons.military_tech_outlined,
+                            color: AppColors.textMuted,
+                            size: 36,
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            'Henüz rozet kazanmadın',
+                            style: TextStyle(
+                              color: AppColors.textMuted,
+                              fontSize: 14,
+                            ),
+                          ),
+                        ],
                       ),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 44,
-                          height: 44,
-                          decoration: BoxDecoration(
-                            color: AppColors.primary.withValues(alpha: 0.18),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Icon(
-                            Icons.emoji_events_rounded,
-                            color: AppColors.primary,
-                            size: 24,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                badge.name,
-                                style: const TextStyle(
-                                  color: AppColors.textMain,
-                                  fontWeight: FontWeight.w700,
-                                  fontSize: 15,
-                                ),
+                    );
+                  }
+
+                  // Filter featured badges that are actually earned
+                  var displayDefs = featuredBadgeIds
+                      .where((id) => earnedIds.contains(id))
+                      .map((id) => badgeDefinitions.firstWhere((d) => d.id == id, orElse: () => badgeDefinitions.first))
+                      .where((d) => earnedIds.contains(d.id))
+                      .toList();
+                  
+                  // If none are featured, just show up to 4 most recently earned badges
+                  if (displayDefs.isEmpty) {
+                    final sortedEarned = List<AppBadge>.from(earnedList)
+                      ..sort((a, b) {
+                        final aTime = a.earnedAt ?? DateTime(0);
+                        final bTime = b.earnedAt ?? DateTime(0);
+                        return bTime.compareTo(aTime);
+                      });
+                    
+                    final recentIds = sortedEarned.take(4).map((e) => e.id).toSet();
+                    displayDefs = badgeDefinitions.where((d) => recentIds.contains(d.id)).toList();
+                  }
+
+                  return Wrap(
+                    spacing: 12,
+                    runSpacing: 16,
+                    children: displayDefs.map((def) {
+                      return HexagonBadge(
+                        definition: def,
+                        isEarned: true,
+                        size: 64.0,
+                        onTap: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => BadgeShowcasePage(
+                                uid: widget.uid,
+                                isCurrentUser: true,
                               ),
-                              if (badge.description.isNotEmpty) ...[
-                                const SizedBox(height: 2),
-                                Text(
-                                  badge.description,
-                                  style: const TextStyle(
-                                    color: AppColors.textMuted,
-                                    fontSize: 13,
-                                  ),
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
+                            ),
+                          );
+                        },
+                      );
+                    }).toList(),
                   );
-                }).toList(),
+                },
               );
             },
           ),

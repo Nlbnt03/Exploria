@@ -62,17 +62,17 @@ class UserXP {
   Color get titleColor {
     switch (currentTitle) {
       case UserTitle.efsane:
-        return Colors.red;
+        return const Color(0xFFFF1744); // Radiant Neon Red
       case UserTitle.ustaKasif:
-        return const Color(0xFFFFD700); // Gold
+        return const Color(0xFFF5A623); // Vibrant Amber/Gold
       case UserTitle.seyyah:
-        return const Color(0xFF7B2FBE); // App Main Purple
+        return const Color(0xFFEC4899); // Neon Pink/Magenta
       case UserTitle.kasif:
-        return Colors.blue;
+        return Colors.blue; // Mavi uyumu korundu
       case UserTitle.gezgin:
-        return Colors.green;
+        return const Color(0xFF10B981); // Emerald Green
       case UserTitle.yolcu:
-        return Colors.grey;
+        return const Color(0xFF94A3B8); // Cool Slate Gray
     }
   }
 

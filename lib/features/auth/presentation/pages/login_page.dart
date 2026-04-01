@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../app/router/app_router.dart';
+import '../../../../core/services/notification_service.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../data/repositories/auth_repository.dart';
 import '../../domain/exceptions/auth_flow_exception.dart';
@@ -58,7 +59,11 @@ class _LoginPageState extends State<LoginPage> {
         _showMessage(result.message ?? 'E-posta doğrulanmamış.');
         return;
       }
+      // Login sonrası FCM token'ı Firestore'a kaydet (bootstrap sırasında uid yoktu)
+      NotificationService.instance.saveToken();
       Navigator.pushReplacementNamed(context, AppRouter.home);
+      // Bildirim tap'ından bekleyen rota varsa oraya yönlendir
+      NotificationService.instance.consumePendingRoute();
     } on AuthFlowException catch (e) {
       if (!mounted) return;
       _showMessage(e.message);

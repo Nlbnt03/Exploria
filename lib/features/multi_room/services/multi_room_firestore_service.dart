@@ -249,11 +249,15 @@ class MultiRoomFirestoreService {
     await _firestore.runTransaction((tx) async {
       final existing = await tx.get(inviteRef);
       if (existing.exists) {
-        throw FirebaseException(
-          plugin: 'multi_room_firestore_service',
-          code: 'invite-already-exists',
-          message: 'Bu kullanici icin zaten bir davet olusturulmus.',
-        );
+        final existingStatus = existing.data()?['status'] as String?;
+        if (existingStatus == 'pending') {
+          throw FirebaseException(
+            plugin: 'multi_room_firestore_service',
+            code: 'invite-already-exists',
+            message: 'Bu kullanici icin zaten bir davet olusturulmus.',
+          );
+        }
+        // Reddedilmiş/kabul edilmiş daveti üzerine yaz → Functions pending geçişini yakalar
       }
 
       tx.set(inviteRef, {

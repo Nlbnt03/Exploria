@@ -159,7 +159,7 @@ service cloud.firestore {
 
       match /badges/{badgeId} {
         allow read: if isSignedIn();
-        allow write: if false;
+        allow write: if isOwner(uid);
       }
     }
 
@@ -405,26 +405,49 @@ service cloud.firestore {
         && isRoomHost(request.resource.data.roomId)
         && exists(/databases/$(database)/documents/rooms/$(request.resource.data.roomId));
 
-      allow update: if isSignedIn()
-        && request.auth.uid == resource.data.toUserId
-        && resource.data.status == 'pending'
-        && request.resource.data.keys().hasOnly([
-          'roomId',
-          'roomName',
-          'fromUserId',
-          'fromUsername',
-          'toUserId',
-          'status',
-          'createdAt',
-          'updatedAt'
-        ])
-        && request.resource.data.roomId == resource.data.roomId
-        && request.resource.data.roomName == resource.data.roomName
-        && request.resource.data.fromUserId == resource.data.fromUserId
-        && request.resource.data.fromUsername == resource.data.fromUsername
-        && request.resource.data.toUserId == resource.data.toUserId
-        && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.status in ['accepted', 'rejected'];
+      allow update: if isSignedIn() && (
+        // Alıcı, bekleyen daveti kabul/reddet edebilir
+        (
+          request.auth.uid == resource.data.toUserId
+          && resource.data.status == 'pending'
+          && request.resource.data.keys().hasOnly([
+            'roomId',
+            'roomName',
+            'fromUserId',
+            'fromUsername',
+            'toUserId',
+            'status',
+            'createdAt',
+            'updatedAt'
+          ])
+          && request.resource.data.roomId == resource.data.roomId
+          && request.resource.data.roomName == resource.data.roomName
+          && request.resource.data.fromUserId == resource.data.fromUserId
+          && request.resource.data.fromUsername == resource.data.fromUsername
+          && request.resource.data.toUserId == resource.data.toUserId
+          && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.status in ['accepted', 'rejected']
+        ) ||
+        // Gönderici, reddedilmiş/kabul edilmiş daveti yeniden gönderebilir
+        (
+          request.auth.uid == resource.data.fromUserId
+          && resource.data.status in ['rejected', 'accepted']
+          && isRoomHost(resource.data.roomId)
+          && request.resource.data.keys().hasOnly([
+            'roomId',
+            'roomName',
+            'fromUserId',
+            'fromUsername',
+            'toUserId',
+            'status',
+            'createdAt'
+          ])
+          && request.resource.data.fromUserId == resource.data.fromUserId
+          && request.resource.data.toUserId == resource.data.toUserId
+          && request.resource.data.roomId == resource.data.roomId
+          && request.resource.data.status == 'pending'
+        )
+      );
 
       allow delete: if false;
     }
@@ -441,6 +464,16 @@ service cloud.firestore {
     match /pois/{poiId} {
       allow read: if isSignedIn();
       allow write: if isSignedIn();
+    }
+
+    match /maps/{cityId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn();
+
+      match /pois/{poiId} {
+        allow read: if isSignedIn();
+        allow write: if isSignedIn();
+      }
     }
 
     match /leaderboard/{uid} {

@@ -59,6 +59,7 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,
+        iconTheme: const IconThemeData(color: Colors.white),
         title: const Text(
           'Haftalık Görevler',
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),

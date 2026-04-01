@@ -9,8 +9,6 @@ class PoiService {
   PoiService({FirebaseFirestore? firestore})
       : _firestore = firestore ?? FirebaseFirestore.instance;
 
-  static const String _collectionName = 'pois';
-
   /// Bir kerelik kullanilacak, lokal JSON listesini Firestore'a tasiyan arac.
   Future<void> migrateLocalPoisToFirestore() async {
     final areaJsonMap = {
@@ -41,7 +39,7 @@ class PoiService {
           final originalIdStr = poiMap['id'].toString();
           final docId = '${cityId}_$originalIdStr';
 
-          final docRef = _firestore.collection(_collectionName).doc(docId);
+          final docRef = _firestore.collection('maps').doc(cityId).collection('pois').doc(docId);
           
           // Mevcut POI'ye cityId ekle ve id'nin string olmasini garanti et
           final dataToSave = Map<String, dynamic>.from(poiMap)
@@ -68,9 +66,11 @@ class PoiService {
   Future<List<Map<String, dynamic>>> getPoisForCity(String cityId) async {
     try {
       final snapshot = await _firestore
-          .collection(_collectionName)
-          .where('cityId', isEqualTo: cityId)
-          .get();
+          .collection('maps')
+          .doc(cityId)
+          .collection('pois')
+          // Future get query (offline cache öncelikli veya sunucu destekli)
+          .get(const GetOptions(source: Source.serverAndCache));
 
       return snapshot.docs.map((doc) => doc.data()).toList();
     } catch (e) {

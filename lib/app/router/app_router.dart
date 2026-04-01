@@ -16,6 +16,11 @@ import '../../features/multi_room/presentation/screens/multi_map_screen.dart';
 import '../../features/multi_room/presentation/screens/pending_invites_screen.dart';
 import '../../features/multi_room/presentation/screens/waiting_room_screen.dart';
 
+class HomePageArgs {
+  const HomePageArgs({this.openFriendRequests = false});
+  final bool openFriendRequests;
+}
+
 class AppRouter {
   static const String startup = '/startup';
   static const String login = '/login';
@@ -54,8 +59,11 @@ class AppRouter {
           settings: settings,
         );
       case home:
+        final args = settings.arguments;
+        final openFriendRequests =
+            args is HomePageArgs ? args.openFriendRequests : false;
         return FadeScaleRoute<void>(
-          builder: (_) => const HomePage(),
+          builder: (_) => HomePage(openFriendRequests: openFriendRequests),
           settings: settings,
         );
       case citySelection:

@@ -20,7 +20,9 @@ import '../../../../providers/game_provider.dart';
 import '../../../../widgets/xp_popup.dart';
 import '../../../../widgets/level_up_dialog.dart';
 import '../../../../widgets/map_completed_dialog.dart';
-
+import '../../../badges/data/badge_award_service.dart';
+import '../../../badges/domain/badge_definitions.dart';
+import '../../../badges/presentation/widgets/badge_celebration_dialog.dart';
 class CityMapPageArgs {
   const CityMapPageArgs({
     required this.areaId,
@@ -56,6 +58,7 @@ class CityMapPage extends ConsumerStatefulWidget {
 class _CityMapPageState extends ConsumerState<CityMapPage>
     with WidgetsBindingObserver {
   final MapProgressService _mapProgressService = MapProgressService();
+  final BadgeAwardService _badgeAwardService = BadgeAwardService();
 
   CampusMapController? _mapController;
   late final MapAreaConfig _selectedArea;
@@ -422,10 +425,16 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                                 // Harita tamamlandı mı kontrol et
                                 if (_totalPoiCount > 0 && _visitedPoiIds.length >= _totalPoiCount) {
                                   if (context.mounted) {
-                                    MapCompletedDialog.show(context, _mapName);
+                                    MapCompletedDialog.show(
+                                      context, 
+                                      _mapName,
+                                      uid: _uid,
+                                      mapId: _mapId,
+                                      gameNotifier: ref.read(gameProvider.notifier),
+                                    );
                                   }
                                 }
-                                
+
                                 unawaited(_persistMapState(
                                   uid: _uid, 
                                   mapState: CampusMapState(
@@ -743,9 +752,39 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
             if (didPop) return;
             final shouldPop = await _showExitConfirmation();
             if (shouldPop && context.mounted) {
-              Navigator.of(context).popUntil(
-                (route) => route.settings.name == AppRouter.home,
+              // BÖLÜM 2 — Rozet Kontrolü (Haritadan Çıkarken)
+              final bContext = BadgeCheckContext(
+                totalVisited: _visitedPoiIds.length,
+                historicBuildingVisited: _parsedPois.where((p) => _visitedPoiIds.contains(p['featureId']) && (p['category'].toString().toLowerCase().contains('tarih') || p['type'].toString().toLowerCase().contains('tarih'))).length,
+                mosqueVisited: _parsedPois.where((p) => _visitedPoiIds.contains(p['featureId']) && (p['category'].toString().toLowerCase().contains('cami') || p['type'].toString().toLowerCase().contains('cami'))).length,
+                distinctCitiesVisited: 1, // Mevcut scope içinde tek şehir
+                coopSessionsCompleted: 0,
+                distinctCoopPartners: 0,
+                coopMapJustCompleted: false,
+                currentStreak: ref.read(gameProvider).valueOrNull?.weeklyQuests.duzenliGezgin.current ?? 0,
+                allWeeklyQuestsJustCompleted: false,
+                visitTime: DateTime.now(),
+                recentVisitTimes: [DateTime.now()],
+                lastVisitedMapId: _mapId,
+                lastVisitedMapCompletion: _totalPoiCount > 0 ? _visitedPoiIds.length / _totalPoiCount : 0.0,
+                weeklyLeaderboardRank: 999,
               );
+
+              final newBadges = await _badgeAwardService.checkAndAwardBadges(
+                uid: _uid!,
+                context: bContext,
+                gameNotifier: ref.read(gameProvider.notifier),
+              );
+
+              if (newBadges.isNotEmpty && context.mounted) {
+                await BadgeCelebrationDialog.show(context, newBadges);
+              }
+
+              if (context.mounted) {
+                Navigator.of(context).popUntil(
+                  (route) => route.settings.name == AppRouter.home,
+                );
+              }
             }
           },
           child: Scaffold(

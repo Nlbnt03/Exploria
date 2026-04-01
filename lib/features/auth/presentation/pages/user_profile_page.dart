@@ -11,6 +11,9 @@ import '../../../../widgets/xp_card.dart';
 import '../../data/services/friends_service.dart';
 import '../../data/services/badge_service.dart';
 import '../../domain/models/badge.dart' show AppBadge;
+import '../../../badges/domain/badge_definitions.dart';
+import '../../../badges/presentation/widgets/badge_hexagon.dart';
+import '../../../badges/presentation/pages/badge_showcase_page.dart';
 
 class UserProfilePageArgs {
   const UserProfilePageArgs({required this.uid});
@@ -124,7 +127,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
             _buildTitleSection(),
             const SizedBox(height: 24),
           ],
-          _buildBadgesSection(),
+          _buildBadgesSection(isCurrentUser),
         ],
       ),
     );
@@ -520,7 +523,10 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
     );
   }
 
-  Widget _buildBadgesSection() {
+  Widget _buildBadgesSection(bool isCurrentUser) {
+    // 1. Get featured badge IDs from user data
+    final featuredBadgeIds = (_userData?['featuredBadges'] as List?)?.map((e) => e.toString()).toList() ?? [];
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(18),
@@ -534,20 +540,51 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Row(
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Icon(
-                Icons.emoji_events_rounded,
-                color: AppColors.primary,
-                size: 22,
+              const Row(
+                children: [
+                  Icon(
+                    Icons.emoji_events_rounded,
+                    color: AppColors.primary,
+                    size: 22,
+                  ),
+                  SizedBox(width: 8),
+                  Text(
+                    'Rozetler',
+                    style: TextStyle(
+                      color: AppColors.textMain,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
-              SizedBox(width: 8),
-              Text(
-                'Rozetler',
-                style: TextStyle(
-                  color: AppColors.textMain,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
+              TextButton(
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => BadgeShowcasePage(
+                        uid: widget.uid,
+                        isCurrentUser: isCurrentUser,
+                      ),
+                    ),
+                  );
+                },
+                style: TextButton.styleFrom(
+                  minimumSize: Size.zero,
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
+                child: const Text(
+                  'Tümünü Gör >',
+                  style: TextStyle(
+                    color: AppColors.primary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ],
@@ -565,8 +602,10 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
                 );
               }
 
-              final badges = snapshot.data ?? const <AppBadge>[];
-              if (badges.isEmpty) {
+              final earnedList = snapshot.data ?? const <AppBadge>[];
+              final earnedIds = earnedList.map((e) => e.id).toSet();
+              
+              if (earnedList.isEmpty) {
                 return Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(vertical: 24),
@@ -590,9 +629,53 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
                 );
               }
 
+              // Filter featured badges that are actually earned
+              var displayDefs = featuredBadgeIds
+                  .where((id) => earnedIds.contains(id))
+                  .map((id) => badgeDefinitions.firstWhere((d) => d.id == id, orElse: () => badgeDefinitions.first))
+                  .where((d) => earnedIds.contains(d.id)) // double check just in case
+                  .toList();
+              
+              // If none are featured, just show up to 4 most recently earned badges
+              if (displayDefs.isEmpty) {
+                final sortedEarned = List<AppBadge>.from(earnedList)
+                  ..sort((a, b) {
+                    final aTime = a.earnedAt ?? DateTime(0);
+                    final bTime = b.earnedAt ?? DateTime(0);
+                    return bTime.compareTo(aTime);
+                  }); // newest first
+                
+                final recentIds = sortedEarned.take(4).map((e) => e.id).toSet();
+                displayDefs = badgeDefinitions.where((d) => recentIds.contains(d.id)).toList();
+              }
+
               return Column(
-                children:
-                    badges.map((badge) => _BadgeCard(badge: badge)).toList(),
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 16,
+                    children: displayDefs.map((def) {
+                      return HexagonBadge(
+                        definition: def,
+                        isEarned: true,
+                        size: 64.0,
+                        onTap: () {
+                          // Profilde tıklayınca detay sayfasına yönlendir
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => BadgeShowcasePage(
+                                uid: widget.uid,
+                                isCurrentUser: isCurrentUser,
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    }).toList(),
+                  ),
+                ],
               );
             },
           ),
@@ -637,92 +720,3 @@ class _StatItem extends StatelessWidget {
   }
 }
 
-class _BadgeCard extends StatelessWidget {
-  const _BadgeCard({required this.badge});
-
-  final AppBadge badge;
-
-  IconData get _icon {
-    switch (badge.iconName) {
-      case 'explore':
-        return Icons.explore_rounded;
-      case 'star':
-        return Icons.star_rounded;
-      case 'map':
-        return Icons.map_rounded;
-      case 'groups':
-        return Icons.groups_rounded;
-      case 'bolt':
-        return Icons.bolt_rounded;
-      case 'favorite':
-        return Icons.favorite_rounded;
-      case 'trophy':
-      case 'emoji_events':
-        return Icons.emoji_events_rounded;
-      case 'local_fire':
-        return Icons.local_fire_department_rounded;
-      case 'diamond':
-        return Icons.diamond_rounded;
-      case 'rocket':
-        return Icons.rocket_launch_rounded;
-      default:
-        return Icons.emoji_events_rounded;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.inputFill.withValues(alpha: 0.85),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: AppColors.inputBorder.withValues(alpha: 0.35),
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.18),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(_icon, color: AppColors.primary, size: 24),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  badge.name,
-                  style: const TextStyle(
-                    color: AppColors.textMain,
-                    fontWeight: FontWeight.w700,
-                    fontSize: 15,
-                  ),
-                ),
-                if (badge.description.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    badge.description,
-                    style: const TextStyle(
-                      color: AppColors.textMuted,
-                      fontSize: 13,
-                    ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}

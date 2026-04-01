@@ -7,7 +7,8 @@ import '../models/leaderboard_entry.dart';
 import '../models/weekly_quest.dart';
 import '../features/auth/data/services/leaderboard_service.dart';
 import 'package:flutter/material.dart';
-
+import '../features/badges/data/badge_award_service.dart';
+import '../features/badges/domain/badge_definitions.dart';
 // Callback for title change
 typedef OnTitleChanged = void Function(UserTitle newTitle);
 
@@ -19,6 +20,7 @@ class GameNotifier extends AsyncNotifier<UserXP> {
   UserTitle? _previousTitle;
   StreamSubscription? _sub;
   OnTitleChanged? onTitleChanged;
+  bool _pendingPerfectionistBadgeCheck = false;
 
   @override
   FutureOr<UserXP> build() async {
@@ -288,6 +290,14 @@ class GameNotifier extends AsyncNotifier<UserXP> {
         final finalXP = currentXP + xpToAdd;
         final finalWeeklyXP = currentWeeklyXP + xpToAdd;
 
+        bool wasAllDone = quests.ilkAdim.done && quests.kasifRuhu.done && quests.cesitliKasif.done && quests.duzenliGezgin.done && quests.takimOyuncusu.done && quests.takimKasifi.done && quests.tamHafta.done;
+        bool isAllDone = ilkAdim.done && kasifRuhu.done && cesitliKasif.done && duzenliGezgin.done && takimOyuncusu.done && takimKasifi.done && tamHafta.done;
+        
+        // Save for after transaction
+        if (!wasAllDone && isAllDone) {
+          _pendingPerfectionistBadgeCheck = true;
+        }
+
         final oldTitle = UserXP(currentXP: currentXP, weeklyQuests: WeeklyQuests.empty()).currentTitle;
         final newUserXP = UserXP(currentXP: finalXP, weeklyQuests: WeeklyQuests.empty());
         final newTitle = newUserXP.currentTitle;
@@ -325,6 +335,30 @@ class GameNotifier extends AsyncNotifier<UserXP> {
           titleColorHex: LeaderboardEntry.colorToHex(newUserXP.titleColor),
         );
       });
+      
+      // BÖLÜM 2 — Rozet Kontrolü (Perfectionist)
+      if (_pendingPerfectionistBadgeCheck) {
+        _pendingPerfectionistBadgeCheck = false;
+        final bContext = BadgeCheckContext(
+          totalVisited: 0,
+          historicBuildingVisited: 0,
+          mosqueVisited: 0,
+          distinctCitiesVisited: 0,
+          coopSessionsCompleted: 0,
+          distinctCoopPartners: 0,
+          coopMapJustCompleted: false,
+          currentStreak: 0,
+          allWeeklyQuestsJustCompleted: true,
+          visitTime: DateTime.now(),
+          recentVisitTimes: [],
+        );
+        BadgeAwardService().checkAndAwardBadges(
+          uid: uid,
+          context: bContext,
+          gameNotifier: this,
+        );
+      }
+
       return isLevelUp;
     } catch (e) {
       debugPrint('Error updating quests and xp: $e');

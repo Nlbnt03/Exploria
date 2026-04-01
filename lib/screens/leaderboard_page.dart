@@ -447,7 +447,7 @@ class _EmptyState extends StatelessWidget {
               ),
               child: ElevatedButton.icon(
                 onPressed: onAddFriends,
-                icon: const Icon(Icons.person_add_rounded, size: 20),
+                icon: const Icon(Icons.person_add_rounded, size: 20, color: Colors.white),
                 label: const Text(
                   'Arkadaş Ekle',
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),

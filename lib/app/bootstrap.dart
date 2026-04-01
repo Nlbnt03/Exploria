@@ -1,10 +1,14 @@
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/widgets.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'package:cloud_firestore/cloud_firestore.dart' as firestore;
+
 import '../firebase_options.dart';
+import '../core/services/notification_service.dart';
 import 'app.dart';
 
 const _defaultMapboxAccessToken =
@@ -15,6 +19,9 @@ const String _mapboxCacheRefreshKey = 'mapbox_cache_refresh_version';
 
 Future<void> bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await ensureFirebaseInitialized();
+  await NotificationService.instance.initialize();
+
   MapboxMapsOptions.setTileStoreUsageMode(TileStoreUsageMode.DISABLED);
   MapboxOptions.setAccessToken(
     const String.fromEnvironment(
@@ -29,10 +36,18 @@ Future<void> bootstrap() async {
   );
 }
 
-Future<void> ensureFirebaseInitialized() {
-  return _firebaseInitialization ??= Firebase.initializeApp(
-    options: DefaultFirebaseOptions.currentPlatform,
-  );
+Future<void> ensureFirebaseInitialized() async {
+  if (_firebaseInitialization == null) {
+    _firebaseInitialization = Firebase.initializeApp(
+      options: DefaultFirebaseOptions.currentPlatform,
+    ).then((_) {
+      firestore.FirebaseFirestore.instance.settings = firestore.Settings(
+        persistenceEnabled: true,
+        cacheSizeBytes: firestore.Settings.CACHE_SIZE_UNLIMITED,
+      );
+    });
+  }
+  return _firebaseInitialization;
 }
 
 Future<void> ensureFreshMapboxData() async {

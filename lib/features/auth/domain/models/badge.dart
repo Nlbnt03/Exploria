@@ -1,5 +1,9 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+enum BadgeTier { bronze, silver, gold, secret }
+
+enum BadgeCategory { exploration, social, streak, secret }
+
 class AppBadge {
   const AppBadge({
     required this.id,

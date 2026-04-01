@@ -1,13 +1,35 @@
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 import '../../core/theme/app_colors.dart';
+import '../features/badges/data/badge_award_service.dart';
+import '../features/badges/domain/badge_definitions.dart';
+import '../features/badges/presentation/widgets/badge_celebration_dialog.dart';
+import '../providers/game_provider.dart';
 
 class MapCompletedDialog extends StatefulWidget {
   final String mapName;
+  final String? uid;
+  final String? mapId;
+  final GameNotifier? gameNotifier;
+  final bool isCoop;
 
-  const MapCompletedDialog({super.key, required this.mapName});
+  const MapCompletedDialog({
+    super.key, 
+    required this.mapName,
+    this.uid,
+    this.mapId,
+    this.gameNotifier,
+    this.isCoop = false,
+  });
 
-  static void show(BuildContext context, String mapName) {
+  static void show(
+    BuildContext context, 
+    String mapName, {
+    String? uid,
+    String? mapId,
+    GameNotifier? gameNotifier,
+    bool isCoop = false,
+  }) {
     showGeneralDialog(
       context: context,
       barrierDismissible: true,
@@ -15,7 +37,13 @@ class MapCompletedDialog extends StatefulWidget {
       barrierColor: Colors.black.withAlpha(200),
       transitionDuration: const Duration(milliseconds: 600),
       pageBuilder: (context, anim1, anim2) {
-        return MapCompletedDialog(mapName: mapName);
+        return MapCompletedDialog(
+          mapName: mapName,
+          uid: uid,
+          mapId: mapId,
+          gameNotifier: gameNotifier,
+          isCoop: isCoop,
+        );
       },
       transitionBuilder: (context, anim1, anim2, child) {
         return ScaleTransition(
@@ -46,8 +74,39 @@ class _MapCompletedDialogState extends State<MapCompletedDialog> with TickerProv
     _glowController = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat(reverse: true);
     _badgeController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1000));
     
-    Future.delayed(const Duration(milliseconds: 400), () {
+    Future.delayed(const Duration(milliseconds: 400), () async {
       if (mounted) _badgeController.forward();
+      
+      // BÖLÜM 2 — Rozet Kontrolü (Harita Tamamlandı)
+      if (widget.uid != null && widget.gameNotifier != null) {
+        final bContext = BadgeCheckContext(
+          totalVisited: 0,
+          historicBuildingVisited: 0,
+          mosqueVisited: 0,
+          distinctCitiesVisited: 0,
+          coopSessionsCompleted: 0,
+          distinctCoopPartners: 0,
+          coopMapJustCompleted: widget.isCoop,
+          currentStreak: 0,
+          allWeeklyQuestsJustCompleted: false,
+          visitTime: DateTime.now(),
+          recentVisitTimes: [],
+          lastVisitedMapId: widget.mapId,
+          lastVisitedMapCompletion: 1.0,
+        );
+        
+        final newBadges = await BadgeAwardService().checkAndAwardBadges(
+          uid: widget.uid!,
+          context: bContext,
+          gameNotifier: widget.gameNotifier!,
+        );
+        
+        if (newBadges.isNotEmpty && mounted) {
+          Future.delayed(const Duration(milliseconds: 500), () {
+            if (mounted) BadgeCelebrationDialog.show(context, newBadges);
+          });
+        }
+      }
     });
   }
 
