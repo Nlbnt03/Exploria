@@ -189,4 +189,29 @@ class FirestoreUserService {
       );
     }
   }
+
+  Future<void> deleteUser(String uid) async {
+    final userRef = _users.doc(uid);
+    final userDoc = await userRef.get();
+    if (userDoc.exists) {
+      final data = userDoc.data() ?? {};
+      final usernameLower = (data['usernameLower'] as String?)?.trim();
+      if (usernameLower != null && usernameLower.isNotEmpty) {
+        await _usernames.doc(usernameLower).delete();
+      }
+      
+      final friends = List<String>.from(data['friends'] ?? []);
+      for (final friendUid in friends) {
+        try {
+          await _users.doc(friendUid).collection('friends').doc(uid).delete();
+        } catch (_) {}
+      }
+
+      try {
+        await _firestore.collection('leaderboard').doc(uid).delete();
+      } catch (_) {}
+
+      await userRef.delete();
+    }
+  }
 }

@@ -9,7 +9,7 @@ class FogManager {
   FogManager({
     required this.campusBoundary,
     this.gridSizeMeters = 50,
-    this.baseFogOpacity = 0.65,
+    this.baseFogOpacity = 0.85,
     this.revealRadiusMeters = 28,
   }) : _campusBounds = calculatePolygonBounds(campusBoundary);
 
@@ -26,9 +26,9 @@ class FogManager {
   bool _initialized = false;
   late final double _latStepDeg;
   late final double _lonStepDeg;
-  static const double _viewportBufferRatio = 0.28;
+  static const double _viewportBufferRatio = 0.18;
   static const List<double> _fadeOpacitySteps = <double>[0.5, 0.3, 0.1, 0.0];
-  static const int _cloudPuffsPerCell = 50;
+  static const int _cloudPuffsPerCell = 60;
 
   MapAreaBounds get bounds => _campusBounds;
   int get revealedCount => _revealedCellIds.length + _fadingCellStepById.length;
@@ -220,9 +220,9 @@ class FogManager {
         final lng = centerLng + ((_rand(seed, 1) - 0.5) * lonSpreadDeg);
         final lat = centerLat + ((_rand(seed, 2) - 0.5) * latSpreadDeg);
 
-        final texture = 0.35 + (_rand(seed, 3) * 0.35);
+        final texture = 0.42 + (_rand(seed, 3) * 0.35);
         final opacity = (cellOpacity * texture).clamp(0.0, 1.0);
-        final radius = 22.0 + (_rand(seed, 4) * 18.0);
+        final radius = 36.0 + (_rand(seed, 4) * 32.0);
 
         features.add(<String, Object?>{
           'type': 'Feature',

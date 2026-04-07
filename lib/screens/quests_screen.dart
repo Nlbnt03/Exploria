@@ -55,7 +55,7 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
     final userXPAsync = ref.watch(gameProvider);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF1E1040),
+      backgroundColor: Colors.transparent,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
         elevation: 0,

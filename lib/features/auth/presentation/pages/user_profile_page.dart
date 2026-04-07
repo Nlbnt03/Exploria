@@ -8,12 +8,14 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../models/user_xp.dart';
 import '../../../../models/weekly_quest.dart';
 import '../../../../widgets/xp_card.dart';
+import '../../data/services/firestore_user_service.dart';
 import '../../data/services/friends_service.dart';
 import '../../data/services/badge_service.dart';
 import '../../domain/models/badge.dart' show AppBadge;
 import '../../../badges/domain/badge_definitions.dart';
 import '../../../badges/presentation/widgets/badge_hexagon.dart';
 import '../../../badges/presentation/pages/badge_showcase_page.dart';
+import 'edit_profile_page.dart';
 
 class UserProfilePageArgs {
   const UserProfilePageArgs({required this.uid});
@@ -21,9 +23,18 @@ class UserProfilePageArgs {
 }
 
 class UserProfilePage extends ConsumerStatefulWidget {
-  const UserProfilePage({super.key, required this.uid});
+  const UserProfilePage({
+    super.key,
+    required this.uid,
+    this.isTab = false,
+    this.onSignOut,
+    this.isSigningOut = false,
+  });
 
   final String uid;
+  final bool isTab;
+  final VoidCallback? onSignOut;
+  final bool isSigningOut;
 
   @override
   ConsumerState<UserProfilePage> createState() => _UserProfilePageState();
@@ -54,8 +65,9 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
               .doc(widget.uid)
               .get();
       if (!mounted) return;
+      final data = doc.data() ?? <String, dynamic>{};
       setState(() {
-        _userData = doc.data() ?? <String, dynamic>{};
+        _userData = data;
         _isLoading = false;
       });
     } catch (_) {
@@ -63,6 +75,8 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
       setState(() => _isLoading = false);
     }
   }
+
+
 
   String get _displayName {
     if (_userData == null) return '';
@@ -355,37 +369,81 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
   }
 
   Widget _buildAppBar() {
+    final currentUserUid = FirebaseAuth.instance.currentUser?.uid;
+    final isCurrentUser = widget.uid == currentUserUid;
+
     return Row(
       children: [
-        InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () => Navigator.pop(context),
-          child: Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: AppColors.card,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: AppColors.inputBorder.withValues(alpha: 0.45),
+        if (!widget.isTab) ...[
+          InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => Navigator.pop(context),
+            child: Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: AppColors.card,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppColors.inputBorder.withValues(alpha: 0.45),
+                ),
+              ),
+              child: const Icon(
+                Icons.arrow_back_ios_new_rounded,
+                color: AppColors.textMain,
+                size: 18,
               ),
             ),
-            child: const Icon(
-              Icons.arrow_back_ios_new_rounded,
+          ),
+          const SizedBox(width: 14),
+        ],
+        const Expanded(
+          child: Text(
+            'Profil',
+            style: TextStyle(
               color: AppColors.textMain,
-              size: 18,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
             ),
           ),
         ),
-        const SizedBox(width: 14),
-        const Text(
-          'Profil',
-          style: TextStyle(
-            color: AppColors.textMain,
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
+        if (isCurrentUser)
+          InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () async {
+              if (_userData == null) return;
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => EditProfilePage(
+                    initialData: _userData!,
+                    uid: widget.uid,
+                    onSignOut: widget.onSignOut,
+                    isSigningOut: widget.isSigningOut,
+                  ),
+                ),
+              );
+              if (mounted) {
+                _loadUser();
+              }
+            },
+            child: Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: AppColors.card,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: AppColors.inputBorder.withValues(alpha: 0.45),
+                ),
+              ),
+              child: const Icon(
+                Icons.settings_rounded,
+                color: AppColors.textMain,
+                size: 20,
+              ),
+            ),
           ),
-        ),
       ],
     );
   }
@@ -684,6 +742,8 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
     );
   }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
 
 class _StatItem extends StatelessWidget {
   const _StatItem({

@@ -721,7 +721,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
               <Object>['get', 'poi_type'],
               'Cami', '#10B981', 'Saray', '#F59E0B', 'Müze', '#3B82F6',
               'Tarihi Yapı', '#6B7280', 'Meydan', '#F43F5E', 'Hamam', '#06B6D4',
-              'Çarşı & Pazar', '#8B5CF6', 'Park & Bahçe', '#84CC16',
+              'Çarşı & Pazar', '#8B5CF6', 'Çarşı', '#8B5CF6', 'Park & Bahçe', '#84CC16',
               'Semt & Cadde', '#F97316', 'Kule & Tepe', '#EF4444',
               'Sinagog & Kilise', '#A855F7',
               'Eğitim Binası', '#3B82F6', 'Araştırma Merkezi', '#F59E0B',

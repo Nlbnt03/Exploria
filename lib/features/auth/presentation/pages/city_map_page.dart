@@ -78,6 +78,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
   Set<String> _availableCategories = {};
   Set<String> _activeCategories = {};
   bool _poisInitiallyLoaded = false;
+  bool _poiLayerCreated = false;
 
   bool get _isTestArea =>
       widget.areaId == mapAreaFatih ||
@@ -159,6 +160,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
       onPersistStateRequested:
           (state) => _persistMapState(uid: uid, mapState: state),
       testMode: _isTestArea,
+      areaMinZoom: _selectedArea.minZoom,
     );
     mapController.addListener(_onControllerChanged);
 
@@ -192,6 +194,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
     final photoUrl = payload['photo_url']?.toString() ?? '';
     final lat = (payload['lat'] as num?)?.toDouble() ?? 0.0;
     final lon = (payload['lon'] as num?)?.toDouble() ?? 0.0;
+    final xpValue = (payload['xp'] as num?)?.toInt() ?? 50;
 
     showModalBottomSheet(
       context: context,
@@ -401,15 +404,15 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                               onCheckInSuccess: () async {
                                 _visitedPoiIds.add(id);
                                 _mapController?.visitedPoiIds = _visitedPoiIds.toList();
-                                xpAnimAmount = 50;
+                                xpAnimAmount = xpValue;
                                 debugPrint('[Gezdim] CheckIn başarılı: poi=$id, visited=${_visitedPoiIds.length}/$_totalPoiCount, uid=$_uid');
                                 setSheetState(() {});
                                 setState(() {});
-                                
+
                                 if (!context.mounted) return;
                                 debugPrint('[Gezdim] onPlaceVisited çağrılıyor...');
                                 try {
-                                  final isLevelUp = await ref.read(gameProvider.notifier).onPlaceVisited(id, category, false);
+                                  final isLevelUp = await ref.read(gameProvider.notifier).onPlaceVisited(id, category, false, xpValue: xpValue);
                                   debugPrint('[Gezdim] onPlaceVisited tamamlandı, isLevelUp=$isLevelUp');
                                   if (context.mounted && isLevelUp) {
                                     final userXP = ref.read(gameProvider).valueOrNull;
@@ -449,16 +452,16 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                               onCancelVisit: () async {
                                 _visitedPoiIds.remove(id);
                                 _mapController?.visitedPoiIds = _visitedPoiIds.toList();
-                                xpAnimAmount = -50;
+                                xpAnimAmount = -xpValue;
                                 debugPrint('[Gezdim] İptal: poi=$id, visited=${_visitedPoiIds.length}/$_totalPoiCount, uid=$_uid');
                                 setSheetState(() {});
                                 setState(() {});
                                 _loadAndShowPois();
-                                
+
                                 // XP düşür
                                 debugPrint('[Gezdim] removeXP çağrılıyor...');
                                 try {
-                                  await ref.read(gameProvider.notifier).removeXP(50);
+                                  await ref.read(gameProvider.notifier).removeXP(xpValue);
                                   debugPrint('[Gezdim] removeXP tamamlandı');
                                 } catch (e) {
                                   debugPrint('[Gezdim] removeXP HATA: $e');
@@ -508,47 +511,72 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
     if (_parsedPois.isNotEmpty) return;
 
     final rawList = await PoiService().getPoisForCity(widget.areaId);
+    debugPrint('[Map] ${widget.areaId} için ${rawList.length} POI alındı.');
 
     final categories = <String>{};
     final parsed = <Map<String, dynamic>>[];
 
     for (final map in rawList) {
-      final name = map['isim'] as String? ?? map['name'] as String? ?? '';
-      final type = map['kategori'] as String? ?? map['type'] as String? ?? 'unknown';
-      final rarity = map['oncelik'] as String? ?? map['rarity'] as String? ?? 'common';
-      final category = map['alt_kategori'] as String? ?? map['category'] as String? ?? '';
-      final xp = (map['xp'] as num?)?.toInt() ?? 0;
-      final description = map['aciklama'] as String? ?? '';
-      final photoUrl = map['foto_url'] as String? ?? '';
+      try {
+        final name = map['name'] as String? ?? map['isim'] as String? ?? '';
+        final type = map['category'] as String? ?? map['kategori'] as String? ?? map['type'] as String? ?? 'unknown';
+        final xpValue = (map['xpValue'] as num?)?.toInt() ?? (map['xp'] as num?)?.toInt() ?? 0;
+        // Derive rarity from xpValue
+        final String rarity;
+        if (xpValue >= 100) {
+          rarity = 'must-see';
+        } else if (xpValue >= 75) {
+          rarity = 'önerilen';
+        } else if (xpValue >= 50) {
+          rarity = 'rare';
+        } else {
+          rarity = map['oncelik'] as String? ?? map['rarity'] as String? ?? 'common';
+        }
+        final category = map['subCategory'] as String? ?? map['alt_kategori'] as String? ?? map['category'] as String? ?? '';
+        final description = map['description'] as String? ?? map['aciklama'] as String? ?? '';
+        final photoUrl = map['imageUrl'] as String? ?? map['foto_url'] as String? ?? '';
 
-      double lon = 0;
-      double lat = 0;
-      if (map.containsKey('koordinatlar')) {
-        final coords = map['koordinatlar'] as Map<String, dynamic>;
-        lon = (coords['longitude'] as num).toDouble();
-        lat = (coords['latitude'] as num).toDouble();
-      } else {
-        lon = (map['lon'] as num).toDouble();
-        lat = (map['lat'] as num).toDouble();
+        double lon = 0;
+        double lat = 0;
+        if (map.containsKey('koordinatlar')) {
+          final coords = map['koordinatlar'] as Map<String, dynamic>;
+          lon = (coords['longitude'] as num?)?.toDouble() ??
+              (coords['lng'] as num?)?.toDouble() ?? 0;
+          lat = (coords['latitude'] as num?)?.toDouble() ??
+              (coords['lat'] as num?)?.toDouble() ?? 0;
+        } else {
+          lon = (map['longitude'] as num?)?.toDouble() ??
+              (map['lon'] as num?)?.toDouble() ?? 0;
+          lat = (map['latitude'] as num?)?.toDouble() ??
+              (map['lat'] as num?)?.toDouble() ?? 0;
+        }
+
+        if (lon == 0 && lat == 0) {
+          debugPrint('[Map] Koordinat bulunamadı, POI atlanıyor: $name');
+          continue;
+        }
+
+        final featureId = map['id']?.toString() ?? name;
+        categories.add(type);
+
+        parsed.add(<String, dynamic>{
+          'featureId': featureId,
+          'name': name,
+          'type': type,
+          'rarity': rarity,
+          'category': category,
+          'xp': xpValue,
+          'description': description,
+          'photo_url': photoUrl,
+          'lon': lon,
+          'lat': lat,
+        });
+      } catch (e) {
+        debugPrint('[Map] POI parse hatası (atlanıyor): $e — veri: $map');
       }
-
-      final featureId = map['id']?.toString() ?? name;
-      categories.add(type);
-
-      parsed.add(<String, dynamic>{
-        'featureId': featureId,
-        'name': name,
-        'type': type,
-        'rarity': rarity,
-        'category': category,
-        'xp': xp,
-        'description': description,
-        'photo_url': photoUrl,
-        'lon': lon,
-        'lat': lat,
-      });
     }
 
+    debugPrint('[Map] ${widget.areaId}: ${parsed.length} geçerli POI parse edildi.');
     _parsedPois = parsed;
     _availableCategories = categories;
     if (!_poisInitiallyLoaded) {
@@ -556,6 +584,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
       _poisInitiallyLoaded = true;
     }
   }
+
 
   Future<void> _loadAndShowPois() async {
     final controller = _mapController;
@@ -605,7 +634,8 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
 
       // First load uses addPoiGeoJsonLayer (creates source + layers).
       // Subsequent calls update existing source.
-      if (!_poisInitiallyLoaded || !controller.styleReady) {
+      if (!_poiLayerCreated) {
+        _poiLayerCreated = true;
         await controller.addPoiGeoJsonLayer(geoJson);
       } else {
         await controller.updatePoiGeoJson(geoJson);
@@ -913,9 +943,8 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                     ),
                     child: Text(
                       _hasPoiData
-                          ? 'Gezilen: ${_visitedPoiIds.length} / $_totalPoiCount  |  ${mapController.revealedCellCount}/${mapController.totalCellCount} hücre'
-                          : mapController.statusMessage ??
-                              '${_selectedArea.title} fog modu: ${mapController.revealedCellCount}/${mapController.totalCellCount} hücre açıldı',
+                          ? 'Gezilen: ${_visitedPoiIds.length} / $_totalPoiCount'
+                          : mapController.statusMessage ?? _selectedArea.title,
                       style: const TextStyle(
                         color: AppColors.textMain,
                         fontWeight: FontWeight.w600,
@@ -1264,6 +1293,7 @@ const Map<String, Color> _categoryColorMap = {
   'Meydan': Color(0xFFF43F5E),
   'Hamam': Color(0xFF06B6D4),
   'Çarşı & Pazar': Color(0xFF8B5CF6),
+  'Çarşı': Color(0xFF8B5CF6),
   'Park & Bahçe': Color(0xFF84CC16),
   'Semt & Cadde': Color(0xFFF97316),
   'Kule & Tepe': Color(0xFFEF4444),

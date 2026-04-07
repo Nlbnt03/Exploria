@@ -12,11 +12,11 @@ import '../features/badges/domain/badge_definitions.dart';
 // Callback for title change
 typedef OnTitleChanged = void Function(UserTitle newTitle);
 
-final gameProvider = AsyncNotifierProvider<GameNotifier, UserXP>(() {
+final gameProvider = AsyncNotifierProvider.autoDispose<GameNotifier, UserXP>(() {
   return GameNotifier();
 });
 
-class GameNotifier extends AsyncNotifier<UserXP> {
+class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
   UserTitle? _previousTitle;
   StreamSubscription? _sub;
   OnTitleChanged? onTitleChanged;
@@ -199,7 +199,7 @@ class GameNotifier extends AsyncNotifier<UserXP> {
     }
   }
 
-  Future<bool> onPlaceVisited(String placeId, String category, bool isCoop) async {
+  Future<bool> onPlaceVisited(String placeId, String category, bool isCoop, {int? xpValue}) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return false;
     
@@ -220,7 +220,7 @@ class GameNotifier extends AsyncNotifier<UserXP> {
         // Parse current quests
         var quests = WeeklyQuests.fromMap(questsMap);
         
-        int xpToAdd = isCoop ? 75 : 50;
+        int xpToAdd = xpValue ?? (isCoop ? 75 : 50);
         String today = "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}";
 
         WeeklyQuestItem ilkAdim = quests.ilkAdim;

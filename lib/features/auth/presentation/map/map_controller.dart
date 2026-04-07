@@ -18,13 +18,13 @@ class CampusMapController extends ChangeNotifier {
     this.restoredState,
     this.onPersistStateRequested,
     this.testMode = false,
+    this.areaMinZoom = 14.8,
   }) : _lastInsidePosition =
            restoredState?.lastInsidePosition ?? initialUserPosition,
        _currentZoom = restoredState?.zoom ?? 16.0,
        visitedPoiIds = restoredState?.visitedPoiIds.toList() ?? <String>[];
 
   static const String _fogSourceId = 'gtu-fog-source';
-  static const String _fogLayerId = 'gtu-fog-layer';
   static const String _cloudSourceId = 'gtu-cloud-source';
   static const String _cloudLayerId = 'gtu-cloud-layer';
 
@@ -35,6 +35,7 @@ class CampusMapController extends ChangeNotifier {
   final CampusMapState? restoredState;
   final Future<void> Function(CampusMapState state)? onPersistStateRequested;
   final bool testMode;
+  final double areaMinZoom;
 
   GeoJsonSource? _fogSource;
   GeoJsonSource? _cloudSource;
@@ -75,7 +76,7 @@ class CampusMapController extends ChangeNotifier {
   int get revealedCellCount => fogManager.revealedCount;
   int get totalCellCount => fogManager.totalCount;
 
-  double get minZoom => 14.8;
+  double get minZoom => areaMinZoom;
   double get maxZoom => 19.2;
   
   Stream<Map<String, dynamic>> get onPoiTapped => _poiTappedController.stream;
@@ -219,6 +220,7 @@ class CampusMapController extends ChangeNotifier {
             'Meydan', '#F43F5E', // Rose
             'Hamam', '#06B6D4', // Cyan
             'Çarşı & Pazar', '#8B5CF6', // Purple
+            'Çarşı', '#8B5CF6', // Purple
             'Park & Bahçe', '#84CC16', // Lime
             'Semt & Cadde', '#F97316', // Orange
             'Kule & Tepe', '#EF4444', // Red
@@ -291,6 +293,9 @@ class CampusMapController extends ChangeNotifier {
       final existing = await map.style.getSource(sourceId);
       if (existing is GeoJsonSource) {
         await existing.updateGeoJSON(geoJson);
+      } else {
+        // Source not found or wrong type — create from scratch.
+        await addPoiGeoJsonLayer(geoJson);
       }
     } catch (_) {
       // If source doesn't exist yet, fall back to full add.
@@ -383,29 +388,6 @@ class CampusMapController extends ChangeNotifier {
     await _fogSource?.updateGeoJSON(_emptyFeatureCollection);
     _lastRenderedFogGeoJson = _emptyFeatureCollection;
 
-    try {
-      await map.style.addLayer(
-        FillLayer(
-          id: _fogLayerId,
-          sourceId: _fogSourceId,
-          fillAntialias: false,
-          fillColor: const Color(0xFFFFFFFF).toARGB32(),
-          fillOpacityExpression: <Object>[
-            '*',
-            <Object>[
-              'coalesce',
-              <Object>['get', 'opacity'],
-              fogManager.baseFogOpacity,
-            ],
-            0.06,
-          ],
-        ),
-      );
-    } on PlatformException catch (e) {
-      if (!_isAlreadyExistsError(e)) {
-        rethrow;
-      }
-    }
 
     _cloudSource = GeoJsonSource(
       id: _cloudSourceId,
@@ -431,8 +413,8 @@ class CampusMapController extends ChangeNotifier {
         CircleLayer(
           id: _cloudLayerId,
           sourceId: _cloudSourceId,
-          circleColor: const Color(0xFFFFFFFF).toARGB32(),
-          circleBlur: 0.96,
+          circleColor: const Color(0xFFD8DDE8).toARGB32(),
+          circleBlur: 0.88,
           circleOpacityExpression: <Object>[
             'min',
             0.95,
@@ -443,7 +425,7 @@ class CampusMapController extends ChangeNotifier {
                 <Object>['get', 'opacity'],
                 0.0,
               ],
-              1.35,
+              1.65,
             ],
           ],
           circleRadiusExpression: <Object>[

@@ -9,11 +9,11 @@ final leaderboardServiceProvider = Provider<LeaderboardService>((ref) {
 });
 
 final leaderboardProvider =
-    AsyncNotifierProvider<LeaderboardNotifier, List<LeaderboardEntry>>(() {
+    AsyncNotifierProvider.autoDispose<LeaderboardNotifier, List<LeaderboardEntry>>(() {
   return LeaderboardNotifier();
 });
 
-class LeaderboardNotifier extends AsyncNotifier<List<LeaderboardEntry>> {
+class LeaderboardNotifier extends AutoDisposeAsyncNotifier<List<LeaderboardEntry>> {
   StreamSubscription? _sub;
 
   @override

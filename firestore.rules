@@ -135,7 +135,7 @@ service cloud.firestore {
         )
       );
 
-      allow delete: if false;
+      allow delete: if isOwner(uid);
 
       match /friends/{friendUid} {
         allow read: if isSignedIn() && (isOwner(uid) || isOwner(friendUid));
@@ -165,7 +165,7 @@ service cloud.firestore {
 
     match /usernames/{usernameLower} {
       // Client transaction içinde tx.get(usernames/{usernameLower}) kullanıldığı için read açık olmalı.
-      allow read: if isVerified();
+      allow read: if isSignedIn();
 
       allow create: if isVerified()
         && validUsernameLower(usernameLower)
@@ -183,7 +183,7 @@ service cloud.firestore {
         && request.resource.data.username.size() >= 3
         && resource.data.uid == request.auth.uid;
 
-      allow delete: if isVerified()
+      allow delete: if isSignedIn()
         && resource.data.uid == request.auth.uid;
     }
 

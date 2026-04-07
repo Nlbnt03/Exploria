@@ -3,6 +3,7 @@ import 'dart:math' as math;
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../app/bootstrap.dart';
 import '../../../../app/router/app_router.dart';
@@ -39,11 +40,17 @@ class _StartupSplashPageState extends State<StartupSplashPage>
         Future<void>.delayed(const Duration(milliseconds: 900)),
       ]);
       if (!mounted) return;
-      final hasSession = FirebaseAuth.instance.currentUser != null;
-      Navigator.pushReplacementNamed(
-        context,
-        hasSession ? AppRouter.home : AppRouter.login,
-      );
+      final user = FirebaseAuth.instance.currentUser;
+      final hasSession = user != null;
+      
+      String nextRoute = AppRouter.login;
+      if (hasSession) {
+        final prefs = await SharedPreferences.getInstance();
+        final hasSeenOnboarding = prefs.getBool('has_seen_onboarding_${user.uid}') ?? false;
+        nextRoute = hasSeenOnboarding ? AppRouter.home : AppRouter.onboarding;
+      }
+      
+      Navigator.pushReplacementNamed(context, nextRoute);
     } catch (error) {
       if (!mounted) return;
       setState(() => _initializationError = error);

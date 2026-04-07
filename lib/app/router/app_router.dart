@@ -15,6 +15,7 @@ import '../../features/multi_room/presentation/screens/create_room_screen.dart';
 import '../../features/multi_room/presentation/screens/multi_map_screen.dart';
 import '../../features/multi_room/presentation/screens/pending_invites_screen.dart';
 import '../../features/multi_room/presentation/screens/waiting_room_screen.dart';
+import '../../features/onboarding/presentation/pages/onboarding_page.dart';
 
 class HomePageArgs {
   const HomePageArgs({this.openFriendRequests = false});
@@ -35,6 +36,7 @@ class AppRouter {
   static const String multiMap = '/multi-map';
   static const String userProfile = '/user-profile';
   static const String mapPreview = '/map-preview';
+  static const String onboarding = '/onboarding';
 
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
     switch (settings.name) {
@@ -135,6 +137,11 @@ class AppRouter {
         final mode = args is MapPreviewPageArgs ? args.mode : 'solo';
         return SlideLeftRoute<void>(
           builder: (_) => MapPreviewPage(areaId: areaId, mode: mode),
+          settings: settings,
+        );
+      case onboarding:
+        return FadeScaleRoute<void>(
+          builder: (_) => const OnboardingPage(),
           settings: settings,
         );
       default:

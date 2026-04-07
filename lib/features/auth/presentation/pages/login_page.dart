@@ -1,4 +1,6 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../core/services/notification_service.dart';
@@ -61,7 +63,14 @@ class _LoginPageState extends State<LoginPage> {
       }
       // Login sonrası FCM token'ı Firestore'a kaydet (bootstrap sırasında uid yoktu)
       NotificationService.instance.saveToken();
-      Navigator.pushReplacementNamed(context, AppRouter.home);
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        final prefs = await SharedPreferences.getInstance();
+        final hasSeenOnboarding = prefs.getBool('has_seen_onboarding_${user.uid}') ?? false;
+        Navigator.pushReplacementNamed(context, hasSeenOnboarding ? AppRouter.home : AppRouter.onboarding);
+      } else {
+        Navigator.pushReplacementNamed(context, AppRouter.home);
+      }
       // Bildirim tap'ından bekleyen rota varsa oraya yönlendir
       NotificationService.instance.consumePendingRoute();
     } on AuthFlowException catch (e) {

@@ -133,38 +133,54 @@ class _MapPreviewPageState extends State<MapPreviewPage> {
 
     try {
       final rawList = await PoiService().getPoisForCity(widget.areaId);
+      debugPrint('[Preview] ${widget.areaId} için ${rawList.length} POI yüklendi.');
+
       final features = <Map<String, Object?>>[];
       for (final poi in rawList) {
-        final name = poi['isim'] as String? ?? poi['name'] as String? ?? '';
-        final type = poi['kategori'] as String? ?? poi['type'] as String? ?? 'unknown';
-        final rarity = poi['oncelik'] as String? ?? poi['rarity'] as String? ?? 'common';
+        try {
+          final name = poi['isim'] as String? ?? poi['name'] as String? ?? '';
+          final type = poi['kategori'] as String? ?? poi['type'] as String? ?? 'unknown';
+          final rarity = poi['oncelik'] as String? ?? poi['rarity'] as String? ?? 'common';
 
-        double lon = 0;
-        double lat = 0;
-        if (poi.containsKey('koordinatlar')) {
-          final coords = poi['koordinatlar'] as Map<String, dynamic>;
-          lon = (coords['longitude'] as num).toDouble();
-          lat = (coords['latitude'] as num).toDouble();
-        } else {
-          lon = (poi['lon'] as num).toDouble();
-          lat = (poi['lat'] as num).toDouble();
+          double lon = 0;
+          double lat = 0;
+          if (poi.containsKey('koordinatlar')) {
+            final coords = poi['koordinatlar'] as Map<String, dynamic>;
+            lon = (coords['longitude'] as num?)?.toDouble() ??
+                (coords['lng'] as num?)?.toDouble() ?? 0;
+            lat = (coords['latitude'] as num?)?.toDouble() ??
+                (coords['lat'] as num?)?.toDouble() ?? 0;
+          } else {
+            lon = (poi['lon'] as num?)?.toDouble() ??
+                (poi['longitude'] as num?)?.toDouble() ?? 0;
+            lat = (poi['lat'] as num?)?.toDouble() ??
+                (poi['latitude'] as num?)?.toDouble() ?? 0;
+          }
+
+          if (lon == 0 && lat == 0) {
+            debugPrint('[Preview] Koordinat bulunamadı, POI atlanıyor: $name');
+            continue;
+          }
+
+          features.add(<String, Object?>{
+            'type': 'Feature',
+            'id': poi['id']?.toString() ?? name,
+            'properties': <String, Object?>{
+              'name': name,
+              'poi_type': type,
+              'rarity': rarity,
+            },
+            'geometry': <String, Object?>{
+              'type': 'Point',
+              'coordinates': <double>[lon, lat],
+            },
+          });
+        } catch (e) {
+          debugPrint('[Preview] POI parse hatası (atlanıyor): $e — veri: $poi');
         }
-
-        features.add(<String, Object?>{
-          'type': 'Feature',
-          'id': poi['id']?.toString() ?? name,
-          'properties': <String, Object?>{
-            'name': name,
-            'poi_type': type,
-            'rarity': rarity,
-          },
-          'geometry': <String, Object?>{
-            'type': 'Point',
-            'coordinates': <double>[lon, lat],
-          },
-        });
       }
 
+      debugPrint('[Preview] ${features.length} geçerli POI feature oluşturuldu.');
       final geoJson = jsonEncode(<String, Object?>{
         'type': 'FeatureCollection',
         'features': features,
@@ -205,6 +221,7 @@ class _MapPreviewPageState extends State<MapPreviewPage> {
               'Meydan', '#F43F5E',
               'Hamam', '#06B6D4',
               'Çarşı & Pazar', '#8B5CF6',
+              'Çarşı', '#8B5CF6',
               'Park & Bahçe', '#84CC16',
               'Semt & Cadde', '#F97316',
               'Kule & Tepe', '#EF4444',

@@ -25,6 +25,7 @@ class MapAreaConfig {
     required this.center,
     required this.boundary,
     this.gridSizeMeters = 50,
+    this.minZoom = 14.8,
   });
 
   final String id;
@@ -34,6 +35,7 @@ class MapAreaConfig {
   final Position center;
   final List<Position> boundary;
   final double gridSizeMeters;
+  final double minZoom;
 }
 
 const String gtuStyleUri = defaultMapStyleUri;
@@ -165,7 +167,8 @@ final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
     styleUri: defaultMapStyleUri,
     center: gebzeTeknikCenter,
     boundary: gebzeTeknikBoundary,
-    gridSizeMeters: 30,
+    gridSizeMeters: 65,
+    minZoom: 14.0,
   ),
   MapAreaConfig(
     id: mapAreaGebzeKyk,
@@ -174,7 +177,8 @@ final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
     styleUri: defaultMapStyleUri,
     center: gebzeKykCenter,
     boundary: gebzeKykBoundary,
-    gridSizeMeters: 30,
+    gridSizeMeters: 65,
+    minZoom: 13.0,
   ),
   MapAreaConfig(
     id: mapAreaFatih,
@@ -183,7 +187,8 @@ final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
     styleUri: defaultMapStyleUri,
     center: fatihCenter,
     boundary: fatihBoundary,
-    gridSizeMeters: 50,
+    gridSizeMeters: 130,
+    minZoom: 12.5,
   ),
   MapAreaConfig(
     id: mapAreaBeyoglu,
@@ -192,7 +197,8 @@ final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
     styleUri: defaultMapStyleUri,
     center: beyogluCenter,
     boundary: beyogluBoundary,
-    gridSizeMeters: 50,
+    gridSizeMeters: 130,
+    minZoom: 12.5,
   ),
   MapAreaConfig(
     id: mapAreaUskudar,
@@ -201,7 +207,8 @@ final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
     styleUri: defaultMapStyleUri,
     center: uskudarCenter,
     boundary: uskudarBoundary,
-    gridSizeMeters: 50,
+    gridSizeMeters: 130,
+    minZoom: 12.5,
   ),
   MapAreaConfig(
     id: mapAreaKadikoy,
@@ -210,7 +217,8 @@ final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
     styleUri: defaultMapStyleUri,
     center: kadikoyCenter,
     boundary: kadikoyBoundary,
-    gridSizeMeters: 50,
+    gridSizeMeters: 130,
+    minZoom: 12.5,
   ),
   MapAreaConfig(
     id: mapAreaAnkara,
@@ -219,7 +227,8 @@ final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
     styleUri: defaultMapStyleUri,
     center: ankaraCenter,
     boundary: ankaraBoundary,
-    gridSizeMeters: 50,
+    gridSizeMeters: 130,
+    minZoom: 12.0,
   ),
 ];
 
