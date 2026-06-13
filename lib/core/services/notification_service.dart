@@ -52,10 +52,15 @@ class NotificationService {
     // 3. Yerel bildirim eklentisini başlat
     await _initLocalNotifications();
 
-    // 4. FCM token'ı Firestore'a kaydet
+    // 4. FCM token'ı Firestore'a kaydet ve genel kanala abone ol
     await _saveTokenToFirestore();
     _messaging.onTokenRefresh.listen((_) => _saveTokenToFirestore());
-
+    try {
+      await _messaging.subscribeToTopic('announcements');
+      debugPrint('[FCM] Abone olundu: announcements');
+    } catch (e) {
+      debugPrint('[FCM] announcements kanalına abone olunamadı: $e');
+    }
     // 5. Dinleyicileri kur
     _setupMessageListeners();
   }

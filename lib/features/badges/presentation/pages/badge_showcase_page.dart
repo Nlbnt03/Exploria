@@ -251,22 +251,26 @@ class _BadgeShowcasePageState extends State<BadgeShowcasePage> {
         foregroundColor: AppColors.textMain,
         elevation: 0,
       ),
-      body: StreamBuilder<List<AppBadge>>(
-        stream: _badgeService.watchBadges(widget.uid),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(
-              child: CircularProgressIndicator(color: AppColors.primary),
-            );
+      body: StreamBuilder<QuerySnapshot>(
+        stream: FirebaseFirestore.instance.collection('badges').where('isActive', isEqualTo: true).snapshots(),
+        builder: (context, globalSnap) {
+          if (globalSnap.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator(color: AppColors.primary));
           }
+          final allBadgeDefs = globalSnap.data?.docs.map((doc) => BadgeDefinition.fromJson(doc.data() as Map<String, dynamic>, doc.id)).toList() ?? <BadgeDefinition>[];
 
-          final earnedList = snapshot.data ?? const <AppBadge>[];
-          final earnedIds = earnedList.map((e) => e.id).toSet();
+          return StreamBuilder<List<AppBadge>>(
+            stream: _badgeService.watchBadges(widget.uid),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+              }
 
-          final earnedDefs =
-              badgeDefinitions.where((d) => earnedIds.contains(d.id)).toList();
-          final unearnedDefs =
-              badgeDefinitions.where((d) => !earnedIds.contains(d.id)).toList();
+              final earnedList = snapshot.data ?? const <AppBadge>[];
+              final earnedIds = earnedList.map((e) => e.id).toSet();
+
+              final earnedDefs = allBadgeDefs.where((d) => earnedIds.contains(d.id)).toList();
+              final unearnedDefs = allBadgeDefs.where((d) => !earnedIds.contains(d.id)).toList();
 
           return SingleChildScrollView(
             padding: const EdgeInsets.all(24),
@@ -392,6 +396,8 @@ class _BadgeShowcasePageState extends State<BadgeShowcasePage> {
                 ],
               ],
             ),
+          );
+            },
           );
         },
       ),

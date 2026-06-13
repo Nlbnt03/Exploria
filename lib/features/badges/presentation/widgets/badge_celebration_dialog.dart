@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:async';
 import '../../domain/badge_definitions.dart';
+import '../../data/badge_award_service.dart';
 import 'badge_hexagon.dart';
 import '../../../../core/theme/app_colors.dart';
 
@@ -78,8 +79,11 @@ class _BadgeCelebrationDialogState extends State<BadgeCelebrationDialog>
   @override
   Widget build(BuildContext context) {
     final badgeId = widget.badgeIds[_currentIndex];
-    final def = badgeDefinitions.firstWhere((d) => d.id == badgeId,
-        orElse: () => badgeDefinitions.first);
+    final badges = BadgeAwardService.cachedBadges ?? [];
+    if (badges.isEmpty) return const SizedBox();
+
+    final def = badges.firstWhere((d) => d.id == badgeId,
+        orElse: () => badges.first);
 
     return Scaffold(
       backgroundColor: Colors.transparent,

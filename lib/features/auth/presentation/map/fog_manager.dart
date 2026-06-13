@@ -28,7 +28,7 @@ class FogManager {
   late final double _lonStepDeg;
   static const double _viewportBufferRatio = 0.18;
   static const List<double> _fadeOpacitySteps = <double>[0.5, 0.3, 0.1, 0.0];
-  static const int _cloudPuffsPerCell = 60;
+  static const int _cloudPuffsPerCell = 10;
 
   MapAreaBounds get bounds => _campusBounds;
   int get revealedCount => _revealedCellIds.length + _fadingCellStepById.length;
@@ -280,21 +280,19 @@ class FogManager {
   }
 
   Iterable<_FogCell> _visibleFogCells(_PaddedViewport viewport) sync* {
-    for (final cell in _cells.values) {
-      if (_revealedCellIds.contains(cell.id)) {
-        continue;
-      }
+    final minRow = ((viewport.minLat - _campusBounds.minLat) / _latStepDeg).floor();
+    final maxRow = ((viewport.maxLat - _campusBounds.minLat) / _latStepDeg).ceil();
+    final minCol = ((viewport.minLng - _campusBounds.minLng) / _lonStepDeg).floor();
+    final maxCol = ((viewport.maxLng - _campusBounds.minLng) / _lonStepDeg).ceil();
 
-      final intersectsViewport =
-          cell.maxLat >= viewport.minLat &&
-          cell.minLat <= viewport.maxLat &&
-          cell.maxLng >= viewport.minLng &&
-          cell.minLng <= viewport.maxLng;
-      if (!intersectsViewport) {
-        continue;
+    for (int row = minRow; row <= maxRow; row++) {
+      for (int col = minCol; col <= maxCol; col++) {
+        final id = '${row}_$col';
+        final cell = _cells[id];
+        if (cell == null) continue;
+        if (_revealedCellIds.contains(cell.id)) continue;
+        yield cell;
       }
-
-      yield cell;
     }
   }
 

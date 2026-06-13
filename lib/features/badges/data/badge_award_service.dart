@@ -9,6 +9,7 @@ import '../../../providers/game_provider.dart';
 class BadgeAwardService {
   final _badgeService = BadgeService();
   final _firestore = FirebaseFirestore.instance;
+  static List<BadgeDefinition>? cachedBadges;
 
   Future<List<String>> checkAndAwardBadges({
     required String uid,
@@ -21,7 +22,12 @@ class BadgeAwardService {
       final existingBadges = await _badgeService.fetchBadges(uid);
       final existingIds = existingBadges.map((b) => b.id).toSet();
 
-      for (final def in badgeDefinitions) {
+      if (cachedBadges == null) {
+        final snap = await _firestore.collection('badges').where('isActive', isEqualTo: true).get();
+        cachedBadges = snap.docs.map((doc) => BadgeDefinition.fromJson(doc.data(), doc.id)).toList();
+      }
+
+      for (final def in cachedBadges!) {
         if (existingIds.contains(def.id)) continue;
 
         if (def.condition(context)) {
@@ -71,5 +77,16 @@ class BadgeAwardService {
       case BadgeCategory.secret:
         return 'visibility_off';
     }
+  }
+
+  static Future<void> initBadges() async {
+    final snap = await FirebaseFirestore.instance
+        .collection('badges')
+        .where('isActive', isEqualTo: true)
+        .get();
+    cachedBadges = snap.docs
+        .map((doc) => BadgeDefinition.fromJson(doc.data(), doc.id))
+        .toList();
+    debugPrint('[Badges] ${cachedBadges!.length} rozet projenin önbelleğine yüklendi.');
   }
 }

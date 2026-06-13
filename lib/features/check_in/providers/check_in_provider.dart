@@ -28,6 +28,8 @@ class CheckInNotifier extends StateNotifier<CheckInState> {
     required String mapId,
     required double venueLat,
     required double venueLng,
+    double? userLat,
+    double? userLng,
   }) async {
     // 1. Kullanıcıyı Loading durumuna al
     state = CheckInState.loading;
@@ -39,6 +41,8 @@ class CheckInNotifier extends StateNotifier<CheckInState> {
       mapId: mapId,
       venueLat: venueLat,
       venueLng: venueLng,
+      userLat: userLat,
+      userLng: userLng,
       onTooFar: (dist) {
         // Hesaplanıp fazla çıkan mesafeyi gösterim için saklıyoruz
         lastCalculatedDistance = dist;

@@ -71,7 +71,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
 
   Room? _room;
   Position? _lastInsidePosition;
-  Timer? _locationTimer;
+  StreamSubscription<geo.Position>? _locationSub;
   Timer? _fogRefreshDebounce;
   Timer? _fogAnimationTicker;
   Timer? _persistMapStateDebounce;
@@ -85,6 +85,8 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
   bool _historyMarked = false;
   bool _allMembersReadyToExplore = false;
   double _initialZoom = 16.0;
+  double _minZoom = 14.8;
+  double _maxZoom = 17.5;
 
   String? _historyMapId;
   String? _historyAreaId;
@@ -329,7 +331,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
       
       if (restoredState != null) {
         _lastInsidePosition = restoredState.lastInsidePosition;
-        _initialZoom = (restoredState.zoom ?? 16.0).clamp(14.8, 19.2).toDouble();
+        _initialZoom = (restoredState.zoom ?? 16.0).clamp(14.8, 17.5).toDouble();
         _visitedPoiIds = Set.from(restoredState.visitedPoiIds);
         _fogManager?.restoreRevealedCells(restoredState.revealedCellIds);
       }
@@ -349,7 +351,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
     }
 
     final areaId = _historyAreaId ?? _room?.cityId ?? _resolveAreaForRoom(_room).id;
-    final isTestArea = areaId == mapAreaFatih || areaId == mapAreaBeyoglu || areaId == mapAreaUskudar || areaId == mapAreaKadikoy || areaId == mapAreaAnkara;
+    final isTestArea = areaId == mapAreaFatih || areaId == mapAreaBeyoglu || areaId == mapAreaUskudar || areaId == mapAreaAnkara;
     if (isTestArea) {
       // Test areas do not use GPS
       return;
@@ -368,18 +370,35 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
     }
 
     _isTracking = true;
-    await _pushCurrentLocation();
 
-    _locationTimer?.cancel();
-    _locationTimer = Timer.periodic(const Duration(seconds: 5), (_) {
-      unawaited(_pushCurrentLocation());
-    });
+    _locationSub = geo.Geolocator.getPositionStream(
+      locationSettings: const geo.LocationSettings(
+        accuracy: geo.LocationAccuracy.high,
+        distanceFilter: 4,
+      ),
+    ).listen(
+      (pos) {
+        if (!_isTracking) return;
+        final position = Position(pos.longitude, pos.latitude);
+        unawaited(_service.updateMyLocation(widget.roomId, pos.latitude, pos.longitude));
+        _revealFogForPosition(position);
+        if (!_cameraMovedToFirstPoint && _styleReady) {
+          _cameraMovedToFirstPoint = true;
+          unawaited(_mapboxMap?.setCamera(CameraOptions(
+            center: Point(coordinates: position),
+            zoom: _initialZoom > _minZoom ? _initialZoom : 16.0,
+          )));
+        }
+      },
+      onError: (_) {},
+      cancelOnError: false,
+    );
   }
 
   void _stopTracking() {
     _isTracking = false;
-    _locationTimer?.cancel();
-    _locationTimer = null;
+    _locationSub?.cancel();
+    _locationSub = null;
   }
 
   Future<bool> _ensureLocationPermission() async {
@@ -396,33 +415,6 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
         permission == geo.LocationPermission.whileInUse;
   }
 
-  Future<void> _pushCurrentLocation() async {
-    final room = _room;
-    if (!_isTracking ||
-        room == null ||
-        !room.isActive ||
-        !_allMembersReadyToExplore) {
-      return;
-    }
-
-    try {
-      final current = await geo.Geolocator.getCurrentPosition(
-        locationSettings: const geo.LocationSettings(
-          accuracy: geo.LocationAccuracy.high,
-        ),
-      );
-
-      await _service.updateMyLocation(
-        widget.roomId,
-        current.latitude,
-        current.longitude,
-      );
-
-      _revealFogForPosition(Position(current.longitude, current.latitude));
-    } on Exception {
-      // Next 5-second tick retries.
-    }
-  }
 
   void _revealFogForPosition(Position position) {
     final fogManager = _fogManager;
@@ -830,6 +822,16 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
     await _prepareLocationLayers();
     _latestCameraState = await _mapboxMap?.getCameraState();
     _styleReady = true;
+    try {
+      await _mapboxMap?.scaleBar.updateSettings(ScaleBarSettings(
+        position: OrnamentPosition.BOTTOM_LEFT,
+        marginLeft: 16,
+        marginBottom: 72,
+      ));
+      await _mapboxMap?.compass.updateSettings(CompassSettings(enabled: false));
+    } on PlatformException {
+      // Best-effort
+    }
     await _refreshLocationSource();
     await _loadAndShowPois();
     _scheduleFogRefresh(delay: const Duration(milliseconds: 120));
@@ -837,6 +839,15 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
 
   void _onCameraChanged(CameraChangedEventData data) {
     _latestCameraState = data.cameraState;
+    final zoom = data.cameraState.zoom;
+    final map = _mapboxMap;
+    if (map != null && (zoom < _minZoom - 0.05 || zoom > _maxZoom + 0.05)) {
+      final corrected = zoom.clamp(_minZoom, _maxZoom);
+      unawaited(map.easeTo(
+        CameraOptions(zoom: corrected),
+        MapAnimationOptions(duration: 150, startDelay: 0),
+      ));
+    }
     _scheduleFogRefresh();
     _schedulePersistMapState();
   }
@@ -851,15 +862,18 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
     final fogManager = FogManager(
       campusBoundary: area.boundary,
       gridSizeMeters: area.gridSizeMeters,
+      revealRadiusMeters: area.gridSizeMeters * 1.3,
     );
     await fogManager.initialize();
     _fogManager = fogManager;
 
+    _minZoom = area.minZoom;
+    _maxZoom = 17.5;
     await map.setBounds(
       CameraBoundsOptions(
         bounds: fogManager.bounds.toCoordinateBounds(),
-        minZoom: 14.8,
-        maxZoom: 19.2,
+        minZoom: _minZoom,
+        maxZoom: _maxZoom,
         minPitch: 0,
         maxPitch: 75,
       ),
@@ -1247,7 +1261,8 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
 
   @override
   void dispose() {
-    _stopTracking();
+    _locationSub?.cancel();
+    _isTracking = false;
     _fogRefreshDebounce?.cancel();
     _fogAnimationTicker?.cancel();
     _persistMapStateDebounce?.cancel();

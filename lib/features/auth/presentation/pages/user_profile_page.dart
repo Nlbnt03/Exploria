@@ -16,6 +16,7 @@ import '../../../badges/domain/badge_definitions.dart';
 import '../../../badges/presentation/widgets/badge_hexagon.dart';
 import '../../../badges/presentation/pages/badge_showcase_page.dart';
 import 'edit_profile_page.dart';
+import '../../../badges/data/badge_award_service.dart';
 
 class UserProfilePageArgs {
   const UserProfilePageArgs({required this.uid});
@@ -688,9 +689,12 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
               }
 
               // Filter featured badges that are actually earned
+              final availableBadges = BadgeAwardService.cachedBadges ?? [];
+              if (availableBadges.isEmpty) return const SizedBox();
+
               var displayDefs = featuredBadgeIds
                   .where((id) => earnedIds.contains(id))
-                  .map((id) => badgeDefinitions.firstWhere((d) => d.id == id, orElse: () => badgeDefinitions.first))
+                  .map((id) => availableBadges.firstWhere((d) => d.id == id, orElse: () => availableBadges.first))
                   .where((d) => earnedIds.contains(d.id)) // double check just in case
                   .toList();
               
@@ -704,7 +708,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
                   }); // newest first
                 
                 final recentIds = sortedEarned.take(4).map((e) => e.id).toSet();
-                displayDefs = badgeDefinitions.where((d) => recentIds.contains(d.id)).toList();
+                displayDefs = availableBadges.where((d) => recentIds.contains(d.id)).toList();
               }
 
               return Column(

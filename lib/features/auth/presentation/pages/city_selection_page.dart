@@ -128,11 +128,10 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
 
     setState(() => _isOpeningMap = true);
     try {
-      // TODO: Test amacli Fatih, Beyoglu, Uskudar, Kadikoy ve Ankara icin tum denetimler devre disi.
+      // TODO: Test amacli Fatih, Beyoglu, Uskudar ve Ankara icin tum denetimler devre disi.
       if (selectedArea.id == mapAreaFatih ||
           selectedArea.id == mapAreaBeyoglu ||
           selectedArea.id == mapAreaUskudar ||
-          selectedArea.id == mapAreaKadikoy ||
           selectedArea.id == mapAreaAnkara) {
         final mapId = await _createMapForSelection(
           areaId: selectedArea.id,

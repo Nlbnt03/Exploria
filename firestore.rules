@@ -482,6 +482,12 @@ service cloud.firestore {
     }
 
 
+    match /badges/{badgeId} {
+      allow read: if isSignedIn();
+      // Geçici olarak yazmaya izin verdik ki app ilk açıldığında migration yapabilsin
+      allow write: if isSignedIn();
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

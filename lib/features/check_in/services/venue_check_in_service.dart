@@ -17,6 +17,8 @@ class VenueCheckInService {
     required String mapId,
     required double venueLat,
     required double venueLng,
+    double? userLat,
+    double? userLng,
     required Function(double distance) onTooFar,
   }) async {
     try {
@@ -32,39 +34,37 @@ class VenueCheckInService {
         return CheckInState.offline;
       }
 
-      // 2. Mevcut GPS'i al (< 4 saniye performansı için best formatı)
-      final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(
-          accuracy: LocationAccuracy.best,
-          timeLimit: Duration(seconds: 4),
-        ),
-      );
+      // 2. Mevcut GPS'i al (Eğer userLat/userLng dışarıdan verilmediyse)
+      double currentLat = userLat ?? 0.0;
+      double currentLng = userLng ?? 0.0;
+      double accuracy = 10.0;
 
-      // 3. Mock Location Check (Özellikle Android için)
-      // TEST İÇİN DEVRE DIŞI BIRAKILDI: Emülatörler isMocked = true verir.
-      /*
-      if (position.isMocked) {
-        return CheckInState.mocked;
+      if (userLat == null || userLng == null) {
+        final position = await Geolocator.getCurrentPosition(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.best,
+            timeLimit: Duration(seconds: 4),
+          ),
+        );
+        currentLat = position.latitude;
+        currentLng = position.longitude;
+        accuracy = position.accuracy;
       }
-      */
 
       // 4. Mesafe Kontrolü (Haversine Formülü)
       final double distance = Geolocator.distanceBetween(
-        position.latitude,
-        position.longitude,
+        currentLat,
+        currentLng,
         venueLat,
         venueLng,
       );
 
-      final double dynamicThreshold = baseThreshold + position.accuracy.clamp(0.0, maxAccuracyAllowance);
+      final double dynamicThreshold = baseThreshold + accuracy.clamp(0.0, maxAccuracyAllowance);
 
-      // TEST İÇİN DEVRE DIŞI BIRAKILDI: Emülatör konumu mekana uzak olabileceği için hata vermesin.
-      /*
       if (distance > dynamicThreshold) {
         onTooFar(distance);
         return CheckInState.tooFar;
       }
-      */
 
       // 5. Sunucu Taraflı Hız ve Transaction Kontrolü
       // TEST İÇİN DEVRE DIŞI BIRAKILDI: Cloud Function henüz deploy edilmedi.

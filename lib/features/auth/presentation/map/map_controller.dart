@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -17,7 +18,6 @@ class CampusMapController extends ChangeNotifier {
     this.initialUserPosition,
     this.restoredState,
     this.onPersistStateRequested,
-    this.testMode = false,
     this.areaMinZoom = 14.8,
   }) : _lastInsidePosition =
            restoredState?.lastInsidePosition ?? initialUserPosition,
@@ -34,7 +34,6 @@ class CampusMapController extends ChangeNotifier {
   final Position? initialUserPosition;
   final CampusMapState? restoredState;
   final Future<void> Function(CampusMapState state)? onPersistStateRequested;
-  final bool testMode;
   final double areaMinZoom;
 
   GeoJsonSource? _fogSource;
@@ -76,8 +75,10 @@ class CampusMapController extends ChangeNotifier {
   int get revealedCellCount => fogManager.revealedCount;
   int get totalCellCount => fogManager.totalCount;
 
+  Position? get lastInsidePosition => _lastInsidePosition;
+
   double get minZoom => areaMinZoom;
-  double get maxZoom => 19.2;
+  double get maxZoom => 17.5;
   
   Stream<Map<String, dynamic>> get onPoiTapped => _poiTappedController.stream;
 
@@ -104,21 +105,21 @@ class CampusMapController extends ChangeNotifier {
           maxPitch: 75,
         ),
       );
-
-      await _upsertFogSourceAndLayer();
     }
+    
+    await _upsertFogSourceAndLayer();
+
     await _enableLocationPuck();
+    await _configureOrnaments(map);
 
     _latestCameraState = await map.getCameraState();
     _currentZoom = _latestCameraState?.zoom ?? _currentZoom;
     _styleReady = true;
     notifyListeners();
 
-    if (!testMode) {
-      await _startLocationTracking();
-      _scheduleFogRefresh();
-      _schedulePersist(delay: const Duration(milliseconds: 500));
-    }
+    await _startLocationTracking();
+    _scheduleFogRefresh();
+    _schedulePersist(delay: const Duration(milliseconds: 500));
   }
 
   void handleMapTap(MapContentGestureContext context) {
@@ -314,6 +315,23 @@ class CampusMapController extends ChangeNotifier {
     }
 
     final map = _mapboxMap;
+
+    if (!_cameraCorrectionInFlight && map != null) {
+      if (zoom < minZoom - 0.05 || zoom > maxZoom + 0.05) {
+        _cameraCorrectionInFlight = true;
+        final corrected = zoom.clamp(minZoom, maxZoom);
+        unawaited(
+          map
+              .easeTo(
+                CameraOptions(zoom: corrected),
+                MapAnimationOptions(duration: 150, startDelay: 0),
+              )
+              .whenComplete(() => _cameraCorrectionInFlight = false),
+        );
+        return;
+      }
+    }
+
     final center = data.cameraState.center.coordinates;
     if (!_cameraCorrectionInFlight &&
         map != null &&
@@ -597,6 +615,21 @@ class CampusMapController extends ChangeNotifier {
     return message.contains('already exists') || message.contains('exists');
   }
 
+  Future<void> _configureOrnaments(MapboxMap map) async {
+    try {
+      await map.scaleBar.updateSettings(ScaleBarSettings(
+        position: OrnamentPosition.BOTTOM_LEFT,
+        marginLeft: 16,
+        marginBottom: 72,
+      ));
+      await map.compass.updateSettings(CompassSettings(
+        enabled: false,
+      ));
+    } on PlatformException {
+      // Ornament config is best-effort.
+    }
+  }
+
   Future<void> _enableLocationPuck() async {
     final map = _mapboxMap;
     if (map == null) return;
@@ -624,7 +657,7 @@ class CampusMapController extends ChangeNotifier {
       return;
     }
 
-    _revealAnimationTicker = Timer.periodic(const Duration(milliseconds: 70), (
+    _revealAnimationTicker = Timer.periodic(const Duration(milliseconds: 40), (
       _,
     ) {
       if (_isOutOfCampus || !_styleReady) {

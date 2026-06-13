@@ -29,29 +29,34 @@ class HexagonBadge extends StatelessWidget {
       );
     }
 
-    String emoji;
-    switch (badgeId) {
-      case 'first_step': emoji = '👣'; break;
-      case 'curious': emoji = '🧭'; break;
-      case 'explorer': emoji = '🗺️'; break;
-      case 'history_hunter': emoji = '🏛️'; break;
-      case 'spiritual': emoji = '🕌'; break;
-      case 'multi_city': emoji = '🌍'; break;
-      case 'fatih_conqueror': emoji = '⭐'; break;
-      case 'legend_explorer': emoji = '👑'; break;
-      case 'team_player': emoji = '🤝'; break;
-      case 'team_captain': emoji = '👥'; break;
-      case 'weekly_leader': emoji = '🏆'; break;
-      case 'co_conqueror': emoji = '💫'; break;
-      case 'flame': emoji = '🔥'; break;
-      case 'unstoppable': emoji = '⚡'; break;
-      case 'perfectionist': emoji = '🎯'; break;
-      case 'legend_streak': emoji = '💎'; break;
-      case 'night_explorer': emoji = '🌙'; break;
-      case 'early_bird': emoji = '🌅'; break;
-      case 'speed_explorer': emoji = '🚀'; break;
-      case 'winter_traveler': emoji = '❄️'; break;
-      default: emoji = '🏅';
+    String emoji = definition.iconName ?? '🏅';
+    if (emoji.isEmpty) emoji = '🏅';
+
+    // Geriye dönük uyumluluk (Eski stringler örn: 'explore', 'local_fire_department' geldiğinde)
+    // Emoji karakterlerinin length'i 1-3 arasındadır. Uzunsa eski string'dir, fallback kullan.
+    if (emoji.length > 2) {
+      switch (badgeId) {
+        case 'first_step': emoji = '👣'; break;
+        case 'curious': emoji = '🧭'; break;
+        case 'explorer': emoji = '🗺️'; break;
+        case 'history_hunter': emoji = '🏛️'; break;
+        case 'spiritual': emoji = '🕌'; break;
+        case 'multi_city': emoji = '🌍'; break;
+        case 'fatih_conqueror': emoji = '⭐'; break;
+        case 'legend_explorer': emoji = '👑'; break;
+        case 'team_player': emoji = '🤝'; break;
+        case 'team_captain': emoji = '👥'; break;
+        case 'weekly_leader': emoji = '🏆'; break;
+        case 'co_conqueror': emoji = '💫'; break;
+        case 'flame': emoji = '🔥'; break;
+        case 'unstoppable': emoji = '⚡'; break;
+        case 'perfectionist': emoji = '🎯'; break;
+        case 'legend_streak': emoji = '💎'; break;
+        case 'night_explorer': emoji = '🌙'; break;
+        case 'early_bird': emoji = '🌅'; break;
+        case 'speed_explorer': emoji = '🚀'; break;
+        case 'winter_traveler': emoji = '❄️'; break;
+      }
     }
 
     return Text(

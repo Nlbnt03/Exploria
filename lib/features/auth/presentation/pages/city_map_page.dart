@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
@@ -80,13 +81,6 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
   bool _poisInitiallyLoaded = false;
   bool _poiLayerCreated = false;
 
-  bool get _isTestArea =>
-      widget.areaId == mapAreaFatih ||
-      widget.areaId == mapAreaBeyoglu ||
-      widget.areaId == mapAreaUskudar ||
-      widget.areaId == mapAreaKadikoy ||
-      widget.areaId == mapAreaAnkara;
-
   bool get _hasPoiData =>
       widget.areaId == mapAreaGtu ||
       widget.areaId == mapAreaFatih ||
@@ -137,11 +131,12 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
       }
     }
 
-    final restoredCenter =
-        restoredState?.cameraCenter ??
-        restoredState?.lastInsidePosition ??
-        widget.initialUserPosition ??
-        _selectedArea.center;
+    // For real areas, GPS position (passed from selection screen) takes
+    // priority over saved camera state so the map always opens on the user.
+    final restoredCenter = widget.initialUserPosition ??
+            restoredState?.lastInsidePosition ??
+            _selectedArea.center;
+
     final restoredZoom =
         (restoredState?.zoom ?? 16.0).clamp(14.8, 19.2).toDouble();
 
@@ -149,17 +144,16 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
       fogManager: FogManager(
         campusBoundary: _selectedArea.boundary,
         gridSizeMeters: _selectedArea.gridSizeMeters,
+        revealRadiusMeters: _selectedArea.gridSizeMeters * 1.3,
       ),
       locationService: LocationService(
         pollingInterval: const Duration(seconds: 4),
       ),
       defaultCenter: restoredCenter,
-      initialUserPosition:
-          restoredState?.lastInsidePosition ?? widget.initialUserPosition,
+      initialUserPosition: widget.initialUserPosition ?? restoredState?.lastInsidePosition,
       restoredState: restoredState,
       onPersistStateRequested:
           (state) => _persistMapState(uid: uid, mapState: state),
-      testMode: _isTestArea,
       areaMinZoom: _selectedArea.minZoom,
     );
     mapController.addListener(_onControllerChanged);
@@ -246,10 +240,10 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                         child: Stack(
                           fit: StackFit.expand,
                           children: [
-                            Image.network(
-                              photoUrl,
+                            CachedNetworkImage(
+                              imageUrl: photoUrl,
                               fit: BoxFit.cover,
-                              errorBuilder: (_, __, ___) => Container(
+                              errorWidget: (context, url, error) => Container(
                                 color: AppColors.card,
                                 child: const Icon(
                                   Icons.image_not_supported_rounded,
@@ -257,18 +251,15 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                                   size: 40,
                                 ),
                               ),
-                              loadingBuilder: (_, child, progress) {
-                                if (progress == null) return child;
-                                return Container(
-                                  color: AppColors.card,
-                                  child: const Center(
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: AppColors.primary,
-                                    ),
+                              placeholder: (context, url) => Container(
+                                color: AppColors.card,
+                                child: const Center(
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppColors.primary,
                                   ),
-                                );
-                              },
+                                ),
+                              ),
                             ),
                             // Bottom gradient for text readability
                             Positioned(
@@ -401,6 +392,8 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                               venueLat: lat,
                               venueLng: lon,
                               currentVisited: currentVisited,
+                              userLat: _mapController?.lastInsidePosition?.lat.toDouble(),
+                              userLng: _mapController?.lastInsidePosition?.lng.toDouble(),
                               onCheckInSuccess: () async {
                                 _visitedPoiIds.add(id);
                                 _mapController?.visitedPoiIds = _visitedPoiIds.toList();

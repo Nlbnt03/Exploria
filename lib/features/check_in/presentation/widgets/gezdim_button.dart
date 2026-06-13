@@ -7,6 +7,8 @@ class GezdimButton extends ConsumerWidget {
   final String mapId;
   final double venueLat;
   final double venueLng;
+  final double? userLat;
+  final double? userLng;
   final bool currentVisited;
   final VoidCallback onCheckInSuccess;
   final VoidCallback onCancelVisit;
@@ -17,6 +19,8 @@ class GezdimButton extends ConsumerWidget {
     required this.mapId,
     required this.venueLat,
     required this.venueLng,
+    this.userLat,
+    this.userLng,
     required this.currentVisited,
     required this.onCheckInSuccess,
     required this.onCancelVisit,
@@ -76,6 +80,8 @@ class GezdimButton extends ConsumerWidget {
         mapId: mapId,
         venueLat: venueLat,
         venueLng: venueLng,
+        userLat: userLat,
+        userLng: userLng,
       );
     }
 

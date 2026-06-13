@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:cached_network_image/cached_network_image.dart';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -635,21 +636,20 @@ class _JourneyModeCard extends StatelessWidget {
               children: [
                 AspectRatio(
                   aspectRatio: 24 / 9,
-                  child: Image.network(
-                    imageUrl,
+                  child: CachedNetworkImage(
+                    imageUrl: imageUrl,
                     fit: BoxFit.cover,
-                    errorBuilder: (_, __, ___) {
-                      return Container(
-                        color: const Color(0x33111111),
-                        child: const Center(
-                          child: Icon(
-                            Icons.landscape_rounded,
-                            color: AppColors.textMuted,
-                            size: 36,
-                          ),
+                    placeholder: (context, url) => Container(color: const Color(0x33111111)),
+                    errorWidget: (context, url, error) => Container(
+                      color: const Color(0x33111111),
+                      child: const Center(
+                        child: Icon(
+                          Icons.landscape_rounded,
+                          color: AppColors.textMuted,
+                          size: 36,
                         ),
-                      );
-                    },
+                      ),
+                    ),
                   ),
                 ),
                 Positioned.fill(

@@ -339,3 +339,50 @@ export const onRoomInviteWritten = onDocumentWritten(
     }
   }
 );
+
+// ────────────────────────────────────────────────────────────
+// 4. ADMIN PANEL GENEL BİLDİRİMİ (TOPIC)
+// ────────────────────────────────────────────────────────────
+export const onAdminNotificationWritten = onDocumentWritten(
+  "adminNotifications/{notificationId}",
+  async (event) => {
+    const snap = event.data;
+    if (!snap) return;
+
+    const afterData = snap.after.data() as {
+      title?: string;
+      body?: string;
+      status?: string;
+    } | undefined;
+    const beforeData = snap.before.data() as { status?: string } | undefined;
+
+    if (!afterData) return; // deleted
+    if (afterData.status !== "pending") return;
+    if (beforeData && beforeData.status === "pending") return; // didn't change
+
+    try {
+      const message = {
+        topic: "announcements",
+        notification: {
+          title: afterData.title ?? "Yeni Duyuru",
+          body: afterData.body ?? "Exploria'dan yeni bir haber var!",
+        },
+        android: { priority: "high" as const },
+        apns: { payload: { aps: { sound: "default" } } },
+      };
+
+      await admin.messaging().send(message);
+
+      // Gönderildi olarak işaretle
+      await snap.after.ref.update({ 
+        status: "sent", 
+        sentAt: admin.firestore.FieldValue.serverTimestamp() 
+      });
+      
+      console.log(`[AdminNotification] Genel bildirim başarıyla gönderildi: ${afterData.title}`);
+    } catch (error) {
+      await snap.after.ref.update({ status: "error", error: String(error) });
+      console.error("[AdminNotification] Hata:", error);
+    }
+  }
+);

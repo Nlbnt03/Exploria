@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart' as geo;
@@ -25,12 +26,13 @@ class LocationAccessResult {
 class LocationService {
   LocationService({this.pollingInterval = const Duration(seconds: 4)});
 
+  // pollingInterval kept for API compatibility but no longer used.
   final Duration pollingInterval;
 
   final StreamController<Position> _controller =
       StreamController<Position>.broadcast();
 
-  Timer? _timer;
+  StreamSubscription<geo.Position>? _positionSub;
   bool _running = false;
 
   Stream<Position> get positionStream => _controller.stream;
@@ -87,34 +89,32 @@ class LocationService {
     if (!hasPermission) return false;
 
     _running = true;
-    await _pollCurrentLocation();
-    _timer = Timer.periodic(pollingInterval, (_) => _pollCurrentLocation());
+    _positionSub = geo.Geolocator.getPositionStream(
+      locationSettings: const geo.LocationSettings(
+        accuracy: geo.LocationAccuracy.high,
+        distanceFilter: 4,
+      ),
+    ).listen(
+      (pos) {
+        if (_running) {
+          _controller.add(Position(pos.longitude, pos.latitude));
+        }
+      },
+      onError: (_) {},
+      cancelOnError: false,
+    );
     return true;
   }
 
   Future<void> stop() async {
     _running = false;
-    _timer?.cancel();
-    _timer = null;
+    await _positionSub?.cancel();
+    _positionSub = null;
   }
 
   Future<void> dispose() async {
     await stop();
     await _controller.close();
-  }
-
-  Future<void> _pollCurrentLocation() async {
-    if (!_running) return;
-    try {
-      final current = await geo.Geolocator.getCurrentPosition(
-        locationSettings: const geo.LocationSettings(
-          accuracy: geo.LocationAccuracy.high,
-        ),
-      );
-      _controller.add(Position(current.longitude, current.latitude));
-    } catch (_) {
-      // Ignore transient GPS failures, the next tick will retry.
-    }
   }
 
   Future<bool> _ensurePermission() async {

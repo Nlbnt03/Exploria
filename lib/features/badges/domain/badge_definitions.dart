@@ -9,6 +9,11 @@ class BadgeDefinition {
     required this.category,
     required this.isHidden,
     this.xpReward,
+    this.isActive = true,
+    this.conditionField,
+    this.conditionOperator,
+    this.conditionValue,
+    this.iconName,
   });
 
   final String id;
@@ -18,72 +23,142 @@ class BadgeDefinition {
   final BadgeCategory category;
   final bool isHidden;
   final int? xpReward;
+  final bool isActive;
+  final String? conditionField;
+  final String? conditionOperator;
+  final dynamic conditionValue;
+  final String? iconName;
+
+  factory BadgeDefinition.fromJson(Map<String, dynamic> json, String id) {
+    return BadgeDefinition(
+      id: id,
+      name: json['name'] as String? ?? '',
+      description: json['description'] as String? ?? '',
+      tier: BadgeTier.values.firstWhere((e) => e.name == json['tier'], orElse: () => BadgeTier.bronze),
+      category: BadgeCategory.values.firstWhere((e) => e.name == json['category'], orElse: () => BadgeCategory.exploration),
+      isHidden: json['isHidden'] as bool? ?? false,
+      xpReward: json['xpReward'] as int?,
+      isActive: json['isActive'] as bool? ?? true,
+      conditionField: json['conditionField'] as String?,
+      conditionOperator: json['conditionOperator'] as String?,
+      conditionValue: json['conditionValue'],
+      iconName: json['iconName'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'id': id,
+      'name': name,
+      'description': description,
+      'tier': tier.name,
+      'category': category.name,
+      'isHidden': isHidden,
+      'xpReward': xpReward,
+      'isActive': isActive,
+      if (conditionField != null) 'conditionField': conditionField,
+      if (conditionOperator != null) 'conditionOperator': conditionOperator,
+      if (conditionValue != null) 'conditionValue': conditionValue,
+      if (iconName != null) 'iconName': iconName,
+    };
+  }
 
   bool condition(BadgeCheckContext context) {
-    switch (id) {
-      // Exploration
-      case 'first_step':
-        return context.totalVisited >= 1;
-      case 'curious':
-        return context.totalVisited >= 5;
-      case 'explorer':
-        return context.totalVisited >= 25;
-      case 'history_hunter':
-        return context.historicBuildingVisited >= 10;
-      case 'spiritual':
-        return context.mosqueVisited >= 10;
-      case 'multi_city':
-        return context.distinctCitiesVisited >= 3;
-      case 'fatih_conqueror':
-        return context.lastVisitedMapId == 'fatih' &&
-            (context.lastVisitedMapCompletion ?? 0) >= 1.0;
-      case 'legend_explorer':
-        return context.totalVisited >= 100;
+    if (conditionField == null || conditionOperator == null || conditionValue == null) return false;
 
-      // Social
-      case 'team_player':
-        return context.coopSessionsCompleted >= 1;
-      case 'team_captain':
-        return context.distinctCoopPartners >= 3;
-      case 'weekly_leader':
-        return context.weeklyLeaderboardRank == 1;
-      case 'co_conqueror':
-        return context.coopMapJustCompleted;
-
-      // Streak
-      case 'flame':
-        return context.currentStreak >= 3;
-      case 'unstoppable':
-        return context.currentStreak >= 7;
-      case 'perfectionist':
-        return context.allWeeklyQuestsJustCompleted;
-      case 'legend_streak':
-        return context.currentStreak >= 30;
-
-      // Secret
-      case 'night_explorer':
+    dynamic contextValue;
+    switch (conditionField) {
+      case 'totalVisited':
+        contextValue = context.totalVisited;
+        break;
+      case 'historicBuildingVisited':
+        contextValue = context.historicBuildingVisited;
+        break;
+      case 'mosqueVisited':
+        contextValue = context.mosqueVisited;
+        break;
+      case 'distinctCitiesVisited':
+        contextValue = context.distinctCitiesVisited;
+        break;
+      case 'coopSessionsCompleted':
+        contextValue = context.coopSessionsCompleted;
+        break;
+      case 'distinctCoopPartners':
+        contextValue = context.distinctCoopPartners;
+        break;
+      case 'coopMapJustCompleted':
+        contextValue = context.coopMapJustCompleted;
+        break;
+      case 'currentStreak':
+        contextValue = context.currentStreak;
+        break;
+      case 'allWeeklyQuestsJustCompleted':
+        contextValue = context.allWeeklyQuestsJustCompleted;
+        break;
+      case 'weeklyLeaderboardRank':
+        contextValue = context.weeklyLeaderboardRank ?? 999999;
+        break;
+      // Özel Gizli/Karmaşık Durumlar (Pseudo-fields)
+      case 'fatihAreaCompleted':
+         contextValue = (context.lastVisitedMapId == 'fatih' && (context.lastVisitedMapCompletion ?? 0) >= 1.0);
+         break;
+      case 'isNightTime':
         final hour = context.visitTime.hour;
-        return hour >= 23 || hour < 5;
-      case 'early_bird':
+        contextValue = hour >= 23 || hour < 5;
+        break;
+      case 'isEarlyBird':
         final hour = context.visitTime.hour;
-        return hour >= 6 && hour < 7;
-      case 'speed_explorer':
-        // 5 places in 60 minutes
-        if (context.recentVisitTimes.length < 5) return false;
+        contextValue = hour >= 6 && hour < 7;
+        break;
+      case 'isSpeedExplorer':
+        if (context.recentVisitTimes.length < 5) {
+            contextValue = false;
+            break;
+        }
         final times = context.recentVisitTimes..sort();
-        // check if any window of 5 places falls within 60 minutes
+        bool achieved = false;
         for (var i = 0; i <= times.length - 5; i++) {
           final diff = times[i + 4].difference(times[i]);
-          if (diff.inMinutes <= 60) return true;
+          if (diff.inMinutes <= 60) {
+              achieved = true; break;
+          }
         }
-        return false;
-      case 'winter_traveler':
+        contextValue = achieved;
+        break;
+      case 'isWinterTraveler':
         final month = context.visitTime.month;
-        return month == 12 || month == 1 || month == 2;
-
+        contextValue = month == 12 || month == 1 || month == 2;
+        break;
       default:
         return false;
     }
+
+    if (contextValue is num && conditionValue is num) {
+      final cv = contextValue.toDouble();
+      final target = conditionValue.toDouble();
+      switch (conditionOperator) {
+        case '>': return cv > target;
+        case '>=': return cv >= target;
+        case '<': return cv < target;
+        case '<=': return cv <= target;
+        case '==': return cv == target;
+        case '!=': return cv != target;
+        default: return false;
+      }
+    } else if (contextValue is bool && conditionValue is bool) {
+      switch (conditionOperator) {
+        case '==': return contextValue == conditionValue;
+        case '!=': return contextValue != conditionValue;
+        default: return false;
+      }
+    } else if (contextValue is String && conditionValue is String) {
+        switch (conditionOperator) {
+            case '==': return contextValue == conditionValue;
+            case '!=': return contextValue != conditionValue;
+            default: return false;
+        }
+    }
+    return false;
   }
 }
 
@@ -121,192 +196,4 @@ class BadgeCheckContext {
   final List<DateTime> recentVisitTimes;
 }
 
-const badgeDefinitions = <BadgeDefinition>[
-  // KEŞİF
-  BadgeDefinition(
-    id: 'first_step',
-    name: 'İlk Adım',
-    description: '1 mekan ziyaret ettin.',
-    tier: BadgeTier.bronze,
-    category: BadgeCategory.exploration,
-    isHidden: false,
-    xpReward: 50,
-  ),
-  BadgeDefinition(
-    id: 'curious',
-    name: 'Meraklı',
-    description: '5 mekan ziyaret ettin.',
-    tier: BadgeTier.bronze,
-    category: BadgeCategory.exploration,
-    isHidden: false,
-    xpReward: 50,
-  ),
-  BadgeDefinition(
-    id: 'explorer',
-    name: 'Gezgin',
-    description: '25 mekan ziyaret ettin.',
-    tier: BadgeTier.silver,
-    category: BadgeCategory.exploration,
-    isHidden: false,
-    xpReward: 150,
-  ),
-  BadgeDefinition(
-    id: 'history_hunter',
-    name: 'Tarih Avcısı',
-    description: '10 tarihi bina ziyaret ettin.',
-    tier: BadgeTier.silver,
-    category: BadgeCategory.exploration,
-    isHidden: false,
-    xpReward: 150,
-  ),
-  BadgeDefinition(
-    id: 'spiritual',
-    name: 'Manevi Yolcu',
-    description: '10 cami/türbe ziyaret ettin.',
-    tier: BadgeTier.silver,
-    category: BadgeCategory.exploration,
-    isHidden: false,
-    xpReward: 150,
-  ),
-  BadgeDefinition(
-    id: 'multi_city',
-    name: 'Çok Şehirli',
-    description: 'En az 3 farklı şehirde mekan ziyaret ettin.',
-    tier: BadgeTier.silver,
-    category: BadgeCategory.exploration,
-    isHidden: false,
-    xpReward: 150,
-  ),
-  BadgeDefinition(
-    id: 'fatih_conqueror',
-    name: 'Fatih\'in Fatihi',
-    description: 'Fatih bölgesindeki tüm mekanları %100 tamamla.',
-    tier: BadgeTier.gold,
-    category: BadgeCategory.exploration,
-    isHidden: false,
-    xpReward: 500,
-  ),
-  BadgeDefinition(
-    id: 'legend_explorer',
-    name: 'Efsane Kaşif',
-    description: '100 mekan ziyaret ettin.',
-    tier: BadgeTier.gold,
-    category: BadgeCategory.exploration,
-    isHidden: false,
-    xpReward: 500,
-  ),
-
-  // SOSYAL
-  BadgeDefinition(
-    id: 'team_player',
-    name: 'Takım Oyuncusu',
-    description: 'Co-op modunda bir seans tamamladın.',
-    tier: BadgeTier.bronze,
-    category: BadgeCategory.social,
-    isHidden: false,
-    xpReward: 50,
-  ),
-  BadgeDefinition(
-    id: 'team_captain',
-    name: 'Ekip Kaptanı',
-    description: 'Farklı 3 kişiyle co-op yaptın.',
-    tier: BadgeTier.silver,
-    category: BadgeCategory.social,
-    isHidden: false,
-    xpReward: 150,
-  ),
-  BadgeDefinition(
-    id: 'weekly_leader',
-    name: 'Lider',
-    description: 'Haftalık liderlik tablosunda 1. oldun.',
-    tier: BadgeTier.gold,
-    category: BadgeCategory.social,
-    isHidden: false,
-    xpReward: 500,
-  ),
-  BadgeDefinition(
-    id: 'co_conqueror',
-    name: 'Birlikte Fethettik',
-    description: 'Biriyle birlikte bir bölgeyi tamamen bitirdin.',
-    tier: BadgeTier.gold,
-    category: BadgeCategory.social,
-    isHidden: false,
-    xpReward: 500,
-  ),
-
-  // STREAK
-  BadgeDefinition(
-    id: 'flame',
-    name: 'Alev',
-    description: '3 gün üst üste gez!',
-    tier: BadgeTier.bronze,
-    category: BadgeCategory.streak,
-    isHidden: false,
-    xpReward: 50,
-  ),
-  BadgeDefinition(
-    id: 'unstoppable',
-    name: 'Vazgeçmez',
-    description: '7 gün üst üste gezdin.',
-    tier: BadgeTier.silver,
-    category: BadgeCategory.streak,
-    isHidden: false,
-    xpReward: 150,
-  ),
-  BadgeDefinition(
-    id: 'perfectionist',
-    name: 'Mükemmeliyetçi',
-    description: 'Tüm haftalık görevleri tamamla.',
-    tier: BadgeTier.silver,
-    category: BadgeCategory.streak,
-    isHidden: false,
-    xpReward: 150,
-  ),
-  BadgeDefinition(
-    id: 'legend_streak',
-    name: 'Efsane Streak',
-    description: '30 gün üst üste hiç durmadan gez!',
-    tier: BadgeTier.gold,
-    category: BadgeCategory.streak,
-    isHidden: false,
-    xpReward: 500,
-  ),
-
-  // GİZLİ
-  BadgeDefinition(
-    id: 'night_explorer',
-    name: 'Gece Kaşifi',
-    description: 'Gece 23:00 - 05:00 saatleri arasında mekan ziyaret ettin!',
-    tier: BadgeTier.secret,
-    category: BadgeCategory.secret,
-    isHidden: true,
-    xpReward: 300,
-  ),
-  BadgeDefinition(
-    id: 'early_bird',
-    name: 'Erken Kuş',
-    description: 'Sabah 06:00 - 07:00 arasında uyumadın gezdin!',
-    tier: BadgeTier.secret,
-    category: BadgeCategory.secret,
-    isHidden: true,
-    xpReward: 300,
-  ),
-  BadgeDefinition(
-    id: 'speed_explorer',
-    name: 'Hız Kaşifi',
-    description: '60 dakika içerisinde 5 mekana birden gittin.',
-    tier: BadgeTier.secret,
-    category: BadgeCategory.secret,
-    isHidden: true,
-    xpReward: 300,
-  ),
-  BadgeDefinition(
-    id: 'winter_traveler',
-    name: 'Kış Gezgini',
-    description: 'Aralık, Ocak veya Şubat aylarında zorlu şartlarda gezdin.',
-    tier: BadgeTier.secret,
-    category: BadgeCategory.secret,
-    isHidden: true,
-    xpReward: 300,
-  ),
-];
+// ARTIK BU LİSTE SADECE MİGRASYON (FIREBASE'E İLK YÜKLEME) İÇİN KULLANILACAKTIR. 

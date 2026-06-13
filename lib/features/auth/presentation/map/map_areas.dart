@@ -187,7 +187,7 @@ final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
     styleUri: defaultMapStyleUri,
     center: fatihCenter,
     boundary: fatihBoundary,
-    gridSizeMeters: 130,
+    gridSizeMeters: 65,
     minZoom: 12.5,
   ),
   MapAreaConfig(
@@ -197,7 +197,7 @@ final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
     styleUri: defaultMapStyleUri,
     center: beyogluCenter,
     boundary: beyogluBoundary,
-    gridSizeMeters: 130,
+    gridSizeMeters: 65,
     minZoom: 12.5,
   ),
   MapAreaConfig(
@@ -207,7 +207,7 @@ final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
     styleUri: defaultMapStyleUri,
     center: uskudarCenter,
     boundary: uskudarBoundary,
-    gridSizeMeters: 130,
+    gridSizeMeters: 65,
     minZoom: 12.5,
   ),
   MapAreaConfig(
@@ -217,8 +217,8 @@ final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
     styleUri: defaultMapStyleUri,
     center: kadikoyCenter,
     boundary: kadikoyBoundary,
-    gridSizeMeters: 130,
-    minZoom: 12.5,
+    gridSizeMeters: 65,
+    minZoom: 14.5,
   ),
   MapAreaConfig(
     id: mapAreaAnkara,
@@ -227,7 +227,7 @@ final List<MapAreaConfig> selectableMapAreas = <MapAreaConfig>[
     styleUri: defaultMapStyleUri,
     center: ankaraCenter,
     boundary: ankaraBoundary,
-    gridSizeMeters: 130,
+    gridSizeMeters: 65,
     minZoom: 12.0,
   ),
 ];
