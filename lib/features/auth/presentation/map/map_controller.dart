@@ -19,6 +19,7 @@ class CampusMapController extends ChangeNotifier {
     this.restoredState,
     this.onPersistStateRequested,
     this.areaMinZoom = 14.8,
+    this.testMode = false,
   }) : _lastInsidePosition =
            restoredState?.lastInsidePosition ?? initialUserPosition,
        _currentZoom = restoredState?.zoom ?? 16.0,
@@ -35,6 +36,7 @@ class CampusMapController extends ChangeNotifier {
   final CampusMapState? restoredState;
   final Future<void> Function(CampusMapState state)? onPersistStateRequested;
   final double areaMinZoom;
+  final bool testMode;
 
   GeoJsonSource? _fogSource;
   GeoJsonSource? _cloudSource;
