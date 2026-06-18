@@ -11,7 +11,7 @@ import '../core/services/notification_service.dart';
 import 'app.dart';
 
 const _defaultMapboxAccessToken =
-    'pk.eyJ1IjoieW5hbGJhbnQiLCJhIjoiY21tNnZ0ZWQ3MGszajJwczh0azl1MjU1ciJ9.nZDRb_apQzVD9zewlDGxDQ';
+    'pk.eyJ1IjoieW5hbGJhbnQiLCJhIjoiY21xanl2MzJxMGJiZDN4cXh5bmFwMmpxMiJ9.TWXe1GbepbTJ9XJTtcTsJg';
 Future<void>? _firebaseInitialization;
 const int _mapboxCacheRefreshVersion = 2;
 const String _mapboxCacheRefreshKey = 'mapbox_cache_refresh_version';
@@ -30,7 +30,7 @@ Future<void> bootstrap() async {
   );
   runApp(
     const ProviderScope(
-      child: ExploriaApp(),
+      child: KesfedrioApp(),
     ),
   );
 }

@@ -19,9 +19,9 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 // ─── Yerel bildirim kanalı (Android) ─────────────────────────────────────────
 const _androidChannel = AndroidNotificationChannel(
-  'exploria_high_importance',
-  'Exploria Bildirimleri',
-  description: 'Exploria uygulamasından gelen önemli bildirimler.',
+  'kesfedio_high_importance',
+  'Keşfedio Bildirimleri',
+  description: 'Keşfedio uygulamasından gelen önemli bildirimler.',
   importance: Importance.high,
 );
 

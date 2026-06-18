@@ -25,12 +25,14 @@ class _OnboardingPageState extends State<OnboardingPage> {
     {
       'icon': Icons.emoji_events_rounded,
       'title': 'Görevleri Tamamla ve Kazan',
-      'description': 'Haftalık görevleri bitir, XP kazan, seviye atla ve liderlik tablosunda yüksel.',
+      'description':
+          'Haftalık görevleri bitir, XP kazan, seviye atla ve liderlik tablosunda yüksel.',
     },
     {
       'icon': Icons.people_alt_rounded,
       'title': 'Arkadaşlarınla Birlikte Gez',
-      'description': 'Odanı kur, arkadaşlarını davet et ve hep beraber aynı haritada sisleri dağıtmaya başlayın!',
+      'description':
+          'Odanı kur, arkadaşlarını davet et ve hep beraber aynı haritada sisleri dağıtmaya başlayın!',
     },
   ];
 
@@ -46,7 +48,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('has_seen_onboarding_$uid', true);
     }
-    
+
     if (!mounted) return;
     Navigator.pushReplacementNamed(context, AppRouter.home);
   }
@@ -97,7 +99,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
                   ),
                 ),
               ),
-              
+
               // Page View
               Expanded(
                 child: PageView.builder(
@@ -130,7 +132,9 @@ class _OnboardingPageState extends State<OnboardingPage> {
                               ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: AppColors.primary.withValues(alpha: 0.3),
+                                  color: AppColors.primary.withValues(
+                                    alpha: 0.3,
+                                  ),
                                   blurRadius: 30,
                                   spreadRadius: 5,
                                   offset: const Offset(0, 10),
@@ -170,7 +174,7 @@ class _OnboardingPageState extends State<OnboardingPage> {
                   },
                 ),
               ),
-              
+
               // Bottom Controls
               Padding(
                 padding: const EdgeInsets.all(32.0),
@@ -187,15 +191,16 @@ class _OnboardingPageState extends State<OnboardingPage> {
                           width: _currentPage == index ? 24 : 8,
                           height: 8,
                           decoration: BoxDecoration(
-                            color: _currentPage == index 
-                                ? AppColors.primary 
-                                : AppColors.inputBorder,
+                            color:
+                                _currentPage == index
+                                    ? AppColors.primary
+                                    : AppColors.inputBorder,
                             borderRadius: BorderRadius.circular(4),
                           ),
                         ),
                       ),
                     ),
-                    
+
                     // Next / Start Button
                     AnimatedContainer(
                       duration: const Duration(milliseconds: 300),
@@ -212,15 +217,19 @@ class _OnboardingPageState extends State<OnboardingPage> {
                           ),
                           elevation: 4,
                         ),
-                        child: _currentPage == _pages.length - 1
-                            ? const Text(
-                                'Başla',
-                                style: TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
+                        child:
+                            _currentPage == _pages.length - 1
+                                ? const Text(
+                                  'Başla',
+                                  style: TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                )
+                                : const Icon(
+                                  Icons.arrow_forward_ios_rounded,
+                                  color: Colors.white,
                                 ),
-                              )
-                            : const Icon(Icons.arrow_forward_ios_rounded,color : Colors.white),
                       ),
                     ),
                   ],

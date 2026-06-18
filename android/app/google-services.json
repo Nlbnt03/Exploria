@@ -7,9 +7,9 @@
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:770040957958:android:a73c248840314fbc9e0787",
+        "mobilesdk_app_id": "1:770040957958:android:f31a10bc8ed0b7639e0787",
         "android_client_info": {
-          "package_name": "com.nalbantsoft.exploria"
+          "package_name": "com.nalbantsoft.kesfedio"
         }
       },
       "oauth_client": [],

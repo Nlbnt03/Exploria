@@ -87,14 +87,6 @@ class AuthScaffold extends StatelessWidget {
                               height: 112,
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(24),
-                                gradient: const LinearGradient(
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                  colors: [
-                                    AppColors.primary,
-                                    AppColors.secondary,
-                                  ],
-                                ),
                                 boxShadow: const [
                                   BoxShadow(
                                     color: Color(0x88222040),
@@ -103,10 +95,12 @@ class AuthScaffold extends StatelessWidget {
                                   ),
                                 ],
                               ),
-                              child: const Icon(
-                                Icons.explore_rounded,
-                                color: Colors.white,
-                                size: 48,
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(24),
+                                child: Image.asset(
+                                  'assets/logo.png',
+                                  fit: BoxFit.cover,
+                                ),
                               ),
                             ),
                           ),

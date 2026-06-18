@@ -310,16 +310,20 @@ class _HomeTab extends StatelessWidget {
                 height: 54,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(16),
-                  gradient: const LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [AppColors.primary, AppColors.secondary],
-                  ),
+                  boxShadow: const [
+                    BoxShadow(
+                      color: Color(0x55222040),
+                      blurRadius: 12,
+                      offset: Offset(0, 4),
+                    ),
+                  ],
                 ),
-                child: const Icon(
-                  Icons.explore_rounded,
-                  color: Colors.white,
-                  size: 26,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: Image.asset(
+                    'assets/logo.png',
+                    fit: BoxFit.cover,
+                  ),
                 ),
               ),
               const Spacer(),

@@ -101,7 +101,7 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     return AuthScaffold(
-      title: "Exploria'ya Hoş Geldin",
+      title: "Keşfedio'ya Hoş Geldin",
       subtitle: 'Yeni maceran seni bekliyor',
       titleFontSize: 33,
       subtitleFontSize: 15,

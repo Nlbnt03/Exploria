@@ -51,7 +51,7 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions android = FirebaseOptions(
     apiKey: 'AIzaSyDreXQy4iSfoxCD7tR3YglTRW42to9BAZw',
-    appId: '1:770040957958:android:a73c248840314fbc9e0787',
+    appId: '1:770040957958:android:f31a10bc8ed0b7639e0787',
     messagingSenderId: '770040957958',
     projectId: 'exploria-f774c',
     storageBucket: 'exploria-f774c.firebasestorage.app',
@@ -59,10 +59,10 @@ class DefaultFirebaseOptions {
 
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyBlR9zWce9dK8ji9h_eqqEsr-7SFATJXNw',
-    appId: '1:770040957958:ios:bf7b2dee0cc564a89e0787',
+    appId: '1:770040957958:ios:27afcc7c938c172a9e0787',
     messagingSenderId: '770040957958',
     projectId: 'exploria-f774c',
     storageBucket: 'exploria-f774c.firebasestorage.app',
-    iosBundleId: 'com.nalbantsoft.exploria',
+    iosBundleId: 'com.nalbantsoft.kesfedio',
   );
 }

@@ -111,14 +111,6 @@ class _StartupSplashPageState extends State<StartupSplashPage>
                           height: 86,
                           decoration: BoxDecoration(
                             borderRadius: BorderRadius.circular(24),
-                            gradient: const LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: <Color>[
-                                AppColors.primary,
-                                AppColors.secondary,
-                              ],
-                            ),
                             boxShadow: <BoxShadow>[
                               BoxShadow(
                                 color: AppColors.primary.withValues(
@@ -129,16 +121,18 @@ class _StartupSplashPageState extends State<StartupSplashPage>
                               ),
                             ],
                           ),
-                          child: const Icon(
-                            Icons.explore_rounded,
-                            color: Colors.white,
-                            size: 42,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(24),
+                            child: Image.asset(
+                              'assets/logo.png',
+                              fit: BoxFit.cover,
+                            ),
                           ),
                         ),
                       ),
                       const SizedBox(height: 18),
                       const Text(
-                        'EXPLORIA',
+                        'KEŞFEDİO',
                         style: TextStyle(
                           color: AppColors.textMain,
                           fontSize: 28,
@@ -148,7 +142,7 @@ class _StartupSplashPageState extends State<StartupSplashPage>
                       ),
                       const SizedBox(height: 8),
                       const Text(
-                        'Exploria Hazırlanıyor...',
+                        'Keşfedio Hazırlanıyor...',
                         style: TextStyle(
                           color: AppColors.textMuted,
                           fontSize: 14,

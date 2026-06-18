@@ -60,17 +60,19 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
   Future<void> _loadUser() async {
     setState(() => _isLoading = true);
     try {
-      final doc =
-          await FirebaseFirestore.instance
-              .collection('users')
-              .doc(widget.uid)
-              .get();
+      await Future.wait<void>([
+        FirebaseFirestore.instance
+            .collection('users')
+            .doc(widget.uid)
+            .get()
+            .then((doc) {
+          if (!mounted) return;
+          _userData = doc.data() ?? <String, dynamic>{};
+        }),
+        if (BadgeAwardService.cachedBadges == null) BadgeAwardService.initBadges(),
+      ]);
       if (!mounted) return;
-      final data = doc.data() ?? <String, dynamic>{};
-      setState(() {
-        _userData = data;
-        _isLoading = false;
-      });
+      setState(() => _isLoading = false);
     } catch (_) {
       if (!mounted) return;
       setState(() => _isLoading = false);
@@ -83,7 +85,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
     if (_userData == null) return '';
     final name = (_userData!['name'] as String?)?.trim() ?? '';
     final surname = (_userData!['surname'] as String?)?.trim() ?? '';
-    return '$name $surname'.trim();
+    return '$name $surname'.trim().split(' ').map((w) => w.isEmpty ? '' : w[0].toUpperCase() + w.substring(1).toLowerCase()).join(' ');
   }
 
   String get _username {
@@ -690,7 +692,14 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
 
               // Filter featured badges that are actually earned
               final availableBadges = BadgeAwardService.cachedBadges ?? [];
-              if (availableBadges.isEmpty) return const SizedBox();
+              if (availableBadges.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Center(
+                    child: CircularProgressIndicator(color: AppColors.primary),
+                  ),
+                );
+              }
 
               var displayDefs = featuredBadgeIds
                   .where((id) => earnedIds.contains(id))

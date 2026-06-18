@@ -128,30 +128,6 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
 
     setState(() => _isOpeningMap = true);
     try {
-      // TODO: Test amacli Fatih, Beyoglu, Uskudar ve Ankara icin tum denetimler devre disi.
-      if (selectedArea.id == mapAreaFatih ||
-          selectedArea.id == mapAreaBeyoglu ||
-          selectedArea.id == mapAreaUskudar ||
-          selectedArea.id == mapAreaAnkara) {
-        final mapId = await _createMapForSelection(
-          areaId: selectedArea.id,
-          mapName: mapName,
-        );
-        if (mapId == null || !mounted) return;
-
-        await Navigator.pushNamed(
-          context,
-          AppRouter.cityMap,
-          arguments: CityMapPageArgs(
-            areaId: selectedArea.id,
-            mapId: mapId,
-            mapName: mapName,
-            initialUserPosition: selectedArea.center,
-          ),
-        );
-        return;
-      }
-
       final accessResult = await LocationService.requestSinglePosition();
       if (!mounted) return;
 
