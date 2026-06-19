@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Hesap Silme — Keşfedio</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0c1a;
+      color: #e0d8f0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+    .card {
+      background: #1a1630;
+      border: 1px solid #2e2750;
+      border-radius: 20px;
+      max-width: 600px;
+      width: 100%;
+      padding: 40px 36px;
+    }
+    .logo {
+      font-size: 28px;
+      font-weight: 800;
+      color: #a78bfa;
+      margin-bottom: 6px;
+    }
+    .subtitle {
+      color: #7c6faa;
+      font-size: 14px;
+      margin-bottom: 32px;
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: #f0eaff;
+      margin-bottom: 12px;
+    }
+    p {
+      color: #b0a0d0;
+      font-size: 15px;
+      line-height: 1.7;
+      margin-bottom: 24px;
+    }
+    .steps {
+      background: #120f22;
+      border-radius: 12px;
+      padding: 20px 24px;
+      margin-bottom: 28px;
+    }
+    .steps h2 {
+      font-size: 15px;
+      font-weight: 700;
+      color: #a78bfa;
+      margin-bottom: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .step {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      margin-bottom: 12px;
+    }
+    .step:last-child { margin-bottom: 0; }
+    .step-num {
+      background: #a78bfa;
+      color: #0f0c1a;
+      border-radius: 50%;
+      width: 24px;
+      height: 24px;
+      min-width: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .step-text {
+      color: #c8b8e8;
+      font-size: 14px;
+      line-height: 1.6;
+      padding-top: 2px;
+    }
+    .data-section h2 {
+      font-size: 15px;
+      font-weight: 700;
+      color: #a78bfa;
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .data-item {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: #b0a0d0;
+      line-height: 1.5;
+    }
+    .data-item::before {
+      content: "•";
+      color: #a78bfa;
+      flex-shrink: 0;
+    }
+    .contact {
+      margin-top: 32px;
+      padding-top: 24px;
+      border-top: 1px solid #2e2750;
+      font-size: 14px;
+      color: #7c6faa;
+    }
+    .contact a {
+      color: #a78bfa;
+      text-decoration: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">Keşfedio</div>
+    <div class="subtitle">Şehir Keşif Oyunu</div>
+
+    <h1>Hesap Silme Talebi</h1>
+    <p>
+      Keşfedio hesabınızı ve ilişkili tüm verilerinizi kalıcı olarak silmek için
+      aşağıdaki adımları takip edebilirsiniz.
+    </p>
+
+    <div class="steps">
+      <h2>Uygulama Üzerinden Silme</h2>
+      <div class="step">
+        <div class="step-num">1</div>
+        <div class="step-text">Uygulamayı açın ve hesabınıza giriş yapın.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">2</div>
+        <div class="step-text">Alt menüden <strong>Profil</strong> sekmesine gidin.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">3</div>
+        <div class="step-text">Sağ üstteki <strong>Profili Düzenle</strong> butonuna dokunun.</div>
+      </div>
+      <div class="step">
+        <div class="step-num">4</div>
+        <div class="step-text">Sayfanın altındaki <strong>Hesabı Sil</strong> seçeneğine tıklayın ve onaylayın.</div>
+      </div>
+    </div>
+
+    <div class="data-section">
+      <h2>Silinen Veriler</h2>
+      <div class="data-item">Kullanıcı adı, ad, soyad ve e-posta adresi</div>
+      <div class="data-item">Keşif haritaları ve ziyaret edilen konumlar</div>
+      <div class="data-item">XP puanı, rozetler ve görev geçmişi</div>
+      <div class="data-item">Arkadaşlık ilişkileri ve sosyal veriler</div>
+      <div class="data-item">Bildirim token'ları ve oturum bilgileri</div>
+    </div>
+
+    <p style="margin-top: 20px; margin-bottom: 0; font-size: 14px; color: #7c6faa;">
+      Tüm veriler hesap silindiği anda kalıcı olarak kaldırılır. Geri alınamaz.
+    </p>
+
+    <div class="contact">
+      Uygulama üzerinden silme işlemi yapamıyorsanız bizimle iletişime geçin:<br/>
+      <a href="mailto:nalbantsoft@gmail.com">nalbantsoft@gmail.com</a>
+    </div>
+  </div>
+</body>
+</html>
