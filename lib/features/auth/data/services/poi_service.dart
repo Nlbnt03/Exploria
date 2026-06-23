@@ -7,7 +7,7 @@ class PoiService {
   final FirebaseFirestore _firestore;
 
   PoiService({FirebaseFirestore? firestore})
-      : _firestore = firestore ?? FirebaseFirestore.instance;
+    : _firestore = firestore ?? FirebaseFirestore.instance;
 
   /// Bir kerelik kullanilacak, lokal JSON listesini Firestore'a tasiyan arac.
   Future<void> migrateLocalPoisToFirestore() async {
@@ -30,21 +30,27 @@ class PoiService {
       try {
         final rawJson = await rootBundle.loadString(assetPath);
         final decoded = jsonDecode(rawJson) as Map<String, dynamic>;
-        
+
         // Fatih vb jsonlarda genelde 'mekanlar' keyi olur. Bazen 'places'.
-        final List<dynamic> rawList = decoded['mekanlar'] ?? decoded['places'] ?? [];
+        final List<dynamic> rawList =
+            decoded['mekanlar'] ?? decoded['places'] ?? [];
 
         for (final rawPoi in rawList) {
           final poiMap = rawPoi as Map<String, dynamic>;
           final originalIdStr = poiMap['id'].toString();
           final docId = '${cityId}_$originalIdStr';
 
-          final docRef = _firestore.collection('maps').doc(cityId).collection('pois').doc(docId);
-          
+          final docRef = _firestore
+              .collection('maps')
+              .doc(cityId)
+              .collection('pois')
+              .doc(docId);
+
           // Mevcut POI'ye cityId ekle ve id'nin string olmasini garanti et
-          final dataToSave = Map<String, dynamic>.from(poiMap)
-            ..['cityId'] = cityId
-            ..['id'] = originalIdStr;
+          final dataToSave =
+              Map<String, dynamic>.from(poiMap)
+                ..['cityId'] = cityId
+                ..['id'] = originalIdStr;
 
           batch.set(docRef, dataToSave, SetOptions(merge: true));
           totalPoisMigrated++;
@@ -65,14 +71,38 @@ class PoiService {
   /// Belirli bir sehir (area) icin POI verilerini Firestore'dan ceker.
   Future<List<Map<String, dynamic>>> getPoisForCity(String cityId) async {
     try {
-      final snapshot = await _firestore
-          .collection('maps')
-          .doc(cityId)
-          .collection('pois')
-          // Future get query (offline cache öncelikli veya sunucu destekli)
-          .get(const GetOptions(source: Source.serverAndCache));
+      final pois = _firestore.collection('maps').doc(cityId).collection('pois');
+      QuerySnapshot<Map<String, dynamic>> snapshot;
+      try {
+        snapshot = await pois
+            .where('isActive', isEqualTo: true)
+            .orderBy('order')
+            .get(const GetOptions(source: Source.serverAndCache));
+      } on FirebaseException catch (error) {
+        if (error.code != 'failed-precondition') rethrow;
+        snapshot = await pois
+            .where('isActive', isEqualTo: true)
+            .get(const GetOptions(source: Source.serverAndCache));
+      }
 
-      return snapshot.docs.map((doc) => doc.data()).toList();
+      // Fallback: if isActive filter returns nothing (field not set on documents),
+      // fetch all POIs so maps migrated without isActive still render correctly.
+      if (snapshot.docs.isEmpty) {
+        snapshot = await pois.get(
+          const GetOptions(source: Source.serverAndCache),
+        );
+      }
+
+      final results =
+          snapshot.docs
+              .map((doc) => <String, dynamic>{'id': doc.id, ...doc.data()})
+              .toList();
+      results.sort(
+        (a, b) => ((a['order'] as num?)?.toInt() ?? 0).compareTo(
+          (b['order'] as num?)?.toInt() ?? 0,
+        ),
+      );
+      return results;
     } catch (e) {
       debugPrint('Error fetching POIs for $cityId from Firestore: $e');
       return [];

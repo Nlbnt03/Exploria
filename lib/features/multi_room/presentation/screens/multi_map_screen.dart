@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart' as geo;
@@ -8,11 +10,16 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../auth/data/services/map_area_firestore_service.dart';
 import '../../../auth/data/services/map_progress_service.dart';
 import '../../../auth/domain/models/campus_map_state.dart';
 import '../../../auth/presentation/map/fog_manager.dart';
 import '../../../auth/presentation/map/map_areas.dart';
 import '../../../auth/data/services/poi_service.dart';
+import '../../../badges/data/badge_award_service.dart';
+import '../../../badges/domain/badge_definitions.dart';
+import '../../../badges/presentation/widgets/badge_celebration_dialog.dart';
+import '../../../check_in/presentation/widgets/gezdim_button.dart';
 import '../../models/live_location.dart';
 import '../../models/member.dart';
 import '../../models/room.dart';
@@ -48,6 +55,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
 
   final MultiRoomFirestoreService _service = MultiRoomFirestoreService();
   final MapProgressService _mapProgressService = MapProgressService();
+  final MapAreaFirestoreService _mapAreaService = MapAreaFirestoreService();
 
   MapboxMap? _mapboxMap;
   GeoJsonSource? _locationSource;
@@ -65,11 +73,12 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
   final Map<String, LiveLocation> _locationByUid = <String, LiveLocation>{};
   final Set<String> _inMapUids = <String>{};
   final Set<String> _presenceJoinNotifiedUids = <String>{};
-  
+
   Set<String> _visitedPoiIds = {};
   int _totalPoiCount = 0;
 
   Room? _room;
+  MapAreaConfig? _roomArea;
   Position? _lastInsidePosition;
   StreamSubscription<geo.Position>? _locationSub;
   Timer? _fogRefreshDebounce;
@@ -94,9 +103,20 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
   String? _lastRenderedFogGeoJson;
   String? _lastRenderedCloudGeoJson;
 
+  // POI & badge state
+  final BadgeAwardService _badgeAwardService = BadgeAwardService();
+  List<Map<String, dynamic>> _parsedPois = [];
+  final Map<String, Map<String, dynamic>> _parsedPoisById = {};
+  Set<String> _availableCategories = {};
+  Set<String> _activeCategories = {};
+  bool _poisInitiallyLoaded = false;
+  bool _poiLayerCreated = false;
+  String? _uid;
+
   @override
   void initState() {
     super.initState();
+    _uid = FirebaseAuth.instance.currentUser?.uid;
 
     _roomSub = _service
         .listenRoom(widget.roomId)
@@ -185,6 +205,9 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
     }
 
     final roomCityId = room.cityId.trim();
+    if (_roomArea?.id == roomCityId) {
+      return _roomArea!;
+    }
     final hasMatch = selectableMapAreas.any((area) => area.id == roomCityId);
     final areaId = hasMatch ? roomCityId : defaultMapAreaId;
     return resolveMapArea(areaId);
@@ -192,8 +215,13 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
 
   String _resolveAreaIdForRoom(Room room) {
     final roomCityId = room.cityId.trim();
-    final hasMatch = selectableMapAreas.any((area) => area.id == roomCityId);
-    return hasMatch ? roomCityId : defaultMapAreaId;
+    return roomCityId.isEmpty ? defaultMapAreaId : roomCityId;
+  }
+
+  Future<void> _loadRoomArea(Room room) async {
+    final area = await _mapAreaService.fetchArea(room.cityId);
+    if (!mounted || _room?.cityId != room.cityId) return;
+    setState(() => _roomArea = area);
   }
 
   String _historyMapIdForRoom(Room room) => 'multi_${room.id}';
@@ -219,6 +247,8 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
       _goHomeWithMessage('Oda bulunamadi.');
       return;
     }
+
+    unawaited(_loadRoomArea(room));
 
     if (room.isFinished) {
       _stopTracking();
@@ -328,14 +358,15 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
       _historyMapId = mapId;
       _historyAreaId = areaId;
       _historyMapName = mapName;
-      
+
       if (restoredState != null) {
         _lastInsidePosition = restoredState.lastInsidePosition;
-        _initialZoom = (restoredState.zoom ?? 16.0).clamp(14.8, 17.5).toDouble();
+        _initialZoom =
+            (restoredState.zoom ?? 16.0).clamp(14.8, 17.5).toDouble();
         _visitedPoiIds = Set.from(restoredState.visitedPoiIds);
         _fogManager?.restoreRevealedCells(restoredState.revealedCellIds);
       }
-      
+
       _schedulePersistMapState(delay: const Duration(milliseconds: 700));
     } catch (_) {
       // Room map history registration is best-effort.
@@ -350,9 +381,8 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
       return;
     }
 
-    final areaId = _historyAreaId ?? _room?.cityId ?? _resolveAreaForRoom(_room).id;
-    final isTestArea = areaId == mapAreaFatih || areaId == mapAreaBeyoglu || areaId == mapAreaUskudar || areaId == mapAreaAnkara;
-    if (isTestArea) {
+    final area = _resolveAreaForRoom(_room);
+    if (isTemporaryTestMap(area)) {
       // Test areas do not use GPS
       return;
     }
@@ -380,14 +410,20 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
       (pos) {
         if (!_isTracking) return;
         final position = Position(pos.longitude, pos.latitude);
-        unawaited(_service.updateMyLocation(widget.roomId, pos.latitude, pos.longitude));
+        unawaited(
+          _service.updateMyLocation(widget.roomId, pos.latitude, pos.longitude),
+        );
         _revealFogForPosition(position);
         if (!_cameraMovedToFirstPoint && _styleReady) {
           _cameraMovedToFirstPoint = true;
-          unawaited(_mapboxMap?.setCamera(CameraOptions(
-            center: Point(coordinates: position),
-            zoom: _initialZoom > _minZoom ? _initialZoom : 16.0,
-          )));
+          unawaited(
+            _mapboxMap?.setCamera(
+              CameraOptions(
+                center: Point(coordinates: position),
+                zoom: _initialZoom > _minZoom ? _initialZoom : 16.0,
+              ),
+            ),
+          );
         }
       },
       onError: (_) {},
@@ -414,7 +450,6 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
     return permission == geo.LocationPermission.always ||
         permission == geo.LocationPermission.whileInUse;
   }
-
 
   void _revealFogForPosition(Position position) {
     final fogManager = _fogManager;
@@ -455,9 +490,142 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
     Navigator.pushNamedAndRemoveUntil(context, AppRouter.home, (_) => false);
   }
 
+  Future<void> _ensurePoisParsed() async {
+    if (_parsedPois.isNotEmpty) return;
+    final areaId = _historyAreaId ?? _room?.cityId ?? _resolveAreaForRoom(_room).id;
+    final rawList = await PoiService().getPoisForCity(areaId);
+    final categories = <String>{};
+    final parsed = <Map<String, dynamic>>[];
+    for (final raw in rawList) {
+      try {
+        final name = (raw['name'] as String?)?.trim() ?? '';
+        final type = (raw['category'] as String?)?.trim() ?? 'unknown';
+        final xpValue = (raw['xpValue'] as num?)?.toInt() ?? 0;
+        final String rarity;
+        if (xpValue >= 100) {
+          rarity = 'must-see';
+        } else if (xpValue >= 75) {
+          rarity = 'önerilen';
+        } else if (xpValue >= 50) {
+          rarity = 'rare';
+        } else {
+          rarity = raw['rarity'] as String? ?? 'common';
+        }
+        final lon = (raw['longitude'] as num?)?.toDouble() ?? 0;
+        final lat = (raw['latitude'] as num?)?.toDouble() ?? 0;
+        if (lon == 0 && lat == 0) continue;
+        final featureId = raw['id']?.toString() ?? name;
+        categories.add(type);
+        final entry = <String, dynamic>{
+          'featureId': featureId,
+          'name': name,
+          'type': type,
+          'rarity': rarity,
+          'category': type,
+          'xp': xpValue,
+          'description': raw['description'] as String? ?? '',
+          'photo_url': raw['imageUrl'] as String? ?? '',
+          'lon': lon,
+          'lat': lat,
+        };
+        parsed.add(entry);
+        _parsedPoisById[featureId] = entry;
+      } catch (_) {}
+    }
+    _parsedPois = parsed;
+    _availableCategories = categories;
+    if (!_poisInitiallyLoaded) {
+      _activeCategories = Set.from(categories);
+      _poisInitiallyLoaded = true;
+    }
+  }
+
+  void _toggleCategory(String category) {
+    setState(() {
+      if (_activeCategories.contains(category)) {
+        _activeCategories.remove(category);
+      } else {
+        _activeCategories.add(category);
+      }
+    });
+    _loadAndShowPois();
+  }
+
+  void _toggleAllCategories() {
+    setState(() {
+      if (_activeCategories.length == _availableCategories.length) {
+        _activeCategories.clear();
+      } else {
+        _activeCategories = Set.from(_availableCategories);
+      }
+    });
+    _loadAndShowPois();
+  }
+
+  Future<void> _checkBadgesBeforeExit() async {
+    final uid = _uid;
+    if (uid == null) return;
+    try {
+      final bContext = BadgeCheckContext(
+        totalVisited: _visitedPoiIds.length,
+        historicBuildingVisited: _parsedPois
+            .where((p) =>
+                _visitedPoiIds.contains(p['featureId']) &&
+                (p['category'].toString().toLowerCase().contains('tarih') ||
+                    p['type'].toString().toLowerCase().contains('tarih')))
+            .length,
+        mosqueVisited: _parsedPois
+            .where((p) =>
+                _visitedPoiIds.contains(p['featureId']) &&
+                (p['category'].toString().toLowerCase().contains('cami') ||
+                    p['type'].toString().toLowerCase().contains('cami')))
+            .length,
+        distinctCitiesVisited: 1,
+        coopSessionsCompleted: 1,
+        distinctCoopPartners: (_memberByUid.length - 1).clamp(0, 99),
+        coopMapJustCompleted:
+            _totalPoiCount > 0 && _visitedPoiIds.length >= _totalPoiCount,
+        currentStreak:
+            ref
+                .read(gameProvider)
+                .valueOrNull
+                ?.weeklyQuests
+                .duzenliGezgin
+                .current ??
+            0,
+        allWeeklyQuestsJustCompleted: false,
+        visitTime: DateTime.now(),
+        recentVisitTimes: [DateTime.now()],
+        lastVisitedMapId: _historyAreaId,
+        lastVisitedMapCompletion:
+            _totalPoiCount > 0 ? _visitedPoiIds.length / _totalPoiCount : 0.0,
+        weeklyLeaderboardRank: 999,
+      );
+      final newBadgeDefs = await _badgeAwardService.checkNewBadges(
+        uid: uid,
+        context: bContext,
+      );
+      if (newBadgeDefs.isNotEmpty && mounted) {
+        unawaited(_badgeAwardService.awardBadges(
+          uid: uid,
+          badges: newBadgeDefs,
+          gameNotifier: ref.read(gameProvider.notifier),
+        ));
+        await BadgeCelebrationDialog.show(
+          context,
+          newBadgeDefs.map((d) => d.id).toList(),
+          showAsPill: true,
+        );
+      }
+    } catch (e) {
+      debugPrint('[Co Badge] Hata: $e');
+    }
+  }
+
   Future<void> _leaveRoom() async {
     try {
       _stopTracking();
+      await _checkBadgesBeforeExit();
       await _service.setMyInMapPresence(widget.roomId, inMap: false);
       await _service.leaveRoom(widget.roomId);
       if (!mounted) {
@@ -491,132 +659,374 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
     _mapboxMap = mapboxMap;
   }
 
+  // 80m base + 40m max accuracy allowance — mirrors VenueCheckInService thresholds.
+  static const double _coopProximityThreshold = 120.0;
+
+  /// Returns member UIDs whose last known location is beyond [_coopProximityThreshold]
+  /// from the given POI. Members with no location data are excluded (benefit of doubt).
+  List<String> _outOfRangeMembers(double venueLat, double venueLng) {
+    final out = <String>[];
+    for (final entry in _locationByUid.entries) {
+      final loc = entry.value;
+      final dist = haversineDistanceMeters(
+        Position(loc.lng, loc.lat),
+        Position(venueLng, venueLat),
+      );
+      if (dist > _coopProximityThreshold) out.add(entry.key);
+    }
+    return out;
+  }
+
   void _onPoiTapped(Map<String, dynamic> payload) {
     if (!mounted) return;
-    
-    final id = payload['_feature_id']?.toString() ?? payload['name']?.toString() ?? '';
+
+    final id =
+        payload['_feature_id']?.toString() ?? payload['name']?.toString() ?? '';
     if (id.isEmpty) return;
-    
-    final name = payload['name']?.toString() ?? 'Bilinmeyen Mekan';
-    final category = payload['category']?.toString() ?? '';
+
+    final poi = _parsedPoisById[id];
+    final name =
+        poi?['name'] as String? ??
+        payload['name']?.toString() ??
+        'Bilinmeyen Mekan';
+    final category =
+        poi?['category'] as String? ?? payload['category']?.toString() ?? '';
+    final description = poi?['description'] as String? ?? '';
+    final photoUrl = poi?['photo_url'] as String? ?? '';
+    final lat = poi?['lat'] as double? ?? 0.0;
+    final lon = poi?['lon'] as double? ?? 0.0;
+    final xpValue = poi?['xp'] as int? ?? 50;
+    final mapId = _historyMapId ?? 'multi_${widget.roomId}';
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppColors.bgBottom,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
       builder: (context) {
+        int? xpAnimAmount;
         return StatefulBuilder(
           builder: (context, setSheetState) {
             final currentVisited = _visitedPoiIds.contains(id);
-            return Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
-                    style: const TextStyle(
-                      color: AppColors.textMain,
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  if (category.isNotEmpty) ...[
-                    const SizedBox(height: 4),
-                    Text(
-                      category,
-                      style: const TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 14,
+            return SafeArea(
+              top: false,
+              child: Container(
+                width: double.infinity,
+                decoration: const BoxDecoration(
+                  color: AppColors.bgBottom,
+                  borderRadius:
+                      BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.only(top: 12),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: AppColors.textMuted.withValues(alpha: 0.3),
+                        borderRadius: BorderRadius.circular(2),
                       ),
                     ),
-                  ],
-                  const SizedBox(height: 24),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Stack(
-                          clipBehavior: Clip.none,
+                    if (photoUrl.isNotEmpty)
+                      Container(
+                        margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
+                        height: 180,
+                        width: double.infinity,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(16),
+                          color: AppColors.card,
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(16),
+                          child: CachedNetworkImage(
+                            imageUrl: photoUrl,
+                            fit: BoxFit.cover,
+                            errorWidget: (_, _, _) => const Icon(
+                              Icons.image_not_supported_rounded,
+                              color: AppColors.textMuted,
+                              size: 40,
+                            ),
+                            placeholder: (_, _) => const Center(
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            SizedBox(
-                              width: double.infinity,
-                              child: ElevatedButton(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: currentVisited 
-                                      ? Colors.red.withValues(alpha: 0.2)
-                                      : AppColors.primary,
-                                  foregroundColor: currentVisited
-                                      ? Colors.red
-                                      : Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 16),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(12),
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    name,
+                                    style: const TextStyle(
+                                      color: AppColors.textMain,
+                                      fontSize: 22,
+                                      fontWeight: FontWeight.w800,
+                                    ),
                                   ),
                                 ),
-                                onPressed: () async {
-                                  bool showPopup = false;
-                                  if (currentVisited) {
-                                    _visitedPoiIds.remove(id);
-                                  } else {
-                                    _visitedPoiIds.add(id);
-                                    showPopup = true;
-                                  }
-                                  
-                                  setSheetState(() {});
-                                  setState(() {});
-                                  
-                                  if (!context.mounted) return;
-                                  if (showPopup) {
-                                    final isLevelUp = await ref.read(gameProvider.notifier).onPlaceVisited(id, category, true);
-                                    if (context.mounted && isLevelUp) {
-                                      final userXP = ref.read(gameProvider).valueOrNull;
-                                      if (userXP != null) {
-                                        LevelUpDialog.show(context, userXP.currentTitle);
-                                      }
-                                    }
-                                  }
-                                  
-                                  // Re-render map to update colors
-                                  _loadAndShowPois();
-                                  
-                                  // Save state
-                                  unawaited(_persistMapState());
-                                },
-                                child: Text(
-                                  currentVisited ? 'Gezmedim (İptal Et)' : 'Gezdim',
-                                  style: const TextStyle(
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
+                                if (currentVisited)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 10,
+                                      vertical: 5,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: AppColors.primary
+                                          .withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(20),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.check_circle,
+                                            color: AppColors.primary, size: 14),
+                                        SizedBox(width: 4),
+                                        Text(
+                                          'Gezildi',
+                                          style: TextStyle(
+                                            color: AppColors.primary,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
+                              ],
+                            ),
+                            if (category.isNotEmpty) ...[
+                              const SizedBox(height: 4),
+                              Text(
+                                category,
+                                style: const TextStyle(
+                                  color: AppColors.textMuted,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ],
+                            if (description.isNotEmpty) ...[
+                              const SizedBox(height: 14),
+                              Text(
+                                description,
+                                style: TextStyle(
+                                  color: AppColors.textMain
+                                      .withValues(alpha: 0.85),
+                                  fontSize: 14,
+                                  height: 1.5,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ),
+                    Builder(
+                      builder: (context) {
+                        final outOfRange = _outOfRangeMembers(lat, lon);
+                        final allInRange = outOfRange.isEmpty;
+                        return Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Padding(
+                              padding:
+                                  const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                              child: SafeArea(
+                                top: false,
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    // Team proximity status
+                                    if (_memberByUid.length > 1) ...[
+                                      Container(
+                                        width: double.infinity,
+                                        padding: const EdgeInsets.symmetric(
+                                          horizontal: 12,
+                                          vertical: 10,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: allInRange
+                                              ? const Color(0xFF10B981)
+                                                  .withValues(alpha: 0.12)
+                                              : Colors.orange
+                                                  .withValues(alpha: 0.12),
+                                          borderRadius:
+                                              BorderRadius.circular(12),
+                                          border: Border.all(
+                                            color: allInRange
+                                                ? const Color(0xFF10B981)
+                                                    .withValues(alpha: 0.4)
+                                                : Colors.orange
+                                                    .withValues(alpha: 0.4),
+                                          ),
+                                        ),
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            for (final entry
+                                                in _memberByUid.entries)
+                                              () {
+                                                final loc = _locationByUid[
+                                                    entry.key];
+                                                if (loc == null) {
+                                                  return _ProximityRow(
+                                                    name:
+                                                        entry.value.username,
+                                                    status:
+                                                        _ProximityStatus.unknown,
+                                                  );
+                                                }
+                                                final inRange = !outOfRange
+                                                    .contains(entry.key);
+                                                return _ProximityRow(
+                                                  name:
+                                                      entry.value.username,
+                                                  status: inRange
+                                                      ? _ProximityStatus.inRange
+                                                      : _ProximityStatus
+                                                          .outOfRange,
+                                                );
+                                              }(),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(height: 10),
+                                    ],
+                                    // Gezdim button — blocked when any member is out of range
+                                    IgnorePointer(
+                                      ignoring: !allInRange,
+                                      child: Opacity(
+                                        opacity: allInRange ? 1.0 : 0.45,
+                                        child: SizedBox(
+                                          width: double.infinity,
+                                          child: GezdimButton(
+                                            venueId: id,
+                                            mapId: mapId,
+                                            venueLat: lat,
+                                            venueLng: lon,
+                                            currentVisited: currentVisited,
+                                            userLat: _lastInsidePosition
+                                                ?.lat
+                                                .toDouble(),
+                                            userLng: _lastInsidePosition
+                                                ?.lng
+                                                .toDouble(),
+                                            onCheckInSuccess: () async {
+                                              _visitedPoiIds.add(id);
+                                              xpAnimAmount = xpValue;
+                                              setSheetState(() {});
+                                              setState(() {});
+                                              _loadAndShowPois();
+
+                                              // Award XP + visited to all other members
+                                              unawaited(
+                                                _service.awardCoopCheckIn(
+                                                  mapId: mapId,
+                                                  venueId: id,
+                                                  xpValue: xpValue,
+                                                  memberUids: _memberByUid
+                                                      .keys
+                                                      .toList(),
+                                                ),
+                                              );
+
+                                              if (!context.mounted) return;
+                                              try {
+                                                final isLevelUp = await ref
+                                                    .read(gameProvider.notifier)
+                                                    .onPlaceVisited(
+                                                      id,
+                                                      category,
+                                                      true,
+                                                      xpValue: xpValue,
+                                                    );
+                                                if (context.mounted &&
+                                                    isLevelUp) {
+                                                  final userXP = ref
+                                                      .read(gameProvider)
+                                                      .valueOrNull;
+                                                  if (userXP != null) {
+                                                    LevelUpDialog.show(
+                                                      context,
+                                                      userXP.currentTitle,
+                                                    );
+                                                  }
+                                                }
+                                              } catch (e) {
+                                                debugPrint(
+                                                    '[Co] onPlaceVisited: $e');
+                                              }
+                                              unawaited(_persistMapState());
+                                            },
+                                            onCancelVisit: () async {
+                                              _visitedPoiIds.remove(id);
+                                              xpAnimAmount = -xpValue;
+                                              setSheetState(() {});
+                                              setState(() {});
+                                              _loadAndShowPois();
+                                              try {
+                                                await ref
+                                                    .read(gameProvider.notifier)
+                                                    .removeXP(xpValue);
+                                              } catch (e) {
+                                                debugPrint('[Co] removeXP: $e');
+                                              }
+                                              unawaited(_persistMapState());
+                                            },
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    if (!allInRange)
+                                      Padding(
+                                        padding:
+                                            const EdgeInsets.only(top: 8),
+                                        child: Text(
+                                          'Tüm takım arkadaşları mekana yakın olmalı (${_coopProximityThreshold.toInt()}m).',
+                                          style: const TextStyle(
+                                            color: Colors.orange,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                          textAlign: TextAlign.center,
+                                        ),
+                                      ),
+                                  ],
                                 ),
                               ),
                             ),
-                            if (currentVisited && !(_visitedPoiIds.contains(id) == false))
+                            if (xpAnimAmount != null)
                               Positioned(
                                 top: -30,
                                 left: 0,
                                 right: 0,
                                 child: Center(
                                   child: XPPopup(
-                                    key: UniqueKey(), // Force rebuild on each tap
-                                    xpAmount: 75,
+                                    key: UniqueKey(),
+                                    xpAmount: xpAnimAmount!,
                                     onComplete: () {},
                                   ),
                                 ),
                               ),
                           ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
-                ],
+                        );
+                      },
+                    ),
+                  ],
+                ),
               ),
             );
-          }
+          },
         );
       },
     );
@@ -624,52 +1034,30 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
 
   Future<void> _loadAndShowPois() async {
     final map = _mapboxMap;
-    final areaId = _historyAreaId ?? _room?.cityId ?? _resolveAreaForRoom(_room).id;
-    final hasPoiData = areaId == mapAreaGtu || areaId == mapAreaFatih || areaId == mapAreaBeyoglu || areaId == mapAreaUskudar || areaId == mapAreaKadikoy || areaId == mapAreaAnkara;
-    
-    if (map == null || !hasPoiData) return;
+    if (map == null) return;
 
     try {
-      final List<dynamic> pois = await PoiService().getPoisForCity(areaId);
+      await _ensurePoisParsed();
 
       final features = <Map<String, Object?>>[];
-      for (final poi in pois) {
-        final poiMap = poi as Map<String, dynamic>;
-        
-        final name = poiMap['isim'] as String? ?? poiMap['name'] as String? ?? '';
-        final type = poiMap['kategori'] as String? ?? poiMap['type'] as String? ?? 'unknown';
-        final rarity = poiMap['oncelik'] as String? ?? poiMap['rarity'] as String? ?? 'common';
-        final category = poiMap['alt_kategori'] as String? ?? poiMap['category'] as String? ?? '';
-        final xp = (poiMap['xp'] as num?)?.toInt() ?? 0;
-        
-        double lon = 0;
-        double lat = 0;
-        
-        if (poiMap.containsKey('koordinatlar')) {
-          final coords = poiMap['koordinatlar'] as Map<String, dynamic>;
-          lon = (coords['longitude'] as num).toDouble();
-          lat = (coords['latitude'] as num).toDouble();
-        } else {
-          lon = (poiMap['lon'] as num).toDouble();
-          lat = (poiMap['lat'] as num).toDouble();
-        }
-
-        final featureId = poiMap['id']?.toString() ?? name;
-
+      for (final poi in _parsedPois) {
+        final type = poi['type'] as String;
+        if (!_activeCategories.contains(type)) continue;
+        final featureId = poi['featureId'] as String;
         features.add(<String, Object?>{
           'type': 'Feature',
           'id': featureId,
           'properties': <String, Object?>{
-            'name': name,
+            'name': poi['name'],
             'poi_type': type,
-            'rarity': rarity,
-            'category': category,
-            'xp': xp,
+            'rarity': poi['rarity'],
+            'category': poi['category'],
+            'xp': poi['xp'],
             'visited': _visitedPoiIds.contains(featureId),
           },
           'geometry': <String, Object?>{
             'type': 'Point',
-            'coordinates': <double>[lon, lat],
+            'coordinates': <double>[poi['lon'] as double, poi['lat'] as double],
           },
         });
       }
@@ -679,86 +1067,85 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
         'features': features,
       });
 
-      if (mounted) {
-        setState(() {
-          _totalPoiCount = features.length;
-        });
-      }
+      if (mounted) setState(() => _totalPoiCount = _parsedPois.length);
 
       const sourceId = 'poi-source';
       const circleLayerId = 'poi-circle-layer';
       const labelLayerId = 'poi-label-layer';
 
-      final source = GeoJsonSource(id: sourceId, data: geoJson);
-      try {
-        await map.style.addSource(source);
-      } on PlatformException catch (e) {
-        if (!_isAlreadyExistsError(e)) rethrow;
+      if (!_poiLayerCreated) {
+        _poiLayerCreated = true;
+        try {
+          await map.style.addSource(GeoJsonSource(id: sourceId, data: geoJson));
+        } on PlatformException catch (e) {
+          if (_isAlreadyExistsError(e)) {
+            final existing = await map.style.getSource(sourceId);
+            if (existing is GeoJsonSource) await existing.updateGeoJSON(geoJson);
+          } else {
+            rethrow;
+          }
+        }
+        try {
+          await map.style.addLayer(
+            CircleLayer(
+              id: circleLayerId,
+              sourceId: sourceId,
+              circleRadiusExpression: <Object>[
+                'match', <Object>['get', 'rarity'],
+                'must-see', 14.0, 'önerilen', 10.0,
+                'legendary', 14.0, 'epic', 11.0, 'rare', 8.0, 6.0,
+              ],
+              circleColorExpression: <Object>[
+                'match', <Object>['get', 'poi_type'],
+                'Cami', '#10B981', 'Saray', '#F59E0B', 'Müze', '#3B82F6',
+                'Tarihi Yapı', '#6B7280', 'Meydan', '#F43F5E',
+                'Hamam', '#06B6D4', 'Çarşı & Pazar', '#8B5CF6',
+                'Çarşı', '#8B5CF6', 'Park & Bahçe', '#84CC16',
+                'Semt & Cadde', '#F97316', 'Kule & Tepe', '#EF4444',
+                'Sinagog & Kilise', '#A855F7', 'Eğitim Binası', '#3B82F6',
+                'Araştırma Merkezi', '#F59E0B', 'Spor Tesisleri', '#10B981',
+                'Yeme & İçme', '#F43F5E', '#E0E0E0',
+              ],
+              circleStrokeWidth: 1.5,
+              circleStrokeColor: const Color(0xFFFFFFFF).toARGB32(),
+              circleOpacityExpression: <Object>[
+                'case',
+                <Object>['==', <Object>['get', 'visited'], true],
+                0.4, 0.92,
+              ],
+            ),
+          );
+        } on PlatformException catch (e) {
+          if (!_isAlreadyExistsError(e)) rethrow;
+        }
+        try {
+          await map.style.addLayer(
+            SymbolLayer(
+              id: labelLayerId,
+              sourceId: sourceId,
+              textFieldExpression: <Object>['get', 'name'],
+              textSize: 12.0,
+              textColor: const Color(0xFFFFFFFF).toARGB32(),
+              textHaloColor: const Color(0xFF000000).toARGB32(),
+              textHaloWidth: 1.5,
+              textOpacityExpression: <Object>[
+                'case',
+                <Object>['==', <Object>['get', 'visited'], true],
+                0.5, 1.0,
+              ],
+              textOffset: <double>[0, 1.6],
+              textMaxWidth: 10.0,
+              textAllowOverlap: false,
+              iconAllowOverlap: false,
+            ),
+          );
+        } on PlatformException catch (e) {
+          if (!_isAlreadyExistsError(e)) rethrow;
+        }
+      } else {
+        final existing = await map.style.getSource(sourceId);
+        if (existing is GeoJsonSource) await existing.updateGeoJSON(geoJson);
       }
-
-      try {
-        await map.style.addLayer(
-          CircleLayer(
-            id: circleLayerId,
-            sourceId: sourceId,
-            circleRadiusExpression: <Object>[
-              'match',
-              <Object>['get', 'rarity'],
-              'must-see', 14.0, 'önerilen', 10.0,
-              'legendary', 14.0, 'epic', 11.0, 'rare', 8.0,
-              6.0,
-            ],
-            circleColorExpression: <Object>[
-              'match',
-              <Object>['get', 'poi_type'],
-              'Cami', '#10B981', 'Saray', '#F59E0B', 'Müze', '#3B82F6',
-              'Tarihi Yapı', '#6B7280', 'Meydan', '#F43F5E', 'Hamam', '#06B6D4',
-              'Çarşı & Pazar', '#8B5CF6', 'Çarşı', '#8B5CF6', 'Park & Bahçe', '#84CC16',
-              'Semt & Cadde', '#F97316', 'Kule & Tepe', '#EF4444',
-              'Sinagog & Kilise', '#A855F7',
-              'Eğitim Binası', '#3B82F6', 'Araştırma Merkezi', '#F59E0B',
-              'Spor Tesisleri', '#10B981', 'Yeme & İçme', '#F43F5E',
-              'historic', '#FFB300', 'museum', '#42A5F5', 'park', '#66BB6A', 'tower', '#EF5350',
-              '#E0E0E0',
-            ],
-            circleStrokeWidth: 1.5,
-            circleStrokeColor: const Color(0xFFFFFFFF).toARGB32(),
-            circleOpacityExpression: <Object>[
-              'case',
-              <Object>['==', <Object>['get', 'visited'], true],
-              0.4, 0.92,
-            ],
-          ),
-        );
-      } on PlatformException catch (e) {
-        if (!_isAlreadyExistsError(e)) rethrow;
-      }
-
-      try {
-        await map.style.addLayer(
-          SymbolLayer(
-            id: labelLayerId,
-            sourceId: sourceId,
-            textFieldExpression: <Object>['get', 'name'],
-            textSize: 12.0,
-            textColor: const Color(0xFFFFFFFF).toARGB32(),
-            textHaloColor: const Color(0xFF000000).toARGB32(),
-            textHaloWidth: 1.5,
-            textOpacityExpression: <Object>[
-              'case',
-              <Object>['==', <Object>['get', 'visited'], true],
-              0.5, 1.0,
-            ],
-            textOffset: <double>[0, 1.6],
-            textMaxWidth: 10.0,
-            textAllowOverlap: false,
-            iconAllowOverlap: false,
-          ),
-        );
-      } on PlatformException catch (e) {
-        if (!_isAlreadyExistsError(e)) rethrow;
-      }
-
     } catch (e, st) {
       debugPrint('Error loading POIs: $e\n$st');
     }
@@ -798,7 +1185,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
       if (features.isNotEmpty) {
         final feature = features.first;
         if (feature == null) return;
-        
+
         final queriedFeature = feature.queriedFeature;
         final properties = queriedFeature.feature['properties'];
         final id = queriedFeature.feature['id'];
@@ -823,11 +1210,13 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
     _latestCameraState = await _mapboxMap?.getCameraState();
     _styleReady = true;
     try {
-      await _mapboxMap?.scaleBar.updateSettings(ScaleBarSettings(
-        position: OrnamentPosition.BOTTOM_LEFT,
-        marginLeft: 16,
-        marginBottom: 72,
-      ));
+      await _mapboxMap?.scaleBar.updateSettings(
+        ScaleBarSettings(
+          position: OrnamentPosition.BOTTOM_LEFT,
+          marginLeft: 16,
+          marginBottom: 72,
+        ),
+      );
       await _mapboxMap?.compass.updateSettings(CompassSettings(enabled: false));
     } on PlatformException {
       // Best-effort
@@ -843,10 +1232,12 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
     final map = _mapboxMap;
     if (map != null && (zoom < _minZoom - 0.05 || zoom > _maxZoom + 0.05)) {
       final corrected = zoom.clamp(_minZoom, _maxZoom);
-      unawaited(map.easeTo(
-        CameraOptions(zoom: corrected),
-        MapAnimationOptions(duration: 150, startDelay: 0),
-      ));
+      unawaited(
+        map.easeTo(
+          CameraOptions(zoom: corrected),
+          MapAnimationOptions(duration: 150, startDelay: 0),
+        ),
+      );
     }
     _scheduleFogRefresh();
     _schedulePersistMapState();
@@ -858,7 +1249,11 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
       return;
     }
 
-    final area = _resolveAreaForRoom(_room);
+    final room = _room;
+    if (room != null && _roomArea?.id != room.cityId) {
+      _roomArea = await _mapAreaService.fetchArea(room.cityId);
+    }
+    final area = _resolveAreaForRoom(room);
     final fogManager = FogManager(
       campusBoundary: area.boundary,
       gridSizeMeters: area.gridSizeMeters,
@@ -1289,17 +1684,51 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
         .take(3)
         .join(', ');
     final fogManager = _fogManager;
-    final hasPoiData = area.id == mapAreaGtu || area.id == mapAreaFatih || area.id == mapAreaBeyoglu || area.id == mapAreaUskudar || area.id == mapAreaKadikoy || area.id == mapAreaAnkara;
     final String fogSummary;
     if (fogManager == null) {
       fogSummary = 'Sis hazirlaniyor...';
-    } else if (hasPoiData) {
-      fogSummary = 'Gezilen: ${_visitedPoiIds.length} / $_totalPoiCount  |  ${fogManager.revealedCount}/${fogManager.totalCount} hücre';
     } else {
-      fogSummary = 'Sis acilan hucre: ${fogManager.revealedCount}/${fogManager.totalCount}';
+      fogSummary =
+          'Gezilen: ${_visitedPoiIds.length} / $_totalPoiCount  |  ${fogManager.revealedCount}/${fogManager.totalCount} hücre';
     }
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final confirm = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            backgroundColor: AppColors.bgBottom,
+            title: const Text(
+              'Odadan Ayrıl',
+              style: TextStyle(color: AppColors.textMain),
+            ),
+            content: const Text(
+              'Odadan ayrılmak istediğinize emin misiniz?',
+              style: TextStyle(color: AppColors.textMuted),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text(
+                  'İptal',
+                  style: TextStyle(color: AppColors.textMuted),
+                ),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text(
+                  'Ayrıl',
+                  style: TextStyle(color: AppColors.primary),
+                ),
+              ),
+            ],
+          ),
+        );
+        if (confirm == true && context.mounted) unawaited(_leaveRoom());
+      },
+      child: Scaffold(
       backgroundColor: AppColors.bgBottom,
       appBar: AppBar(
         backgroundColor: AppColors.bgTop,
@@ -1436,6 +1865,50 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
               ),
             ),
           ),
+          // Category filter chips
+          if (_availableCategories.isNotEmpty)
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 118,
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 10),
+                padding: const EdgeInsets.symmetric(vertical: 6),
+                decoration: BoxDecoration(
+                  color: const Color(0xCC12091F),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: AppColors.inputBorder.withValues(alpha: 0.35),
+                  ),
+                ),
+                child: SizedBox(
+                  height: 36,
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    children: [
+                      _MultiCategoryChip(
+                        label: 'Tümü',
+                        isActive: _activeCategories.length ==
+                            _availableCategories.length,
+                        onTap: _toggleAllCategories,
+                        showAllIcon: true,
+                      ),
+                      const SizedBox(width: 6),
+                      for (final cat in _availableCategories) ...[
+                        _MultiCategoryChip(
+                          label: cat,
+                          isActive: _activeCategories.contains(cat),
+                          onTap: () => _toggleCategory(cat),
+                          categoryColor: _coopCategoryColorMap[cat],
+                        ),
+                        const SizedBox(width: 6),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
           Positioned(
             left: 12,
             right: 12,
@@ -1448,11 +1921,11 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
                   color: AppColors.inputBorder.withValues(alpha: 0.45),
                 ),
               ),
-              child: const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 child: Text(
-                  'Mavi: Host | Diger oyuncular: kirmizi/yesil/turuncu/mor',
-                  style: TextStyle(
+                  'Gezilen: ${_visitedPoiIds.length} / $_totalPoiCount',
+                  style: const TextStyle(
                     color: AppColors.textMain,
                     fontWeight: FontWeight.w600,
                   ),
@@ -1463,6 +1936,129 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
           ),
         ],
       ),
+      ),
     );
   }
 }
+
+class _MultiCategoryChip extends StatelessWidget {
+  const _MultiCategoryChip({
+    required this.label,
+    required this.isActive,
+    required this.onTap,
+    this.categoryColor,
+    this.showAllIcon = false,
+  });
+
+  final String label;
+  final bool isActive;
+  final VoidCallback onTap;
+  final Color? categoryColor;
+  final bool showAllIcon;
+
+  @override
+  Widget build(BuildContext context) {
+    final dotColor = categoryColor ?? AppColors.primary;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+        decoration: BoxDecoration(
+          color: isActive ? dotColor.withValues(alpha: 0.18) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isActive
+                ? dotColor.withValues(alpha: 0.7)
+                : AppColors.textMuted.withValues(alpha: 0.3),
+            width: isActive ? 1.4 : 0.8,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (showAllIcon)
+              Icon(Icons.grid_view_rounded,
+                  size: 14,
+                  color: isActive ? AppColors.primary : AppColors.textMuted)
+            else
+              Container(
+                width: 10,
+                height: 10,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: isActive ? dotColor : dotColor.withValues(alpha: 0.3),
+                ),
+              ),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: isActive
+                    ? AppColors.textMain
+                    : AppColors.textMuted.withValues(alpha: 0.7),
+                fontSize: 12,
+                fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+enum _ProximityStatus { inRange, outOfRange, unknown }
+
+class _ProximityRow extends StatelessWidget {
+  const _ProximityRow({required this.name, required this.status});
+
+  final String name;
+  final _ProximityStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, color, label) = switch (status) {
+      _ProximityStatus.inRange => (Icons.check_circle_rounded, const Color(0xFF10B981), 'Yakın'),
+      _ProximityStatus.outOfRange => (Icons.location_off_rounded, Colors.orange, 'Uzakta'),
+      _ProximityStatus.unknown => (Icons.help_outline_rounded, AppColors.textMuted, 'Konum yok'),
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: [
+          Icon(icon, size: 15, color: color),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              name,
+              style: const TextStyle(color: AppColors.textMain, fontSize: 13),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+}
+
+const Map<String, Color> _coopCategoryColorMap = {
+  'Cami': Color(0xFF10B981),
+  'Saray': Color(0xFFF59E0B),
+  'Müze': Color(0xFF3B82F6),
+  'Tarihi Yapı': Color(0xFF6B7280),
+  'Meydan': Color(0xFFF43F5E),
+  'Hamam': Color(0xFF06B6D4),
+  'Çarşı & Pazar': Color(0xFF8B5CF6),
+  'Çarşı': Color(0xFF8B5CF6),
+  'Park & Bahçe': Color(0xFF84CC16),
+  'Semt & Cadde': Color(0xFFF97316),
+  'Kule & Tepe': Color(0xFFEF4444),
+  'Sinagog & Kilise': Color(0xFFA855F7),
+  'Eğitim Binası': Color(0xFF3B82F6),
+  'Araştırma Merkezi': Color(0xFFF59E0B),
+  'Spor Tesisleri': Color(0xFF10B981),
+  'Yeme & İçme': Color(0xFFF43F5E),
+};

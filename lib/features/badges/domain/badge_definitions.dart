@@ -14,6 +14,7 @@ class BadgeDefinition {
     this.conditionOperator,
     this.conditionValue,
     this.iconName,
+    this.images = const <String, String>{},
   });
 
   final String id;
@@ -28,14 +29,25 @@ class BadgeDefinition {
   final String? conditionOperator;
   final dynamic conditionValue;
   final String? iconName;
+  final Map<String, String> images;
+
+  String? get premiumImageUrl => images['a'];
+  String? get socialCardImageUrl => images['b'];
+  String? get listImageUrl => images['c'];
 
   factory BadgeDefinition.fromJson(Map<String, dynamic> json, String id) {
     return BadgeDefinition(
       id: id,
       name: json['name'] as String? ?? '',
       description: json['description'] as String? ?? '',
-      tier: BadgeTier.values.firstWhere((e) => e.name == json['tier'], orElse: () => BadgeTier.bronze),
-      category: BadgeCategory.values.firstWhere((e) => e.name == json['category'], orElse: () => BadgeCategory.exploration),
+      tier: BadgeTier.values.firstWhere(
+        (e) => e.name == json['tier'],
+        orElse: () => BadgeTier.bronze,
+      ),
+      category: BadgeCategory.values.firstWhere(
+        (e) => e.name == json['category'],
+        orElse: () => BadgeCategory.exploration,
+      ),
       isHidden: json['isHidden'] as bool? ?? false,
       xpReward: json['xpReward'] as int?,
       isActive: json['isActive'] as bool? ?? true,
@@ -43,6 +55,7 @@ class BadgeDefinition {
       conditionOperator: json['conditionOperator'] as String?,
       conditionValue: json['conditionValue'],
       iconName: json['iconName'] as String?,
+      images: _parseImages(json['images']),
     );
   }
 
@@ -60,11 +73,25 @@ class BadgeDefinition {
       if (conditionOperator != null) 'conditionOperator': conditionOperator,
       if (conditionValue != null) 'conditionValue': conditionValue,
       if (iconName != null) 'iconName': iconName,
+      'images': images,
+    };
+  }
+
+  static Map<String, String> _parseImages(dynamic rawImages) {
+    if (rawImages is! Map) return const <String, String>{};
+    return <String, String>{
+      for (final entry in rawImages.entries)
+        if (entry.value is String && (entry.value as String).trim().isNotEmpty)
+          entry.key.toString(): (entry.value as String).trim(),
     };
   }
 
   bool condition(BadgeCheckContext context) {
-    if (conditionField == null || conditionOperator == null || conditionValue == null) return false;
+    if (conditionField == null ||
+        conditionOperator == null ||
+        conditionValue == null) {
+      return false;
+    }
 
     dynamic contextValue;
     switch (conditionField) {
@@ -100,8 +127,10 @@ class BadgeDefinition {
         break;
       // Özel Gizli/Karmaşık Durumlar (Pseudo-fields)
       case 'fatihAreaCompleted':
-         contextValue = (context.lastVisitedMapId == 'fatih' && (context.lastVisitedMapCompletion ?? 0) >= 1.0);
-         break;
+        contextValue =
+            (context.lastVisitedMapId == 'fatih' &&
+                (context.lastVisitedMapCompletion ?? 0) >= 1.0);
+        break;
       case 'isNightTime':
         final hour = context.visitTime.hour;
         contextValue = hour >= 23 || hour < 5;
@@ -112,15 +141,16 @@ class BadgeDefinition {
         break;
       case 'isSpeedExplorer':
         if (context.recentVisitTimes.length < 5) {
-            contextValue = false;
-            break;
+          contextValue = false;
+          break;
         }
         final times = context.recentVisitTimes..sort();
         bool achieved = false;
         for (var i = 0; i <= times.length - 5; i++) {
           final diff = times[i + 4].difference(times[i]);
           if (diff.inMinutes <= 60) {
-              achieved = true; break;
+            achieved = true;
+            break;
           }
         }
         contextValue = achieved;
@@ -137,26 +167,39 @@ class BadgeDefinition {
       final cv = contextValue.toDouble();
       final target = conditionValue.toDouble();
       switch (conditionOperator) {
-        case '>': return cv > target;
-        case '>=': return cv >= target;
-        case '<': return cv < target;
-        case '<=': return cv <= target;
-        case '==': return cv == target;
-        case '!=': return cv != target;
-        default: return false;
+        case '>':
+          return cv > target;
+        case '>=':
+          return cv >= target;
+        case '<':
+          return cv < target;
+        case '<=':
+          return cv <= target;
+        case '==':
+          return cv == target;
+        case '!=':
+          return cv != target;
+        default:
+          return false;
       }
     } else if (contextValue is bool && conditionValue is bool) {
       switch (conditionOperator) {
-        case '==': return contextValue == conditionValue;
-        case '!=': return contextValue != conditionValue;
-        default: return false;
+        case '==':
+          return contextValue == conditionValue;
+        case '!=':
+          return contextValue != conditionValue;
+        default:
+          return false;
       }
     } else if (contextValue is String && conditionValue is String) {
-        switch (conditionOperator) {
-            case '==': return contextValue == conditionValue;
-            case '!=': return contextValue != conditionValue;
-            default: return false;
-        }
+      switch (conditionOperator) {
+        case '==':
+          return contextValue == conditionValue;
+        case '!=':
+          return contextValue != conditionValue;
+        default:
+          return false;
+      }
     }
     return false;
   }
@@ -196,4 +239,4 @@ class BadgeCheckContext {
   final List<DateTime> recentVisitTimes;
 }
 
-// ARTIK BU LİSTE SADECE MİGRASYON (FIREBASE'E İLK YÜKLEME) İÇİN KULLANILACAKTIR. 
+// ARTIK BU LİSTE SADECE MİGRASYON (FIREBASE'E İLK YÜKLEME) İÇİN KULLANILACAKTIR.

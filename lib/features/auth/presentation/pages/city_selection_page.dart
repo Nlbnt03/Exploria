@@ -3,9 +3,11 @@ import 'dart:math' as math;
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../data/services/map_area_firestore_service.dart';
 import '../../data/services/map_progress_service.dart';
 import '../map/map_areas.dart';
 import '../map/location_service.dart';
@@ -30,24 +32,66 @@ class CitySelectionPage extends StatefulWidget {
 
 class _CitySelectionPageState extends State<CitySelectionPage> {
   final MapProgressService _mapProgressService = MapProgressService();
+  final MapAreaFirestoreService _mapAreaService = MapAreaFirestoreService();
 
-  String _selectedAreaId = defaultMapAreaId;
+  String _selectedAreaId = '';
   bool _isOpeningMap = false;
-  int _expandedGroupIndex = -1;
+  bool _areasLoading = true;
+  int _expandedGroupIndex = 0;
+  List<MapAreaGroup> _dynamicGroups = [];
 
-  MapAreaConfig get _selectedArea => resolveMapArea(_selectedAreaId);
+  List<MapAreaConfig> get _allAreas =>
+      _dynamicGroups.expand((g) => g.areas).toList();
+
+  MapAreaConfig? get _selectedArea =>
+      _allAreas.where((a) => a.id == _selectedAreaId).firstOrNull;
 
   @override
   void initState() {
     super.initState();
-    // Auto-expand the group that contains the default area.
-    for (var i = 0; i < selectableMapGroups.length; i++) {
-      if (selectableMapGroups[i].areas.any((a) => a.id == _selectedAreaId)) {
-        _expandedGroupIndex = i;
-        break;
+    unawaited(_loadAreas());
+  }
+
+  Future<void> _loadAreas() async {
+    try {
+      final areas = await _mapAreaService.fetchAreas();
+      if (!mounted) return;
+
+      // Group published maps by their display city.
+      final grouped = <String, List<MapAreaConfig>>{};
+      for (final area in areas) {
+        (grouped[area.city] ??= []).add(area);
+      }
+
+      final groups =
+          grouped.entries
+              .map(
+                (e) => MapAreaGroup(
+                  title: '${e.key} Haritaları',
+                  icon: 0xe3ab, // Icons.location_city_rounded
+                  areas: e.value,
+                ),
+              )
+              .toList();
+
+      setState(() {
+        _dynamicGroups = groups;
+        _areasLoading = false;
+        if (areas.isNotEmpty) {
+          _selectedAreaId = areas.first.id;
+          _expandedGroupIndex = 0;
+        }
+      });
+
+      unawaited(_restoreLastOpenedMapSelection());
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _dynamicGroups = [];
+          _areasLoading = false;
+        });
       }
     }
-    unawaited(_restoreLastOpenedMapSelection());
   }
 
   Future<void> _restoreLastOpenedMapSelection() async {
@@ -60,12 +104,11 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
         return;
       }
 
-      final exists = selectableMapAreas.any((area) => area.id == lastAreaId);
-      if (!exists) return;
-
-      // Auto-expand the group containing the restored area.
-      for (var i = 0; i < selectableMapGroups.length; i++) {
-        if (selectableMapGroups[i].areas.any((a) => a.id == lastAreaId)) {
+      for (var i = 0; i < _dynamicGroups.length; i++) {
+        final idx = _dynamicGroups[i].areas.indexWhere(
+          (a) => a.id == lastAreaId,
+        );
+        if (idx != -1) {
           setState(() {
             _selectedAreaId = lastAreaId;
             _expandedGroupIndex = i;
@@ -73,10 +116,8 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
           return;
         }
       }
-
-      setState(() => _selectedAreaId = lastAreaId);
     } catch (_) {
-      // Last opened map lookup is best-effort.
+      // Best-effort
     }
   }
 
@@ -93,15 +134,18 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
   Future<void> _openSelectedMap() async {
     if (_isOpeningMap) return;
     final selectedArea = _selectedArea;
+    if (selectedArea == null) return;
 
     // Show preview first – proceed only if user confirms.
     final confirmed = await Navigator.push<bool>(
       context,
       MaterialPageRoute<bool>(
-        builder: (_) => MapPreviewPage(
-          areaId: selectedArea.id,
-          mode: widget.mode,
-        ),
+        builder:
+            (_) => MapPreviewPage(
+              areaId: selectedArea.id,
+              mode: widget.mode,
+              mapAreaConfig: selectedArea,
+            ),
       ),
     );
     if (confirmed != true || !mounted) return;
@@ -128,29 +172,34 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
 
     setState(() => _isOpeningMap = true);
     try {
-      final accessResult = await LocationService.requestSinglePosition();
-      if (!mounted) return;
+      Position currentPosition;
+      if (isTemporaryTestMap(selectedArea)) {
+        currentPosition = selectedArea.center;
+      } else {
+        final accessResult = await LocationService.requestSinglePosition();
+        if (!mounted) return;
 
-      if (!accessResult.isGranted) {
-        _showGateMessage(accessResult.status);
-        return;
-      }
+        if (!accessResult.isGranted) {
+          _showGateMessage(accessResult.status);
+          return;
+        }
 
-      final currentPosition = accessResult.position!;
-      final isInsideArea = isPointInsidePolygon(
-        currentPosition,
-        selectedArea.boundary,
-      );
-      if (!isInsideArea) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '${selectedArea.title} içinde değilsin. Haritayı açmak için seçilen alanın içine gir.',
-            ),
-            behavior: SnackBarBehavior.floating,
-          ),
+        currentPosition = accessResult.position!;
+        final isInsideArea = isPointInsidePolygon(
+          currentPosition,
+          selectedArea.boundary,
         );
-        return;
+        if (!isInsideArea) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '${selectedArea.title} içinde değilsin. Haritayı açmak için seçilen alanın içine gir.',
+              ),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          return;
+        }
       }
 
       final mapId = await _createMapForSelection(
@@ -167,6 +216,7 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
           mapId: mapId,
           mapName: mapName,
           initialUserPosition: currentPosition,
+          mapAreaConfig: selectedArea,
         ),
       );
     } finally {
@@ -193,10 +243,11 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
     final rawName = await Navigator.of(context).push<String>(
       MaterialPageRoute<String>(
         fullscreenDialog: true,
-        builder: (_) => _MapNameEntryPage(
-          initialName: '$areaTitle Haritası',
-          existingNames: existingNames,
-        ),
+        builder:
+            (_) => _MapNameEntryPage(
+              initialName: '$areaTitle Haritası',
+              existingNames: existingNames,
+            ),
       ),
     );
 
@@ -325,131 +376,178 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
                       ),
                     ),
                     const SizedBox(height: 12),
-                    Expanded(
-                      child: ListView.separated(
-                        itemCount: selectableMapGroups.length,
-                        separatorBuilder: (_, _) => const SizedBox(height: 14),
-                        itemBuilder: (context, groupIndex) {
-                          final group = selectableMapGroups[groupIndex];
-                          final isExpanded = _expandedGroupIndex == groupIndex;
-                          final groupHasSelection = group.areas.any(
-                            (a) => a.id == _selectedAreaId,
-                          );
+                    if (_areasLoading)
+                      const Expanded(
+                        child: Center(
+                          child: CircularProgressIndicator(
+                            color: AppColors.primary,
+                          ),
+                        ),
+                      )
+                    else if (_dynamicGroups.isEmpty)
+                      const Expanded(
+                        child: Center(
+                          child: Text(
+                            'Yayınlanmış harita bulunamadı.',
+                            style: TextStyle(color: AppColors.textMuted),
+                          ),
+                        ),
+                      )
+                    else
+                      Expanded(
+                        child: ListView.separated(
+                          itemCount: _dynamicGroups.length,
+                          separatorBuilder:
+                              (_, _) => const SizedBox(height: 14),
+                          itemBuilder: (context, groupIndex) {
+                            final group = _dynamicGroups[groupIndex];
+                            final isExpanded =
+                                _expandedGroupIndex == groupIndex;
+                            final groupHasSelection = group.areas.any(
+                              (a) => a.id == _selectedAreaId,
+                            );
 
-                          return AnimatedContainer(
-                            duration: const Duration(milliseconds: 220),
-                            decoration: BoxDecoration(
-                              color: isExpanded
-                                  ? AppColors.card
-                                  : AppColors.card.withValues(alpha: 0.5),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(
-                                color: groupHasSelection && isExpanded
-                                    ? AppColors.primary.withValues(alpha: 0.5)
-                                    : AppColors.inputBorder.withValues(alpha: 0.35),
-                                width: groupHasSelection && isExpanded ? 1.3 : 1,
+                            return AnimatedContainer(
+                              duration: const Duration(milliseconds: 220),
+                              decoration: BoxDecoration(
+                                color:
+                                    isExpanded
+                                        ? AppColors.card
+                                        : AppColors.card.withValues(alpha: 0.5),
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color:
+                                      groupHasSelection && isExpanded
+                                          ? AppColors.primary.withValues(
+                                            alpha: 0.5,
+                                          )
+                                          : AppColors.inputBorder.withValues(
+                                            alpha: 0.35,
+                                          ),
+                                  width:
+                                      groupHasSelection && isExpanded ? 1.3 : 1,
+                                ),
                               ),
-                            ),
-                            child: Column(
-                              children: [
-                                // ── Group header ──
-                                InkWell(
-                                  borderRadius: BorderRadius.circular(16),
-                                  onTap: () => setState(() {
-                                    _expandedGroupIndex = isExpanded ? -1 : groupIndex;
-                                  }),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 16,
-                                      vertical: 14,
+                              child: Column(
+                                children: [
+                                  // ── Group header ──
+                                  InkWell(
+                                    borderRadius: BorderRadius.circular(16),
+                                    onTap:
+                                        () => setState(() {
+                                          _expandedGroupIndex =
+                                              isExpanded ? -1 : groupIndex;
+                                        }),
+                                    child: Padding(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 16,
+                                        vertical: 14,
+                                      ),
+                                      child: Row(
+                                        children: [
+                                          Container(
+                                            width: 44,
+                                            height: 44,
+                                            decoration: BoxDecoration(
+                                              color: AppColors.primary
+                                                  .withValues(alpha: 0.18),
+                                              borderRadius:
+                                                  BorderRadius.circular(12),
+                                            ),
+                                            child: Icon(
+                                              IconData(
+                                                group.icon,
+                                                fontFamily: 'MaterialIcons',
+                                              ),
+                                              color: AppColors.primary,
+                                              size: 22,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 12),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  group.title,
+                                                  style: const TextStyle(
+                                                    color: AppColors.textMain,
+                                                    fontSize: 17,
+                                                    fontWeight: FontWeight.w800,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 2),
+                                                Text(
+                                                  '${group.areas.length} harita',
+                                                  style: const TextStyle(
+                                                    color: AppColors.textMuted,
+                                                    fontSize: 12,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                          AnimatedRotation(
+                                            turns: isExpanded ? 0.5 : 0,
+                                            duration: const Duration(
+                                              milliseconds: 220,
+                                            ),
+                                            child: Icon(
+                                              Icons.keyboard_arrow_down_rounded,
+                                              color:
+                                                  isExpanded
+                                                      ? AppColors.primary
+                                                      : AppColors.textMuted,
+                                              size: 26,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
-                                    child: Row(
+                                  ),
+
+                                  // ── Expandable children ──
+                                  AnimatedCrossFade(
+                                    firstChild: const SizedBox.shrink(),
+                                    secondChild: Column(
                                       children: [
                                         Container(
-                                          width: 44,
-                                          height: 44,
-                                          decoration: BoxDecoration(
-                                            color: AppColors.primary.withValues(alpha: 0.18),
-                                            borderRadius: BorderRadius.circular(12),
+                                          margin: const EdgeInsets.symmetric(
+                                            horizontal: 16,
                                           ),
-                                          child: Icon(
-                                            IconData(group.icon, fontFamily: 'MaterialIcons'),
-                                            color: AppColors.primary,
-                                            size: 22,
-                                          ),
+                                          height: 1,
+                                          color: AppColors.inputBorder
+                                              .withValues(alpha: 0.25),
                                         ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Text(
-                                                group.title,
-                                                style: const TextStyle(
-                                                  color: AppColors.textMain,
-                                                  fontSize: 17,
-                                                  fontWeight: FontWeight.w800,
+                                        const SizedBox(height: 8),
+                                        for (final area in group.areas)
+                                          _AreaTile(
+                                            area: area,
+                                            isSelected:
+                                                area.id == _selectedAreaId,
+                                            onTap:
+                                                () => setState(
+                                                  () =>
+                                                      _selectedAreaId = area.id,
                                                 ),
-                                              ),
-                                              const SizedBox(height: 2),
-                                              Text(
-                                                '${group.areas.length} harita',
-                                                style: const TextStyle(
-                                                  color: AppColors.textMuted,
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                            ],
                                           ),
-                                        ),
-                                        AnimatedRotation(
-                                          turns: isExpanded ? 0.5 : 0,
-                                          duration: const Duration(milliseconds: 220),
-                                          child: Icon(
-                                            Icons.keyboard_arrow_down_rounded,
-                                            color: isExpanded
-                                                ? AppColors.primary
-                                                : AppColors.textMuted,
-                                            size: 26,
-                                          ),
-                                        ),
+                                        const SizedBox(height: 8),
                                       ],
                                     ),
+                                    crossFadeState:
+                                        isExpanded
+                                            ? CrossFadeState.showSecond
+                                            : CrossFadeState.showFirst,
+                                    duration: const Duration(milliseconds: 220),
+                                    sizeCurve: Curves.easeInOut,
                                   ),
-                                ),
-
-                                // ── Expandable children ──
-                                AnimatedCrossFade(
-                                  firstChild: const SizedBox.shrink(),
-                                  secondChild: Column(
-                                    children: [
-                                      Container(
-                                        margin: const EdgeInsets.symmetric(horizontal: 16),
-                                        height: 1,
-                                        color: AppColors.inputBorder.withValues(alpha: 0.25),
-                                      ),
-                                      const SizedBox(height: 8),
-                                      for (final area in group.areas)
-                                        _AreaTile(
-                                          area: area,
-                                          isSelected: area.id == _selectedAreaId,
-                                          onTap: () => setState(() => _selectedAreaId = area.id),
-                                        ),
-                                      const SizedBox(height: 8),
-                                    ],
-                                  ),
-                                  crossFadeState: isExpanded
-                                      ? CrossFadeState.showSecond
-                                      : CrossFadeState.showFirst,
-                                  duration: const Duration(milliseconds: 220),
-                                  sizeCurve: Curves.easeInOut,
-                                ),
-                              ],
-                            ),
-                          );
-                        },
+                                ],
+                              ),
+                            );
+                          },
+                        ),
                       ),
-                    ),
                     const SizedBox(height: 14),
                     SizedBox(
                       width: double.infinity,
@@ -484,7 +582,7 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
                                     ),
                                   )
                                   : Text(
-                                    '${_selectedArea.title} Ön İzleme',
+                                    '${_selectedArea?.title ?? ''} Ön İzleme',
                                     style: const TextStyle(
                                       color: Colors.white,
                                       fontSize: 16,
@@ -654,7 +752,9 @@ class _MapNameEntryPageState extends State<_MapNameEntryPage> {
     if (exists) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Bu isimde bir haritanız zaten var. Lütfen farklı bir isim girin.'),
+          content: Text(
+            'Bu isimde bir haritanız zaten var. Lütfen farklı bir isim girin.',
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -780,14 +880,16 @@ class _AreaTile extends StatelessWidget {
         margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: isSelected
-              ? AppColors.primary.withValues(alpha: 0.14)
-              : Colors.transparent,
+          color:
+              isSelected
+                  ? AppColors.primary.withValues(alpha: 0.14)
+                  : Colors.transparent,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isSelected
-                ? AppColors.primary.withValues(alpha: 0.6)
-                : Colors.transparent,
+            color:
+                isSelected
+                    ? AppColors.primary.withValues(alpha: 0.6)
+                    : Colors.transparent,
             width: isSelected ? 1.2 : 0,
           ),
         ),
@@ -806,9 +908,10 @@ class _AreaTile extends StatelessWidget {
                   Text(
                     area.title,
                     style: TextStyle(
-                      color: isSelected
-                          ? AppColors.textMain
-                          : AppColors.textMain.withValues(alpha: 0.85),
+                      color:
+                          isSelected
+                              ? AppColors.textMain
+                              : AppColors.textMain.withValues(alpha: 0.85),
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
                     ),

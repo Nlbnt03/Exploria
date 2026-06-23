@@ -436,6 +436,45 @@ class MultiRoomFirestoreService {
     }, SetOptions(merge: true));
   }
 
+  /// Co-op check-in: awards XP and marks the venue as visited for all members
+  /// except the current user (who is handled locally via gameProvider).
+  Future<void> awardCoopCheckIn({
+    required String mapId,
+    required String venueId,
+    required int xpValue,
+    required List<String> memberUids,
+  }) async {
+    final currentUid = _uid;
+    final batch = _firestore.batch();
+
+    for (final uid in memberUids) {
+      if (uid == currentUid) continue;
+
+      // Increment XP fields atomically
+      batch.update(_firestore.collection('users').doc(uid), {
+        'xp': FieldValue.increment(xpValue),
+        'weeklyXP': FieldValue.increment(xpValue),
+        'weeklyXPUpdatedAt': FieldValue.serverTimestamp(),
+      });
+
+      // Append venueId to the member's visited list without overwriting
+      batch.set(
+        _firestore.collection('userMapStates').doc(uid),
+        {
+          'mapStates': {
+            mapId: {
+              'visitedPoiIds': FieldValue.arrayUnion([venueId]),
+              'updatedAt': FieldValue.serverTimestamp(),
+            },
+          },
+        },
+        SetOptions(merge: true),
+      );
+    }
+
+    await batch.commit();
+  }
+
   Stream<List<Invite>> listenPendingInvites() {
     final uid = _uid;
     return _invites

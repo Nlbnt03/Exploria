@@ -9,10 +9,15 @@ import '../../data/services/poi_service.dart';
 import '../map/map_areas.dart';
 
 class MapPreviewPageArgs {
-  const MapPreviewPageArgs({required this.areaId, required this.mode});
+  const MapPreviewPageArgs({
+    required this.areaId,
+    required this.mode,
+    this.mapAreaConfig,
+  });
 
   final String areaId;
   final String mode;
+  final MapAreaConfig? mapAreaConfig;
 }
 
 class MapPreviewPage extends StatefulWidget {
@@ -20,10 +25,12 @@ class MapPreviewPage extends StatefulWidget {
     super.key,
     required this.areaId,
     required this.mode,
+    this.mapAreaConfig,
   });
 
   final String areaId;
   final String mode;
+  final MapAreaConfig? mapAreaConfig;
 
   @override
   State<MapPreviewPage> createState() => _MapPreviewPageState();
@@ -34,48 +41,60 @@ class _MapPreviewPageState extends State<MapPreviewPage> {
   MapboxMap? _mapboxMap;
   bool _styleLoaded = false;
 
-  bool get _hasPoiData =>
-      widget.areaId == mapAreaGtu ||
-      widget.areaId == mapAreaFatih ||
-      widget.areaId == mapAreaBeyoglu ||
-      widget.areaId == mapAreaUskudar ||
-      widget.areaId == mapAreaKadikoy ||
-      widget.areaId == mapAreaAnkara;
+  bool get _hasPoiData => true;
 
   @override
   void initState() {
     super.initState();
-    _area = resolveMapArea(widget.areaId);
-  }
-
-  double _computePreviewZoom() {
-    final bounds = calculatePolygonBounds(_area.boundary);
-    final latSpan = bounds.maxLat - bounds.minLat;
-    final lngSpan = bounds.maxLng - bounds.minLng;
-    final maxSpan = latSpan > lngSpan ? latSpan : lngSpan;
-
-    // Rough heuristic: smaller span → higher zoom
-    if (maxSpan < 0.005) return 16.0;
-    if (maxSpan < 0.01) return 15.0;
-    if (maxSpan < 0.03) return 13.5;
-    if (maxSpan < 0.06) return 12.5;
-    return 11.5;
+    _area = widget.mapAreaConfig ?? resolveMapArea(widget.areaId);
   }
 
   Future<void> _onStyleLoaded(StyleLoadedEventData _) async {
     if (_styleLoaded) return;
     _styleLoaded = true;
+    final map = _mapboxMap;
+    if (map == null) return;
+
     await _addBoundaryPolygon();
     await _loadPreviewPois();
+  }
+
+  Future<void> _fitPreviewCamera(List<Position> poiPositions) async {
+    final map = _mapboxMap;
+    if (map == null) return;
+
+    final allPositions = <Position>[..._area.boundary, ...poiPositions];
+    if (allPositions.isEmpty) return;
+
+    final bounds = calculatePolygonBounds(allPositions);
+    await map.setBounds(
+      CameraBoundsOptions(
+        bounds: bounds.toCoordinateBounds(),
+        minZoom: 0,
+        maxZoom: 17.5,
+        minPitch: 0,
+        maxPitch: 75,
+      ),
+    );
+    final camera = await map.cameraForCoordinateBounds(
+      bounds.toCoordinateBounds(),
+      MbxEdgeInsets(top: 125, left: 28, bottom: 135, right: 28),
+      0,
+      0,
+      14.5,
+      null,
+    );
+    await map.setCamera(camera);
   }
 
   Future<void> _addBoundaryPolygon() async {
     final map = _mapboxMap;
     if (map == null) return;
 
-    final coordinates = _area.boundary
-        .map((p) => [p.lng.toDouble(), p.lat.toDouble()])
-        .toList();
+    final coordinates =
+        _area.boundary
+            .map((p) => [p.lng.toDouble(), p.lat.toDouble()])
+            .toList();
 
     // Close the polygon ring
     if (coordinates.isNotEmpty &&
@@ -99,24 +118,30 @@ class _MapPreviewPageState extends State<MapPreviewPage> {
     });
 
     try {
-      await map.style.addSource(GeoJsonSource(id: 'preview-boundary', data: geoJson));
+      await map.style.addSource(
+        GeoJsonSource(id: 'preview-boundary', data: geoJson),
+      );
 
       // Fill with semi-transparent purple
-      await map.style.addLayer(FillLayer(
-        id: 'preview-boundary-fill',
-        sourceId: 'preview-boundary',
-        fillColor: AppColors.primary.toARGB32(),
-        fillOpacity: 0.12,
-      ));
+      await map.style.addLayer(
+        FillLayer(
+          id: 'preview-boundary-fill',
+          sourceId: 'preview-boundary',
+          fillColor: AppColors.primary.toARGB32(),
+          fillOpacity: 0.12,
+        ),
+      );
 
       // Solid border line
-      await map.style.addLayer(LineLayer(
-        id: 'preview-boundary-line',
-        sourceId: 'preview-boundary',
-        lineColor: AppColors.primary.toARGB32(),
-        lineWidth: 2.5,
-        lineOpacity: 0.85,
-      ));
+      await map.style.addLayer(
+        LineLayer(
+          id: 'preview-boundary-line',
+          sourceId: 'preview-boundary',
+          lineColor: AppColors.primary.toARGB32(),
+          lineWidth: 2.5,
+          lineOpacity: 0.85,
+        ),
+      );
     } catch (e) {
       debugPrint('Error adding boundary polygon: $e');
     }
@@ -133,35 +158,26 @@ class _MapPreviewPageState extends State<MapPreviewPage> {
 
     try {
       final rawList = await PoiService().getPoisForCity(widget.areaId);
-      debugPrint('[Preview] ${widget.areaId} için ${rawList.length} POI yüklendi.');
+      debugPrint(
+        '[Preview] ${widget.areaId} için ${rawList.length} POI yüklendi.',
+      );
 
       final features = <Map<String, Object?>>[];
+      final poiPositions = <Position>[];
       for (final poi in rawList) {
         try {
-          final name = poi['isim'] as String? ?? poi['name'] as String? ?? '';
-          final type = poi['kategori'] as String? ?? poi['type'] as String? ?? 'unknown';
-          final rarity = poi['oncelik'] as String? ?? poi['rarity'] as String? ?? 'common';
-
-          double lon = 0;
-          double lat = 0;
-          if (poi.containsKey('koordinatlar')) {
-            final coords = poi['koordinatlar'] as Map<String, dynamic>;
-            lon = (coords['longitude'] as num?)?.toDouble() ??
-                (coords['lng'] as num?)?.toDouble() ?? 0;
-            lat = (coords['latitude'] as num?)?.toDouble() ??
-                (coords['lat'] as num?)?.toDouble() ?? 0;
-          } else {
-            lon = (poi['lon'] as num?)?.toDouble() ??
-                (poi['longitude'] as num?)?.toDouble() ?? 0;
-            lat = (poi['lat'] as num?)?.toDouble() ??
-                (poi['latitude'] as num?)?.toDouble() ?? 0;
-          }
+          final name = (poi['name'] as String?)?.trim() ?? '';
+          final type = (poi['category'] as String?)?.trim() ?? 'unknown';
+          final rarity = poi['rarity'] as String? ?? 'common';
+          final lon = (poi['longitude'] as num?)?.toDouble() ?? 0;
+          final lat = (poi['latitude'] as num?)?.toDouble() ?? 0;
 
           if (lon == 0 && lat == 0) {
             debugPrint('[Preview] Koordinat bulunamadı, POI atlanıyor: $name');
             continue;
           }
 
+          poiPositions.add(Position(lon, lat));
           features.add(<String, Object?>{
             'type': 'Feature',
             'id': poi['id']?.toString() ?? name,
@@ -169,6 +185,8 @@ class _MapPreviewPageState extends State<MapPreviewPage> {
               'name': name,
               'poi_type': type,
               'rarity': rarity,
+              'marker_color': _markerColorForCategory(type),
+              'marker_radius': _markerRadiusForRarity(rarity),
             },
             'geometry': <String, Object?>{
               'type': 'Point',
@@ -180,7 +198,9 @@ class _MapPreviewPageState extends State<MapPreviewPage> {
         }
       }
 
-      debugPrint('[Preview] ${features.length} geçerli POI feature oluşturuldu.');
+      debugPrint(
+        '[Preview] ${features.length} geçerli POI feature oluşturuldu.',
+      );
       final geoJson = jsonEncode(<String, Object?>{
         'type': 'FeatureCollection',
         'features': features,
@@ -201,40 +221,11 @@ class _MapPreviewPageState extends State<MapPreviewPage> {
           CircleLayer(
             id: circleLayerId,
             sourceId: sourceId,
-            circleRadiusExpression: <Object>[
-              'match',
-              <Object>['get', 'rarity'],
-              'must-see', 14.0,
-              'önerilen', 10.0,
-              'legendary', 14.0,
-              'epic', 11.0,
-              'rare', 8.0,
-              6.0,
-            ],
-            circleColorExpression: <Object>[
-              'match',
-              <Object>['get', 'poi_type'],
-              'Cami', '#10B981',
-              'Saray', '#F59E0B',
-              'Müze', '#3B82F6',
-              'Tarihi Yapı', '#6B7280',
-              'Meydan', '#F43F5E',
-              'Hamam', '#06B6D4',
-              'Çarşı & Pazar', '#8B5CF6',
-              'Çarşı', '#8B5CF6',
-              'Park & Bahçe', '#84CC16',
-              'Semt & Cadde', '#F97316',
-              'Kule & Tepe', '#EF4444',
-              'Sinagog & Kilise', '#A855F7',
-              'Eğitim Binası', '#3B82F6',
-              'Araştırma Merkezi', '#F59E0B',
-              'Spor Tesisleri', '#10B981',
-              'Yeme & İçme', '#F43F5E',
-              '#E0E0E0',
-            ],
-            circleStrokeWidth: 1.5,
+            circleRadiusExpression: <Object>['get', 'marker_radius'],
+            circleColorExpression: <Object>['get', 'marker_color'],
+            circleStrokeWidth: 2.0,
             circleStrokeColor: const Color(0xFFFFFFFF).toARGB32(),
-            circleOpacity: 0.85,
+            circleOpacity: 0.95,
           ),
         );
       } on PlatformException catch (e) {
@@ -252,23 +243,69 @@ class _MapPreviewPageState extends State<MapPreviewPage> {
             textHaloColor: const Color(0xFF000000).toARGB32(),
             textHaloWidth: 1.5,
             textOffset: <double>[0, 1.6],
-            textMaxWidth: 10.0,
-            textAllowOverlap: false,
+            textMaxWidth: 12.0,
+            textAllowOverlap: true,
             iconAllowOverlap: false,
           ),
         );
       } on PlatformException catch (e) {
         if (!e.toString().toLowerCase().contains('exists')) rethrow;
       }
+
+      await _fitPreviewCamera(poiPositions);
     } catch (e) {
       debugPrint('Error loading preview POIs: $e');
     }
   }
 
+  String _markerColorForCategory(String category) {
+    switch (category.trim().toLowerCase()) {
+      case 'cami':
+      case 'park':
+      case 'park & bahçe':
+      case 'spor tesisleri':
+        return '#22C55E';
+      case 'saray':
+      case 'araştırma merkezi':
+        return '#F59E0B';
+      case 'müze':
+      case 'eğitim binası':
+        return '#3B82F6';
+      case 'meydan':
+      case 'yeme & içme':
+        return '#F43F5E';
+      case 'hamam':
+        return '#06B6D4';
+      case 'çarşı':
+      case 'çarşı & pazar':
+      case 'sinagog & kilise':
+        return '#A855F7';
+      case 'semt & cadde':
+        return '#F97316';
+      case 'kule & tepe':
+        return '#EF4444';
+      default:
+        return '#8B5CF6';
+    }
+  }
+
+  double _markerRadiusForRarity(String rarity) {
+    switch (rarity.trim().toLowerCase()) {
+      case 'must-see':
+      case 'legendary':
+        return 13;
+      case 'epic':
+      case 'önerilen':
+        return 11;
+      case 'rare':
+        return 9;
+      default:
+        return 8;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final previewZoom = _computePreviewZoom();
-
     return Scaffold(
       backgroundColor: AppColors.bgBottom,
       body: Stack(
@@ -280,7 +317,7 @@ class _MapPreviewPageState extends State<MapPreviewPage> {
             styleUri: _area.styleUri,
             cameraOptions: CameraOptions(
               center: Point(coordinates: _area.center),
-              zoom: previewZoom,
+              zoom: 10,
               bearing: 0,
               pitch: 0,
             ),
@@ -462,7 +499,11 @@ class _MapPreviewPageState extends State<MapPreviewPage> {
                 child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.visibility_rounded, color: AppColors.primary, size: 18),
+                    Icon(
+                      Icons.visibility_rounded,
+                      color: AppColors.primary,
+                      size: 18,
+                    ),
                     SizedBox(width: 6),
                     Text(
                       'Ön İzleme',

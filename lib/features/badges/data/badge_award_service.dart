@@ -16,30 +16,57 @@ class BadgeAwardService {
     required BadgeCheckContext context,
     required GameNotifier gameNotifier,
   }) async {
-    final earnedBadgeIds = <String>[];
+    final earned = await checkNewBadges(uid: uid, context: context);
+    await awardBadges(uid: uid, badges: earned, gameNotifier: gameNotifier);
+    return earned.map((d) => d.id).toList();
+  }
 
+  /// Returns badge definitions that the user has just earned but not yet been awarded.
+  /// Only performs Firestore reads — use [awardBadges] separately to write.
+  Future<List<BadgeDefinition>> checkNewBadges({
+    required String uid,
+    required BadgeCheckContext context,
+  }) async {
     try {
       final existingBadges = await _badgeService.fetchBadges(uid);
       final existingIds = existingBadges.map((b) => b.id).toSet();
 
       if (cachedBadges == null) {
-        final snap = await _firestore.collection('badges').where('isActive', isEqualTo: true).get();
-        cachedBadges = snap.docs.map((doc) => BadgeDefinition.fromJson(doc.data(), doc.id)).toList();
+        final snap =
+            await _firestore
+                .collection('badges')
+                .where('isActive', isEqualTo: true)
+                .get();
+        cachedBadges =
+            snap.docs
+                .map((doc) => BadgeDefinition.fromJson(doc.data(), doc.id))
+                .toList();
       }
 
-      for (final def in cachedBadges!) {
-        if (existingIds.contains(def.id)) continue;
-
-        if (def.condition(context)) {
-          await _awardBadge(uid: uid, def: def, gameNotifier: gameNotifier);
-          earnedBadgeIds.add(def.id);
-        }
-      }
+      return cachedBadges!
+          .where(
+            (def) => !existingIds.contains(def.id) && def.condition(context),
+          )
+          .toList();
     } catch (e) {
-      debugPrint('Error awarding badges: $e');
+      debugPrint('Error checking badges: $e');
+      return [];
     }
+  }
 
-    return earnedBadgeIds;
+  /// Writes badge awards to Firestore. Safe to run with [unawaited] while showing the dialog.
+  Future<void> awardBadges({
+    required String uid,
+    required List<BadgeDefinition> badges,
+    required GameNotifier gameNotifier,
+  }) async {
+    for (final def in badges) {
+      try {
+        await _awardBadge(uid: uid, def: def, gameNotifier: gameNotifier);
+      } catch (e) {
+        debugPrint('Error awarding badge ${def.id}: $e');
+      }
+    }
   }
 
   Future<void> _awardBadge({
@@ -58,12 +85,33 @@ class BadgeAwardService {
       'name': def.name,
       'description': def.description,
       'iconName': _getIconNameForCategory(def.category),
+      'images': def.images,
       'earnedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
+
+    await _addToProfileShowcase(uid, def.id);
 
     if (def.xpReward != null && def.xpReward! > 0) {
       await gameNotifier.addXP(def.xpReward!);
     }
+  }
+
+  Future<void> _addToProfileShowcase(String uid, String badgeId) async {
+    final userRef = _firestore.collection('users').doc(uid);
+    await _firestore.runTransaction((transaction) async {
+      final snapshot = await transaction.get(userRef);
+      final rawFeatured = snapshot.data()?['featuredBadges'];
+      final featured =
+          rawFeatured is List
+              ? rawFeatured.map((item) => item.toString()).toList()
+              : <String>[];
+
+      featured.remove(badgeId);
+      featured.insert(0, badgeId);
+      transaction.set(userRef, {
+        'featuredBadges': featured.take(4).toList(),
+      }, SetOptions(merge: true));
+    });
   }
 
   String _getIconNameForCategory(BadgeCategory category) {
@@ -80,13 +128,17 @@ class BadgeAwardService {
   }
 
   static Future<void> initBadges() async {
-    final snap = await FirebaseFirestore.instance
-        .collection('badges')
-        .where('isActive', isEqualTo: true)
-        .get();
-    cachedBadges = snap.docs
-        .map((doc) => BadgeDefinition.fromJson(doc.data(), doc.id))
-        .toList();
-    debugPrint('[Badges] ${cachedBadges!.length} rozet projenin önbelleğine yüklendi.');
+    final snap =
+        await FirebaseFirestore.instance
+            .collection('badges')
+            .where('isActive', isEqualTo: true)
+            .get();
+    cachedBadges =
+        snap.docs
+            .map((doc) => BadgeDefinition.fromJson(doc.data(), doc.id))
+            .toList();
+    debugPrint(
+      '[Badges] ${cachedBadges!.length} rozet projenin önbelleğine yüklendi.',
+    );
   }
 }

@@ -1,7 +1,10 @@
 import 'dart:math' as math;
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import '../../../auth/domain/models/badge.dart';
 import '../../domain/badge_definitions.dart';
+
+enum BadgeImageVariant { premium, list }
 
 class HexagonBadge extends StatelessWidget {
   const HexagonBadge({
@@ -10,12 +13,23 @@ class HexagonBadge extends StatelessWidget {
     this.isEarned = true,
     this.size = 72.0,
     this.onTap,
+    this.imageVariant = BadgeImageVariant.list,
   });
 
   final BadgeDefinition definition;
   final bool isEarned;
   final double size;
   final VoidCallback? onTap;
+  final BadgeImageVariant imageVariant;
+
+  String? get _imageUrl {
+    switch (imageVariant) {
+      case BadgeImageVariant.premium:
+        return definition.premiumImageUrl;
+      case BadgeImageVariant.list:
+        return definition.listImageUrl;
+    }
+  }
 
   Widget _buildBadgeIcon(String badgeId, bool isEarned) {
     if (definition.isHidden && !isEarned) {
@@ -36,53 +50,119 @@ class HexagonBadge extends StatelessWidget {
     // Emoji karakterlerinin length'i 1-3 arasındadır. Uzunsa eski string'dir, fallback kullan.
     if (emoji.length > 2) {
       switch (badgeId) {
-        case 'first_step': emoji = '👣'; break;
-        case 'curious': emoji = '🧭'; break;
-        case 'explorer': emoji = '🗺️'; break;
-        case 'history_hunter': emoji = '🏛️'; break;
-        case 'spiritual': emoji = '🕌'; break;
-        case 'multi_city': emoji = '🌍'; break;
-        case 'fatih_conqueror': emoji = '⭐'; break;
-        case 'legend_explorer': emoji = '👑'; break;
-        case 'team_player': emoji = '🤝'; break;
-        case 'team_captain': emoji = '👥'; break;
-        case 'weekly_leader': emoji = '🏆'; break;
-        case 'co_conqueror': emoji = '💫'; break;
-        case 'flame': emoji = '🔥'; break;
-        case 'unstoppable': emoji = '⚡'; break;
-        case 'perfectionist': emoji = '🎯'; break;
-        case 'legend_streak': emoji = '💎'; break;
-        case 'night_explorer': emoji = '🌙'; break;
-        case 'early_bird': emoji = '🌅'; break;
-        case 'speed_explorer': emoji = '🚀'; break;
-        case 'winter_traveler': emoji = '❄️'; break;
+        case 'first_step':
+          emoji = '👣';
+          break;
+        case 'curious':
+          emoji = '🧭';
+          break;
+        case 'explorer':
+          emoji = '🗺️';
+          break;
+        case 'history_hunter':
+          emoji = '🏛️';
+          break;
+        case 'spiritual':
+          emoji = '🕌';
+          break;
+        case 'multi_city':
+          emoji = '🌍';
+          break;
+        case 'fatih_conqueror':
+          emoji = '⭐';
+          break;
+        case 'legend_explorer':
+          emoji = '👑';
+          break;
+        case 'team_player':
+          emoji = '🤝';
+          break;
+        case 'team_captain':
+          emoji = '👥';
+          break;
+        case 'weekly_leader':
+          emoji = '🏆';
+          break;
+        case 'co_conqueror':
+          emoji = '💫';
+          break;
+        case 'flame':
+          emoji = '🔥';
+          break;
+        case 'unstoppable':
+          emoji = '⚡';
+          break;
+        case 'perfectionist':
+          emoji = '🎯';
+          break;
+        case 'legend_streak':
+          emoji = '💎';
+          break;
+        case 'night_explorer':
+          emoji = '🌙';
+          break;
+        case 'early_bird':
+          emoji = '🌅';
+          break;
+        case 'speed_explorer':
+          emoji = '🚀';
+          break;
+        case 'winter_traveler':
+          emoji = '❄️';
+          break;
       }
     }
 
     return Text(
       emoji,
       style: TextStyle(
-        fontSize: size * 0.4,
-        color: isEarned ? Colors.white : Colors.white54,
+        fontSize: size * 0.48,
+        color: isEarned ? Colors.white : Colors.white38,
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    Widget child = SizedBox(
+    final imageUrl = _imageUrl;
+    final width =
+        imageVariant == BadgeImageVariant.list && imageUrl != null
+            ? size * (260 / 68)
+            : size;
+
+    Widget fallback = SizedBox(
       width: size,
       height: size,
       child: CustomPaint(
-        painter: _HexagonPainter(
-          tier: definition.tier,
-          isEarned: isEarned,
-        ),
-        child: Center(
-          child: _buildBadgeIcon(definition.id, isEarned),
-        ),
+        painter: _HexagonPainter(tier: definition.tier, isEarned: isEarned),
+        child: Center(child: _buildBadgeIcon(definition.id, isEarned)),
       ),
     );
+
+    Widget child;
+    if (imageUrl != null && !(definition.isHidden && !isEarned)) {
+      final shell = SizedBox(
+        width: width,
+        height: size,
+        child: CustomPaint(
+          painter: _HexagonPainter(tier: definition.tier, isEarned: isEarned),
+        ),
+      );
+      child = SizedBox(
+        width: width,
+        height: size,
+        child: CachedNetworkImage(
+          imageUrl: imageUrl,
+          fit: BoxFit.contain,
+          filterQuality: FilterQuality.high,
+          fadeInDuration: const Duration(milliseconds: 150),
+          placeholder: (_, _) => shell,
+          errorWidget: (_, _, _) => fallback,
+        ),
+      );
+    } else {
+      child = fallback;
+    }
 
     if (onTap != null) {
       child = GestureDetector(
@@ -93,10 +173,7 @@ class HexagonBadge extends StatelessWidget {
     }
 
     if (!isEarned) {
-      child = Opacity(
-        opacity: 0.35,
-        child: child,
-      );
+      child = Opacity(opacity: 0.35, child: child);
     }
 
     return child;
@@ -120,7 +197,7 @@ class _HexagonPainter extends CustomPainter {
     final path = Path();
     for (int i = 0; i < 6; i++) {
       // 60 * i degrees. Flat top is when corners start at 0 deg (x=R, y=0) ?
-      // Wait, pointy top starts at -90 deg. 
+      // Wait, pointy top starts at -90 deg.
       // Flat top starts at 0 deg.
       final angle = (60 * i) * math.pi / 180;
       final x = center.dx + radius * math.cos(angle);
@@ -149,9 +226,10 @@ class _HexagonPainter extends CustomPainter {
 
     final paintOuter = Paint()..style = PaintingStyle.fill;
     final paintInner = Paint()..style = PaintingStyle.fill;
-    final paintStroke = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.0;
+    final paintStroke =
+        Paint()
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.0;
 
     if (!isEarned) {
       paintOuter.color = const Color(0xFF3D3848);
