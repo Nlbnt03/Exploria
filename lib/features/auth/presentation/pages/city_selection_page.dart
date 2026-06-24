@@ -172,34 +172,29 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
 
     setState(() => _isOpeningMap = true);
     try {
-      Position currentPosition;
-      if (isTemporaryTestMap(selectedArea)) {
-        currentPosition = selectedArea.center;
-      } else {
-        final accessResult = await LocationService.requestSinglePosition();
-        if (!mounted) return;
+      final accessResult = await LocationService.requestSinglePosition();
+      if (!mounted) return;
 
-        if (!accessResult.isGranted) {
-          _showGateMessage(accessResult.status);
-          return;
-        }
+      if (!accessResult.isGranted) {
+        _showGateMessage(accessResult.status);
+        return;
+      }
 
-        currentPosition = accessResult.position!;
-        final isInsideArea = isPointInsidePolygon(
-          currentPosition,
-          selectedArea.boundary,
-        );
-        if (!isInsideArea) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                '${selectedArea.title} içinde değilsin. Haritayı açmak için seçilen alanın içine gir.',
-              ),
-              behavior: SnackBarBehavior.floating,
+      final Position currentPosition = accessResult.position!;
+      final isInsideArea = isPointInsidePolygon(
+        currentPosition,
+        selectedArea.boundary,
+      );
+      if (!isInsideArea) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '${selectedArea.title} içinde değilsin. Haritayı açmak için seçilen alanın içine gir.',
             ),
-          );
-          return;
-        }
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
       }
 
       final mapId = await _createMapForSelection(

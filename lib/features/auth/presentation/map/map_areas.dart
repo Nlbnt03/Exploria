@@ -16,11 +16,15 @@ const String mapAreaAnkara = 'ankara_merkez';
 
 const String defaultMapAreaId = mapAreaGtu;
 
+
 class MapAreaConfig {
   const MapAreaConfig({
     required this.id,
     required this.title,
     required this.subtitle,
+    this.city = '',
+    this.cityCategory = 'diger',
+    this.totalPois = 0,
     required this.styleUri,
     required this.center,
     required this.boundary,
@@ -31,11 +35,57 @@ class MapAreaConfig {
   final String id;
   final String title;
   final String subtitle;
+  final String city;
+  final String cityCategory;
+  final int totalPois;
   final String styleUri;
   final Position center;
   final List<Position> boundary;
   final double gridSizeMeters;
   final double minZoom;
+
+  static MapAreaConfig fromFirestoreData(String id, Map<String, dynamic> data) {
+    final bounds = Map<String, dynamic>.from(
+      data['bounds'] as Map? ?? const <String, dynamic>{},
+    );
+    final west = (bounds['west'] as num?)?.toDouble();
+    final east = (bounds['east'] as num?)?.toDouble();
+    final south = (bounds['south'] as num?)?.toDouble() ?? 0;
+    final north = (bounds['north'] as num?)?.toDouble() ?? 0;
+
+    if (west == null ||
+        east == null ||
+        bounds['south'] is! num ||
+        bounds['north'] is! num ||
+        west >= east ||
+        south >= north) {
+      throw FormatException('maps/$id belgesinde geçerli bounds alanı yok.');
+    }
+
+    final boundary = [
+      Position(west, south),
+      Position(east, south),
+      Position(east, north),
+      Position(west, north),
+    ];
+
+    final mapName = (data['mapName'] as String?)?.trim() ?? '';
+    final city = (data['city'] as String?)?.trim() ?? '';
+    final cityCategory =
+        (data['cityCategory'] as String?)?.trim().toLowerCase() ?? 'diger';
+
+    return MapAreaConfig(
+      id: id,
+      title: mapName.isEmpty ? id : mapName,
+      subtitle: '${(data['totalPois'] as num?)?.toInt() ?? 0} mekan',
+      city: city.isEmpty ? 'Diğer' : city,
+      cityCategory: cityCategory.isEmpty ? 'diger' : cityCategory,
+      totalPois: (data['totalPois'] as num?)?.toInt() ?? 0,
+      styleUri: defaultMapStyleUri,
+      center: Position((west + east) / 2, (south + north) / 2),
+      boundary: boundary,
+    );
+  }
 }
 
 const String gtuStyleUri = defaultMapStyleUri;
@@ -266,9 +316,7 @@ final List<MapAreaGroup> selectableMapGroups = <MapAreaGroup>[
   MapAreaGroup(
     title: 'Ankara Haritaları',
     icon: 0xe3ab, // Icons.location_city_rounded
-    areas: [
-      selectableMapAreas.firstWhere((a) => a.id == mapAreaAnkara),
-    ],
+    areas: [selectableMapAreas.firstWhere((a) => a.id == mapAreaAnkara)],
   ),
 ];
 

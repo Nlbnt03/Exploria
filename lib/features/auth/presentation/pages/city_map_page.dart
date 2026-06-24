@@ -89,7 +89,6 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
   bool _poiLayerCreated = false;
 
   bool get _hasPoiData => true;
-  bool get _isTemporaryTestMap => isTemporaryTestMap(_selectedArea);
 
   @override
   void initState() {
@@ -171,7 +170,6 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
       onPersistStateRequested:
           (state) => _persistMapState(uid: uid, mapState: state),
       areaMinZoom: _selectedArea.minZoom,
-      testMode: _isTemporaryTestMap,
     );
     mapController.addListener(_onControllerChanged);
 
@@ -427,15 +425,11 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                               venueLng: lon,
                               currentVisited: currentVisited,
                               userLat:
-                                  _isTemporaryTestMap
-                                      ? lat
-                                      : _mapController?.lastInsidePosition?.lat
-                                          .toDouble(),
+                                  _mapController?.lastInsidePosition?.lat
+                                      .toDouble(),
                               userLng:
-                                  _isTemporaryTestMap
-                                      ? lon
-                                      : _mapController?.lastInsidePosition?.lng
-                                          .toDouble(),
+                                  _mapController?.lastInsidePosition?.lng
+                                      .toDouble(),
                               onCheckInSuccess: () async {
                                 _visitedPoiIds.add(id);
                                 _mapController?.visitedPoiIds =

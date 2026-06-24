@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -19,7 +18,6 @@ class CampusMapController extends ChangeNotifier {
     this.restoredState,
     this.onPersistStateRequested,
     this.areaMinZoom = 14.8,
-    this.testMode = false,
   }) : _lastInsidePosition =
            restoredState?.lastInsidePosition ?? initialUserPosition,
        _currentZoom = restoredState?.zoom ?? 16.0,
@@ -36,7 +34,6 @@ class CampusMapController extends ChangeNotifier {
   final CampusMapState? restoredState;
   final Future<void> Function(CampusMapState state)? onPersistStateRequested;
   final double areaMinZoom;
-  final bool testMode;
 
   GeoJsonSource? _fogSource;
   GeoJsonSource? _cloudSource;
@@ -45,7 +42,8 @@ class CampusMapController extends ChangeNotifier {
   Timer? _fogUpdateDebounce;
   Timer? _revealAnimationTicker;
   Timer? _persistDebounce;
-  final _poiTappedController = StreamController<Map<String, dynamic>>.broadcast();
+  final _poiTappedController =
+      StreamController<Map<String, dynamic>>.broadcast();
 
   MapboxMap? _mapboxMap;
   bool _cameraCorrectionInFlight = false;
@@ -81,7 +79,7 @@ class CampusMapController extends ChangeNotifier {
 
   double get minZoom => areaMinZoom;
   double get maxZoom => 17.5;
-  
+
   Stream<Map<String, dynamic>> get onPoiTapped => _poiTappedController.stream;
 
   Future<void> onMapCreated(MapboxMap mapboxMap) async {
@@ -97,20 +95,17 @@ class CampusMapController extends ChangeNotifier {
       restoredState?.revealedCellIds ?? const <String>[],
     );
 
-    if (!testMode) {
-      await map.setBounds(
-        CameraBoundsOptions(
-          bounds: fogManager.bounds.toCoordinateBounds(),
-          minZoom: minZoom,
-          maxZoom: maxZoom,
-          minPitch: 0,
-          maxPitch: 75,
-        ),
-      );
-    }
-    
-    await _upsertFogSourceAndLayer();
+    await map.setBounds(
+      CameraBoundsOptions(
+        bounds: fogManager.bounds.toCoordinateBounds(),
+        minZoom: minZoom,
+        maxZoom: maxZoom,
+        minPitch: 0,
+        maxPitch: 75,
+      ),
+    );
 
+    await _upsertFogSourceAndLayer();
     await _enableLocationPuck();
     await _configureOrnaments(map);
 
@@ -159,7 +154,7 @@ class CampusMapController extends ChangeNotifier {
       if (features.isNotEmpty) {
         final feature = features.first;
         if (feature == null) return;
-        
+
         final queriedFeature = feature.queriedFeature;
         final properties = queriedFeature.feature['properties'];
         final id = queriedFeature.feature['id'];
@@ -228,19 +223,17 @@ class CampusMapController extends ChangeNotifier {
             'Semt & Cadde', '#F97316', // Orange
             'Kule & Tepe', '#EF4444', // Red
             'Sinagog & Kilise', '#A855F7', // Violet
-            
             // Gebze Teknik campus categories
             'Eğitim Binası', '#3B82F6', // Blue
             'Araştırma Merkezi', '#F59E0B', // Amber
             'Spor Tesisleri', '#10B981', // Green
             'Yeme & İçme', '#F43F5E', // Rose
-            
             // Fallback old colors
             'historic', '#FFB300',
             'museum', '#42A5F5',
             'park', '#66BB6A',
             'tower', '#EF5350',
-            
+
             // Default color
             '#E0E0E0',
           ],
@@ -248,7 +241,11 @@ class CampusMapController extends ChangeNotifier {
           circleStrokeColor: const Color(0xFFFFFFFF).toARGB32(),
           circleOpacityExpression: <Object>[
             'case',
-            <Object>['==', <Object>['get', 'visited'], true],
+            <Object>[
+              '==',
+              <Object>['get', 'visited'],
+              true,
+            ],
             0.4,
             0.92,
           ],
@@ -271,7 +268,11 @@ class CampusMapController extends ChangeNotifier {
           textHaloWidth: 1.5,
           textOpacityExpression: <Object>[
             'case',
-            <Object>['==', <Object>['get', 'visited'], true],
+            <Object>[
+              '==',
+              <Object>['get', 'visited'],
+              true,
+            ],
             0.5,
             1.0,
           ],
@@ -408,7 +409,6 @@ class CampusMapController extends ChangeNotifier {
     await _fogSource?.updateGeoJSON(_emptyFeatureCollection);
     _lastRenderedFogGeoJson = _emptyFeatureCollection;
 
-
     _cloudSource = GeoJsonSource(
       id: _cloudSourceId,
       data: _emptyFeatureCollection,
@@ -507,7 +507,8 @@ class CampusMapController extends ChangeNotifier {
       _scheduleFogRefresh(delay: const Duration(milliseconds: 16));
 
       // Batch threshold: >= 10 new cells → immediate persist
-      final newCellsSinceLastPersist = fogManager.revealedCount - _cellCountAtLastPersist;
+      final newCellsSinceLastPersist =
+          fogManager.revealedCount - _cellCountAtLastPersist;
       if (newCellsSinceLastPersist >= _batchCellThreshold) {
         _schedulePersist(delay: Duration.zero);
       } else {
@@ -619,14 +620,14 @@ class CampusMapController extends ChangeNotifier {
 
   Future<void> _configureOrnaments(MapboxMap map) async {
     try {
-      await map.scaleBar.updateSettings(ScaleBarSettings(
-        position: OrnamentPosition.BOTTOM_LEFT,
-        marginLeft: 16,
-        marginBottom: 72,
-      ));
-      await map.compass.updateSettings(CompassSettings(
-        enabled: false,
-      ));
+      await map.scaleBar.updateSettings(
+        ScaleBarSettings(
+          position: OrnamentPosition.BOTTOM_LEFT,
+          marginLeft: 16,
+          marginBottom: 72,
+        ),
+      );
+      await map.compass.updateSettings(CompassSettings(enabled: false));
     } on PlatformException {
       // Ornament config is best-effort.
     }

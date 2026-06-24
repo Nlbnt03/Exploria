@@ -381,12 +381,6 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
       return;
     }
 
-    final area = _resolveAreaForRoom(_room);
-    if (isTemporaryTestMap(area)) {
-      // Test areas do not use GPS
-      return;
-    }
-
     final permissionOk = await _ensureLocationPermission();
     if (!permissionOk) {
       if (mounted) {
