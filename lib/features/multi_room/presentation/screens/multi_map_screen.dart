@@ -44,7 +44,8 @@ class MultiMapScreen extends ConsumerStatefulWidget {
   ConsumerState<MultiMapScreen> createState() => _MultiMapScreenState();
 }
 
-class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
+class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
+    with WidgetsBindingObserver {
   static const String _locationSourceId = 'multi-room-locations-source';
   static const String _circleLayerId = 'multi-room-locations-circle';
   static const String _labelLayerId = 'multi-room-locations-label';
@@ -113,15 +114,54 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
   bool _poiLayerCreated = false;
   String? _uid;
 
+  // Co-op sync & session state
+  StreamSubscription<Set<String>>? _visitsSub;
+  StreamSubscription<List<String>>? _sharedFogSub;
+  Timer? _sharedFogDebounce;
+  final Set<String> _pendingSharedFogCells = {};
+  DateTime? _sessionStartTime;
+  int? _coopXpGain; // XP to display as floating popup for B's screen
+
   @override
   void initState() {
     super.initState();
     _uid = FirebaseAuth.instance.currentUser?.uid;
+    _sessionStartTime = DateTime.now();
+    WidgetsBinding.instance.addObserver(this);
 
-    // Request permission as soon as the screen is visible so the dialog
-    // appears in a clean UI state, not from a background Firestore callback.
+    // Request permission immediately so the dialog appears in clean UI state.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_ensureLocationPermission());
+    });
+
+    // Sync room-level visits → update local visitedPoiIds in real time (B's fix).
+    _visitsSub = _service.listenRoomVisits(widget.roomId).listen((sharedIds) {
+      final newIds = sharedIds.difference(_visitedPoiIds);
+      if (newIds.isNotEmpty && mounted) {
+        setState(() => _visitedPoiIds.addAll(newIds));
+        _loadAndShowPois();
+        unawaited(_persistMapState());
+      }
+    });
+
+    // Sync shared fog from teammates.
+    _sharedFogSub = _service.listenSharedFog(widget.roomId).listen((cells) {
+      final fog = _fogManager;
+      if (fog == null || cells.isEmpty) return;
+      fog.mergeRevealedCells(cells);
+      _scheduleFogRefresh(delay: const Duration(milliseconds: 100));
+    });
+
+    // XP animation for B: listen for new room check-in events.
+    _service.listenRoomCheckInEvents(widget.roomId).listen((event) {
+      final by = event['visitedBy'] as String?;
+      final xp = (event['xpValue'] as num?)?.toInt() ?? 0;
+      if (by != _uid && xp > 0 && mounted) {
+        setState(() => _coopXpGain = xp);
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) setState(() => _coopXpGain = null);
+        });
+      }
     });
 
     _roomSub = _service
@@ -445,6 +485,9 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
     ).listen(
       (pos) {
         if (!_isTracking) return;
+        // Skip inaccurate fixes (GPS drift in buildings / vehicles).
+        if (pos.accuracy > 20.0) return;
+        if (pos.speed > 8.0) return; // > ~29 km/h → likely in a vehicle
         final position = Position(pos.longitude, pos.latitude);
         unawaited(
           _service.updateMyLocation(widget.roomId, pos.latitude, pos.longitude),
@@ -504,9 +547,20 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
       _startFogAnimationTicker();
       _scheduleFogRefresh(delay: const Duration(milliseconds: 16));
       _schedulePersistMapState(delay: const Duration(milliseconds: 650));
-      if (mounted) {
-        setState(() {});
-      }
+      // Share newly revealed cells with teammates (debounced to batch writes).
+      final newCells = fogManager.snapshotRevealedCellIds();
+      _pendingSharedFogCells.addAll(newCells);
+      _sharedFogDebounce?.cancel();
+      _sharedFogDebounce = Timer(const Duration(seconds: 5), () {
+        if (_pendingSharedFogCells.isNotEmpty) {
+          unawaited(_service.updateSharedFog(
+            widget.roomId,
+            _pendingSharedFogCells.toList(),
+          ));
+          _pendingSharedFogCells.clear();
+        }
+      });
+      if (mounted) setState(() {});
       return;
     }
 
@@ -661,21 +715,80 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
   Future<void> _leaveRoom() async {
     try {
       _stopTracking();
+      // Flush shared fog before leaving.
+      if (_pendingSharedFogCells.isNotEmpty) {
+        _sharedFogDebounce?.cancel();
+        await _service.updateSharedFog(
+          widget.roomId,
+          _pendingSharedFogCells.toList(),
+        );
+        _pendingSharedFogCells.clear();
+      }
       await _checkBadgesBeforeExit();
+      if (mounted) await _showSessionSummary();
       await _service.setMyInMapPresence(widget.roomId, inMap: false);
       await _service.leaveRoom(widget.roomId);
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       Navigator.pushNamedAndRemoveUntil(context, AppRouter.home, (_) => false);
     } on Exception catch (e) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text('Odadan ayrilinamadi: $e')));
     }
+  }
+
+  Future<void> _showSessionSummary() async {
+    if (!mounted) return;
+    final duration = _sessionStartTime != null
+        ? DateTime.now().difference(_sessionStartTime!)
+        : Duration.zero;
+    final mins = duration.inMinutes;
+    final secs = duration.inSeconds % 60;
+    final durationStr = mins > 0 ? '${mins}dk ${secs}sn' : '${secs}sn';
+    final teamSize = _memberByUid.length;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.bgBottom,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.flag_rounded, color: AppColors.primary),
+            SizedBox(width: 8),
+            Text('Oturum Özeti',
+                style: TextStyle(color: AppColors.textMain, fontSize: 18)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _SummaryRow(icon: Icons.group_rounded,
+                label: 'Takım', value: '$teamSize kişi'),
+            _SummaryRow(icon: Icons.place_rounded,
+                label: 'Gezilen', value: '${_visitedPoiIds.length} mekan'),
+            _SummaryRow(icon: Icons.timer_rounded,
+                label: 'Süre', value: durationStr),
+            _SummaryRow(
+              icon: Icons.remove_red_eye_rounded,
+              label: 'Açılan hücre',
+              value: '${_fogManager?.revealedCount ?? 0} / '
+                  '${_fogManager?.totalCount ?? 0}',
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Devam Et',
+                style: TextStyle(color: AppColors.primary,
+                    fontWeight: FontWeight.w700)),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _endRoom() async {
@@ -967,6 +1080,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
                                               // Award XP + visited to all other members
                                               unawaited(
                                                 _service.awardCoopCheckIn(
+                                                  roomId: widget.roomId,
                                                   mapId: mapId,
                                                   venueId: id,
                                                   xpValue: xpValue,
@@ -1691,12 +1805,24 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.inactive) {
+      unawaited(_persistMapState());
+    }
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _locationSub?.cancel();
     _isTracking = false;
     _fogRefreshDebounce?.cancel();
     _fogAnimationTicker?.cancel();
     _persistMapStateDebounce?.cancel();
+    _sharedFogDebounce?.cancel();
+    _visitsSub?.cancel();
+    _sharedFogSub?.cancel();
     unawaited(_persistMapState());
     unawaited(_service.setMyInMapPresence(widget.roomId, inMap: false));
     _roomSub?.cancel();
@@ -1970,6 +2096,20 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
               ),
             ),
           ),
+        // Co-op XP popup: shown when a teammate's check-in awards XP to us.
+        if (_coopXpGain != null)
+          Positioned(
+            bottom: 80,
+            left: 0,
+            right: 0,
+            child: Center(
+              child: XPPopup(
+                key: ValueKey(_coopXpGain),
+                xpAmount: _coopXpGain!,
+                onComplete: () {},
+              ),
+            ),
+          ),
         ],
       ),
       ),
@@ -2074,6 +2214,38 @@ class _ProximityRow extends StatelessWidget {
             ),
           ),
           Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+}
+
+class _SummaryRow extends StatelessWidget {
+  const _SummaryRow({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: AppColors.primary),
+          const SizedBox(width: 10),
+          Text(label,
+              style: const TextStyle(color: AppColors.textMuted, fontSize: 14)),
+          const Spacer(),
+          Text(value,
+              style: const TextStyle(
+                  color: AppColors.textMain,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700)),
         ],
       ),
     );

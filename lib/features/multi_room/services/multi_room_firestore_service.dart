@@ -410,15 +410,33 @@ class MultiRoomFirestoreService {
     final roomRef = _rooms.doc(roomId);
     final memberRef = roomRef.collection('members').doc(uid);
     final locationRef = roomRef.collection('locations').doc(uid);
+
+    // Read other members before the transaction for potential host transfer.
+    final membersSnap = await roomRef.collection('members').get();
+    final nextHostUid = membersSnap.docs
+        .where((d) => d.id != uid)
+        .map((d) => (d.data()['uid'] as String?)?.trim() ?? d.id.trim())
+        .where((id) => id.isNotEmpty)
+        .firstOrNull;
+
     await _firestore.runTransaction((tx) async {
       final roomSnap = await tx.get(roomRef);
       if (roomSnap.exists) {
         final room = Room.fromDoc(roomSnap);
         if (room.hostId == uid && !room.isFinished) {
-          tx.update(roomRef, {
-            'status': 'finished',
-            'updatedAt': FieldValue.serverTimestamp(),
-          });
+          if (nextHostUid != null) {
+            // Transfer host — room stays active.
+            tx.update(roomRef, {
+              'hostId': nextHostUid,
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
+          } else {
+            // No other members left — finish the room.
+            tx.update(roomRef, {
+              'status': 'finished',
+              'updatedAt': FieldValue.serverTimestamp(),
+            });
+          }
         }
       }
       tx.delete(memberRef);
@@ -438,7 +456,9 @@ class MultiRoomFirestoreService {
 
   /// Co-op check-in: awards XP and marks the venue as visited for all members
   /// except the current user (who is handled locally via gameProvider).
+  /// Also writes a room-level visit record so every member's screen updates.
   Future<void> awardCoopCheckIn({
+    required String roomId,
     required String mapId,
     required String venueId,
     required int xpValue,
@@ -447,17 +467,26 @@ class MultiRoomFirestoreService {
     final currentUid = _uid;
     final batch = _firestore.batch();
 
+    // Room-level visit — all members' screens observe this.
+    batch.set(
+      _rooms.doc(roomId).collection('visits').doc(venueId),
+      {
+        'venueId': venueId,
+        'visitedBy': currentUid,
+        'xpValue': xpValue,
+        'visitedAt': FieldValue.serverTimestamp(),
+      },
+    );
+
     for (final uid in memberUids) {
       if (uid == currentUid) continue;
 
-      // Increment XP fields atomically
       batch.update(_firestore.collection('users').doc(uid), {
         'xp': FieldValue.increment(xpValue),
         'weeklyXP': FieldValue.increment(xpValue),
         'weeklyXPUpdatedAt': FieldValue.serverTimestamp(),
       });
 
-      // Append venueId to the member's visited list without overwriting
       batch.set(
         _firestore.collection('userMapStates').doc(uid),
         {
@@ -473,6 +502,49 @@ class MultiRoomFirestoreService {
     }
 
     await batch.commit();
+  }
+
+  /// Streams the set of venueIds visited by any team member.
+  Stream<Set<String>> listenRoomVisits(String roomId) {
+    return _rooms
+        .doc(roomId)
+        .collection('visits')
+        .snapshots()
+        .map((snap) => snap.docs.map((d) => d.id).toSet());
+  }
+
+  /// Streams new check-in events (venue + xpValue) for showing XP animation.
+  Stream<Map<String, dynamic>> listenRoomCheckInEvents(String roomId) {
+    return _rooms
+        .doc(roomId)
+        .collection('visits')
+        .snapshots()
+        .expand((snap) => snap.docChanges
+            .where((c) => c.type == DocumentChangeType.added)
+            .map((c) => <String, dynamic>{'id': c.doc.id, ...c.doc.data()!}));
+  }
+
+  /// Merges the caller's newly revealed fog cells into the shared room fog.
+  Future<void> updateSharedFog(String roomId, List<String> newCellIds) async {
+    if (newCellIds.isEmpty) return;
+    await _rooms.doc(roomId).collection('shared').doc('fog').set(
+      {'cells': FieldValue.arrayUnion(newCellIds)},
+      SetOptions(merge: true),
+    );
+  }
+
+  /// Streams the union of all teammates' revealed fog cells.
+  Stream<List<String>> listenSharedFog(String roomId) {
+    return _rooms
+        .doc(roomId)
+        .collection('shared')
+        .doc('fog')
+        .snapshots()
+        .map((snap) {
+      final raw = snap.data()?['cells'];
+      if (raw is! List) return const <String>[];
+      return raw.map((e) => e.toString()).toList();
+    });
   }
 
   Stream<List<Invite>> listenPendingInvites() {

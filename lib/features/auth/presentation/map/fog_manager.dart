@@ -105,6 +105,16 @@ class FogManager {
     }
   }
 
+  /// Merges cells from teammates without clearing existing revealed state.
+  void mergeRevealedCells(Iterable<String> cellIds) {
+    if (!_initialized) return;
+    for (final id in cellIds) {
+      if (!_cells.containsKey(id)) continue;
+      _revealedCellIds.add(id);
+      _fadingCellStepById.remove(id);
+    }
+  }
+
   bool revealForPosition(Position point) {
     if (!_initialized || !contains(point)) return false;
 
