@@ -924,6 +924,11 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                 );
               }
 
+              // Flush fog + map state to Firestore before navigating away.
+              // disposeController() is unawaited in dispose(), so without
+              // this explicit flush the save might race with the page pop.
+              await _mapController?.flushPersist();
+
               if (context.mounted) {
                 Navigator.of(
                   context,
