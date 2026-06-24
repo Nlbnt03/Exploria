@@ -838,10 +838,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
           foregroundColor: AppColors.textMain,
           title: Text(_mapName),
         ),
-        body: _MapLoadingSplash(
-          mapName: _mapName,
-          areaTitle: _selectedArea.title,
-        ),
+        body: _MapLoadingSplash(mapName: _mapName),
       );
     }
 
@@ -1191,10 +1188,9 @@ class _ZoomButton extends StatelessWidget {
 }
 
 class _MapLoadingSplash extends StatefulWidget {
-  const _MapLoadingSplash({required this.mapName, required this.areaTitle});
+  const _MapLoadingSplash({required this.mapName});
 
   final String mapName;
-  final String areaTitle;
 
   @override
   State<_MapLoadingSplash> createState() => _MapLoadingSplashState();
@@ -1305,7 +1301,7 @@ class _MapLoadingSplashState extends State<_MapLoadingSplash>
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '${widget.areaTitle} haritası hazırlanıyor$compactDots',
+                    '${widget.mapName} hazırlanıyor$compactDots',
                     style: const TextStyle(
                       color: AppColors.textMuted,
                       fontSize: 14,

@@ -118,6 +118,12 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
     super.initState();
     _uid = FirebaseAuth.instance.currentUser?.uid;
 
+    // Request permission as soon as the screen is visible so the dialog
+    // appears in a clean UI state, not from a background Firestore callback.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_ensureLocationPermission());
+    });
+
     _roomSub = _service
         .listenRoom(widget.roomId)
         .listen(
@@ -394,6 +400,42 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen> {
     }
 
     _isTracking = true;
+
+    // Send the current position immediately so teammates see this user's dot
+    // right away — without this, distanceFilter suppresses the first update
+    // until the user physically moves.
+    try {
+      final initialPos = await geo.Geolocator.getCurrentPosition(
+        locationSettings: const geo.LocationSettings(
+          accuracy: geo.LocationAccuracy.high,
+          timeLimit: Duration(seconds: 6),
+        ),
+      );
+      if (_isTracking) {
+        final position = Position(initialPos.longitude, initialPos.latitude);
+        unawaited(
+          _service.updateMyLocation(
+            widget.roomId,
+            initialPos.latitude,
+            initialPos.longitude,
+          ),
+        );
+        _revealFogForPosition(position);
+        if (!_cameraMovedToFirstPoint && _styleReady) {
+          _cameraMovedToFirstPoint = true;
+          unawaited(
+            _mapboxMap?.setCamera(
+              CameraOptions(
+                center: Point(coordinates: position),
+                zoom: _initialZoom > _minZoom ? _initialZoom : 16.0,
+              ),
+            ),
+          );
+        }
+      }
+    } catch (_) {
+      // Best-effort — stream will provide the first update once GPS is ready.
+    }
 
     _locationSub = geo.Geolocator.getPositionStream(
       locationSettings: const geo.LocationSettings(
