@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../auth/data/services/map_area_firestore_service.dart';
 import '../../../auth/presentation/map/map_areas.dart';
 import '../../models/friend_ref.dart';
 import '../../models/member.dart';
@@ -28,11 +29,13 @@ class WaitingRoomScreen extends StatefulWidget {
 
 class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
   final MultiRoomFirestoreService _service = MultiRoomFirestoreService();
+  final MapAreaFirestoreService _mapAreaService = MapAreaFirestoreService();
 
   StreamSubscription<Room?>? _roomSub;
   StreamSubscription<List<Member>>? _membersSub;
 
   Room? _room;
+  MapAreaConfig? _mapArea;
   List<Member> _members = const <Member>[];
 
   bool _isProcessing = false;
@@ -43,7 +46,9 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
   int get _minPlayers => _room?.minPlayers ?? 2;
 
   bool get _canStart =>
-      _isHost && (_room?.isWaiting ?? false) && _members.length >= _minPlayers;
+      _isHost &&
+      (_room?.isWaiting ?? false) &&
+      _members.length >= _minPlayers;
 
   @override
   void initState() {
@@ -89,6 +94,9 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
     }
 
     setState(() => _room = room);
+    if (room != null) {
+      unawaited(_loadMapArea(room.cityId));
+    }
 
     if (room == null) {
       if (_routeLocked) {
@@ -110,6 +118,12 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
     if (room.isFinished) {
       _finishRoomAndGoHome();
     }
+  }
+
+  Future<void> _loadMapArea(String cityId) async {
+    final area = await _mapAreaService.fetchArea(cityId);
+    if (!mounted || _room?.cityId != cityId) return;
+    setState(() => _mapArea = area);
   }
 
   Future<void> _openMap() async {
@@ -245,7 +259,7 @@ class _WaitingRoomScreenState extends State<WaitingRoomScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Harita: ${resolveMapArea(room?.cityId ?? 'istanbul').title}',
+                'Harita: ${_mapArea?.title ?? resolveMapArea(room?.cityId ?? defaultMapAreaId).title}',
                 style: const TextStyle(color: AppColors.textMuted),
               ),
               const SizedBox(height: 4),

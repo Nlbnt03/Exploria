@@ -70,32 +70,25 @@ class PoiService {
 
   /// Belirli bir sehir (area) icin POI verilerini Firestore'dan ceker.
   Future<List<Map<String, dynamic>>> getPoisForCity(String cityId) async {
+    return _fetchWithRetry(cityId, attempts: 0);
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchWithRetry(String cityId, {required int attempts}) async {
     try {
       final pois = _firestore.collection('maps').doc(cityId).collection('pois');
-      QuerySnapshot<Map<String, dynamic>> snapshot;
-      try {
-        snapshot = await pois
-            .where('isActive', isEqualTo: true)
-            .orderBy('order')
-            .get(const GetOptions(source: Source.serverAndCache));
-      } on FirebaseException catch (error) {
-        if (error.code != 'failed-precondition') rethrow;
-        snapshot = await pois
-            .where('isActive', isEqualTo: true)
-            .get(const GetOptions(source: Source.serverAndCache));
-      }
-
-      // Fallback: if isActive filter returns nothing (field not set on documents),
-      // fetch all POIs so maps migrated without isActive still render correctly.
-      if (snapshot.docs.isEmpty) {
-        snapshot = await pois.get(
-          const GetOptions(source: Source.serverAndCache),
-        );
-      }
+      final allDocs = await pois
+          .get(const GetOptions(source: Source.serverAndCache));
 
       final results =
-          snapshot.docs
+          allDocs.docs
               .map((doc) => <String, dynamic>{'id': doc.id, ...doc.data()})
+              .where((poi) {
+                final isActive = poi['isActive'];
+                if (isActive is bool) return isActive;
+                if (isActive is int) return isActive == 1;
+                if (isActive is String) return isActive.toLowerCase() == 'true';
+                return true;
+              })
               .toList();
       results.sort(
         (a, b) => ((a['order'] as num?)?.toInt() ?? 0).compareTo(
@@ -104,7 +97,12 @@ class PoiService {
       );
       return results;
     } catch (e) {
-      debugPrint('Error fetching POIs for $cityId from Firestore: $e');
+      if (attempts < 3) {
+        debugPrint('Error fetching POIs for $cityId, retrying ($attempts/3): $e');
+        await Future.delayed(Duration(seconds: 2 * (attempts + 1)));
+        return _fetchWithRetry(cityId, attempts: attempts + 1);
+      }
+      debugPrint('Error fetching POIs for $cityId from Firestore (final): $e');
       return [];
     }
   }

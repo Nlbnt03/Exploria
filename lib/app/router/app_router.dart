@@ -82,6 +82,8 @@ class AppRouter {
         final mapName = args is CityMapPageArgs ? args.mapName : 'Yeni Harita';
         final initialUserPosition =
             args is CityMapPageArgs ? args.initialUserPosition : null;
+        final mapAreaConfig =
+            args is CityMapPageArgs ? args.mapAreaConfig : null;
         return SlideLeftRoute<void>(
           builder:
               (_) => CityMapPage(
@@ -89,6 +91,7 @@ class AppRouter {
                 mapId: mapId,
                 mapName: mapName,
                 initialUserPosition: initialUserPosition,
+                mapAreaConfig: mapAreaConfig,
               ),
           settings: settings,
         );
@@ -133,10 +136,18 @@ class AppRouter {
         );
       case mapPreview:
         final args = settings.arguments;
-        final areaId = args is MapPreviewPageArgs ? args.areaId : defaultMapAreaId;
+        final areaId =
+            args is MapPreviewPageArgs ? args.areaId : defaultMapAreaId;
         final mode = args is MapPreviewPageArgs ? args.mode : 'solo';
+        final mapAreaConfig =
+            args is MapPreviewPageArgs ? args.mapAreaConfig : null;
         return SlideLeftRoute<void>(
-          builder: (_) => MapPreviewPage(areaId: areaId, mode: mode),
+          builder:
+              (_) => MapPreviewPage(
+                areaId: areaId,
+                mode: mode,
+                mapAreaConfig: mapAreaConfig,
+              ),
           settings: settings,
         );
       case onboarding:

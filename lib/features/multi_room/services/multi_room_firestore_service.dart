@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 
 import '../models/friend_ref.dart';
 import '../models/invite.dart';
@@ -141,46 +144,92 @@ class MultiRoomFirestoreService {
     }, SetOptions(merge: true));
   }
 
+  /// Wraps a Firestore snapshot stream with auto-retry on error.
+  /// On error, waits [delay] then re-subscribes automatically.
+  Stream<T> _withAutoRetry<T>(Stream<T> Function() factory, {Duration delay = const Duration(seconds: 3)}) {
+    StreamController<T>? controller;
+    StreamSubscription<T>? sub;
+
+    void start() {
+      sub = factory().listen(
+        (data) {
+          controller?.add(data);
+        },
+        onError: (Object e) {
+          debugPrint('[Firestore] Stream error, retrying in $delay: $e');
+          sub?.cancel();
+          Future.delayed(delay, () {
+            if (controller != null && !controller.isClosed) start();
+          });
+        },
+        onDone: () {
+          debugPrint('[Firestore] Stream closed, reopening in $delay');
+          Future.delayed(delay, () {
+            if (controller != null && !controller.isClosed) start();
+          });
+        },
+      );
+    }
+
+    controller = StreamController<T>(
+      onCancel: () {
+        sub?.cancel();
+        controller?.close();
+      },
+    );
+
+    start();
+    return controller.stream;
+  }
+
   Stream<Room?> listenRoom(String roomId) {
-    return _rooms.doc(roomId).snapshots().map((doc) {
-      if (!doc.exists) return null;
-      return Room.fromDoc(doc);
-    });
+    return _withAutoRetry(
+      () => _rooms.doc(roomId).snapshots().map((doc) {
+        if (!doc.exists) return null;
+        return Room.fromDoc(doc);
+      }),
+    );
   }
 
   Stream<List<Member>> listenMembers(String roomId) {
-    return _rooms
-        .doc(roomId)
-        .collection('members')
-        .orderBy('joinedAt')
-        .snapshots()
-        .map((snapshot) => snapshot.docs.map(Member.fromDoc).toList());
+    return _withAutoRetry(
+      () => _rooms
+          .doc(roomId)
+          .collection('members')
+          .orderBy('joinedAt')
+          .snapshots()
+          .map((snapshot) => snapshot.docs.map(Member.fromDoc).toList()),
+    );
   }
 
   Stream<List<LiveLocation>> listenLocations(String roomId) {
-    return _rooms
-        .doc(roomId)
-        .collection('locations')
-        .snapshots()
-        .map((snapshot) => snapshot.docs.map(LiveLocation.fromDoc).toList());
+    return _withAutoRetry(
+      () => _rooms
+          .doc(roomId)
+          .collection('locations')
+          .snapshots()
+          .map((snapshot) => snapshot.docs.map(LiveLocation.fromDoc).toList()),
+    );
   }
 
   Stream<Set<String>> listenInMapUids(String roomId) {
-    return _rooms
-        .doc(roomId)
-        .collection('presence')
-        .where('inMap', isEqualTo: true)
-        .snapshots()
-        .map((snapshot) {
-          final uids = <String>{};
-          for (final doc in snapshot.docs) {
-            final uid = (doc.data()['uid'] as String?)?.trim() ?? doc.id.trim();
-            if (uid.isNotEmpty) {
-              uids.add(uid);
+    return _withAutoRetry(
+      () => _rooms
+          .doc(roomId)
+          .collection('presence')
+          .where('inMap', isEqualTo: true)
+          .snapshots()
+          .map((snapshot) {
+            final uids = <String>{};
+            for (final doc in snapshot.docs) {
+              final uid = (doc.data()['uid'] as String?)?.trim() ?? doc.id.trim();
+              if (uid.isNotEmpty) {
+                uids.add(uid);
+              }
             }
-          }
-          return uids;
-        });
+            return uids;
+          }),
+    );
   }
 
   Future<void> setMyInMapPresence(String roomId, {required bool inMap}) async {
@@ -411,37 +460,38 @@ class MultiRoomFirestoreService {
     final memberRef = roomRef.collection('members').doc(uid);
     final locationRef = roomRef.collection('locations').doc(uid);
 
-    // Read other members before the transaction for potential host transfer.
-    final membersSnap = await roomRef.collection('members').get();
-    final nextHostUid = membersSnap.docs
-        .where((d) => d.id != uid)
-        .map((d) => (d.data()['uid'] as String?)?.trim() ?? d.id.trim())
-        .where((id) => id.isNotEmpty)
-        .firstOrNull;
+    // Host transfer (if needed) — must happen BEFORE deleting our membership,
+    // because the room update rules require isRoomMember.
+    final roomSnap = await roomRef.get();
+    if (roomSnap.exists) {
+      final room = Room.fromDoc(roomSnap);
+      if (room.hostId == uid && !room.isFinished) {
+        final membersSnap = await roomRef.collection('members').get();
+        final nextHostUid = membersSnap.docs
+            .where((d) => d.id != uid)
+            .map((d) => (d.data()['uid'] as String?)?.trim() ?? d.id.trim())
+            .where((id) => id.isNotEmpty)
+            .firstOrNull;
 
-    await _firestore.runTransaction((tx) async {
-      final roomSnap = await tx.get(roomRef);
-      if (roomSnap.exists) {
-        final room = Room.fromDoc(roomSnap);
-        if (room.hostId == uid && !room.isFinished) {
-          if (nextHostUid != null) {
-            // Transfer host — room stays active.
-            tx.update(roomRef, {
-              'hostId': nextHostUid,
-              'updatedAt': FieldValue.serverTimestamp(),
-            });
-          } else {
-            // No other members left — finish the room.
-            tx.update(roomRef, {
-              'status': 'finished',
-              'updatedAt': FieldValue.serverTimestamp(),
-            });
-          }
+        if (nextHostUid != null) {
+          await roomRef.update({
+            'hostId': nextHostUid,
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
+        } else {
+          await roomRef.update({
+            'status': 'finished',
+            'updatedAt': FieldValue.serverTimestamp(),
+          });
         }
       }
-      tx.delete(memberRef);
-      tx.delete(locationRef);
-    });
+    }
+
+    // Now safe to delete our membership and location.
+    await Future.wait([
+      memberRef.delete().catchError((_) {}),
+      locationRef.delete().catchError((_) {}),
+    ]);
   }
 
   Future<void> updateMyLocation(String roomId, double lat, double lng) async {
@@ -596,7 +646,9 @@ class MultiRoomFirestoreService {
   }
 
   Future<String> _resolveUsername(String uid) async {
-    final userDoc = await _users.doc(uid).get();
+    final userDoc = await _users.doc(uid).get(
+      const GetOptions(source: Source.serverAndCache),
+    );
     final name = (userDoc.data()?['name'] as String?)?.trim() ?? '';
     final surname = (userDoc.data()?['surname'] as String?)?.trim() ?? '';
     final fullName = '$name $surname'.trim();

@@ -678,7 +678,10 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
           },
           'geometry': <String, Object?>{
             'type': 'Point',
-            'coordinates': <double>[poi['lon'] as double, poi['lat'] as double],
+            'coordinates': <double>[
+              poi['lon'] as double,
+              poi['lat'] as double,
+            ],
           },
         });
       }

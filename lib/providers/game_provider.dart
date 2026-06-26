@@ -378,33 +378,41 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
         if (info != null) _pendingQuestCompletions.add(info);
       }
 
-      // BÖLÜM 2 — Rozet Kontrolü (Perfectionist)
+      // BÖLÜM 2 — Rozet Kontrolü (arka planda, kullanıcıyı bekletmez)
       if (_pendingPerfectionistBadgeCheck) {
         _pendingPerfectionistBadgeCheck = false;
-        final bContext = BadgeCheckContext(
-          totalVisited: 0,
-          historicBuildingVisited: 0,
-          mosqueVisited: 0,
-          distinctCitiesVisited: 0,
-          coopSessionsCompleted: 0,
-          distinctCoopPartners: 0,
-          coopMapJustCompleted: false,
-          currentStreak: 0,
-          allWeeklyQuestsJustCompleted: true,
-          visitTime: DateTime.now(),
-          recentVisitTimes: [],
-        );
-        BadgeAwardService().checkAndAwardBadges(
-          uid: uid,
-          context: bContext,
-          gameNotifier: this,
-        );
+        unawaited(_checkBadgesAfterVisit(uid));
       }
 
       return isLevelUp;
     } catch (e) {
       debugPrint('Error updating quests and xp: $e');
       return false;
+    }
+  }
+
+  Future<void> _checkBadgesAfterVisit(String uid) async {
+    try {
+      final bContext = BadgeCheckContext(
+        totalVisited: 0,
+        historicBuildingVisited: 0,
+        mosqueVisited: 0,
+        distinctCitiesVisited: 0,
+        coopSessionsCompleted: 0,
+        distinctCoopPartners: 0,
+        coopMapJustCompleted: false,
+        currentStreak: 0,
+        allWeeklyQuestsJustCompleted: true,
+        visitTime: DateTime.now(),
+        recentVisitTimes: [],
+      );
+      await BadgeAwardService().checkAndAwardBadges(
+        uid: uid,
+        context: bContext,
+        gameNotifier: this,
+      );
+    } catch (e) {
+      debugPrint('Background badge check failed: $e');
     }
   }
 }

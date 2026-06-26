@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' hide Source;
 
 import '../../domain/models/campus_map_state.dart';
 import '../../domain/models/user_map_record.dart';
@@ -16,7 +16,9 @@ class MapProgressService {
       _firestore.collection('userMapStates');
 
   Future<List<String>> fetchAllMapNames(String uid) async {
-    final doc = await _mapStates.doc(uid).get();
+    final doc = await _mapStates.doc(uid).get(
+      const GetOptions(source: Source.serverAndCache),
+    );
     final data = doc.data();
     if (data == null) return const [];
 
@@ -37,7 +39,9 @@ class MapProgressService {
   }
 
   Future<String?> fetchLastOpenedAreaId(String uid) async {
-    final doc = await _mapStates.doc(uid).get();
+    final doc = await _mapStates.doc(uid).get(
+      const GetOptions(source: Source.serverAndCache),
+    );
     final data = doc.data();
     if (data == null) return null;
 
@@ -105,7 +109,9 @@ class MapProgressService {
     required String uid,
     required String mapId,
   }) async {
-    final doc = await _mapStates.doc(uid).get();
+    final doc = await _mapStates.doc(uid).get(
+      const GetOptions(source: Source.serverAndCache),
+    );
     final data = doc.data();
     if (data == null) return null;
 

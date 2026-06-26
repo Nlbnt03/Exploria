@@ -67,6 +67,11 @@ service cloud.firestore {
         && get(/databases/$(database)/documents/rooms/$(roomId)).data.hostId == request.auth.uid;
     }
 
+    // Debug-only: co-op simulator user — never used in production.
+    function isSimUser(uid) {
+      return uid == 'sim_user_b__debug' || uid == 'sim_user_c__debug';
+    }
+
     function isCurrentRoomHostByField() {
       return isSignedIn()
         && resource.data.hostId == request.auth.uid;
@@ -303,10 +308,11 @@ service cloud.firestore {
       allow update: if isRoomHost(roomId)
         && isRoomMember(roomId)
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          'hostId',
           'status',
           'updatedAt'
         ])
-        && request.resource.data.status in ['active', 'finished']
+        && (request.resource.data.status in ['active', 'finished'] || request.resource.data.keys().hasOnly(['hostId', 'updatedAt']))
         && resource.data.status in ['waiting', 'active', 'finished'];
 
       allow delete: if false;
@@ -326,6 +332,18 @@ service cloud.firestore {
             'joinedAt'
           ]);
 
+        // Debug sim user: authenticated host can write fake member entry.
+        allow create: if isSignedIn()
+          && isSimUser(uid)
+          && isRoomHost(roomId)
+          && request.resource.data.uid == uid
+          && request.resource.data.username is string
+          && request.resource.data.keys().hasOnly([
+            'uid',
+            'username',
+            'joinedAt'
+          ]);
+
         allow update: if isSignedIn()
           && uid == request.auth.uid
           && request.resource.data.uid == resource.data.uid
@@ -335,7 +353,7 @@ service cloud.firestore {
             'joinedAt'
           ]);
 
-        allow delete: if isSignedIn() && uid == request.auth.uid;
+        allow delete: if isSignedIn() && (uid == request.auth.uid || (isSimUser(uid) && isRoomHost(roomId)));
       }
 
       match /locations/{uid} {
@@ -352,7 +370,14 @@ service cloud.firestore {
           && request.resource.data.lat is number
           && request.resource.data.lng is number;
 
-        allow delete: if isSignedIn() && uid == request.auth.uid;
+        // Debug sim user: host can write fake location entry.
+        allow create, update: if isSignedIn()
+          && isSimUser(uid)
+          && isRoomHost(roomId)
+          && request.resource.data.lat is number
+          && request.resource.data.lng is number;
+
+        allow delete: if isSignedIn() && (uid == request.auth.uid || (isSimUser(uid) && isRoomHost(roomId)));
       }
 
       match /presence/{uid} {
@@ -370,7 +395,30 @@ service cloud.firestore {
           && request.resource.data.uid == request.auth.uid
           && request.resource.data.inMap is bool;
 
-        allow delete: if isSignedIn() && uid == request.auth.uid;
+        // Debug sim user: host can write fake presence entry.
+        allow create, update: if isSignedIn()
+          && isSimUser(uid)
+          && isRoomHost(roomId)
+          && request.resource.data.uid == uid
+          && request.resource.data.inMap is bool;
+
+        allow delete: if isSignedIn() && (uid == request.auth.uid || (isSimUser(uid) && isRoomHost(roomId)));
+      }
+
+      match /shared/{docId} {
+        allow read: if isRoomMember(roomId) || isRoomHost(roomId);
+        allow write: if isRoomMember(roomId) || isRoomHost(roomId);
+      }
+
+      match /visits/{venueId} {
+        allow read: if isRoomMember(roomId) || isRoomHost(roomId);
+        
+        allow create, update: if isSignedIn()
+          && (isRoomMember(roomId) || isRoomHost(roomId))
+          && request.resource.data.keys().hasAll(['venueId', 'visitedBy', 'xpValue', 'visitedAt'])
+          && (request.resource.data.visitedBy == request.auth.uid || (isRoomHost(roomId) && isSimUser(request.resource.data.visitedBy)));
+          
+        allow delete: if false;
       }
     }
 

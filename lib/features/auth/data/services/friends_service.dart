@@ -141,31 +141,48 @@ class FriendsService {
     return _friendRequests.where('toUid', isEqualTo: uid).snapshots().asyncMap((
       snapshot,
     ) async {
-      final views = <FriendRequestView>[];
+      final pendingRequests = <Map<String, dynamic>>[];
+      final fromUids = <String>[];
+
       for (final requestDoc in snapshot.docs) {
         final requestData = requestDoc.data();
         final status = (requestData['status'] as String?)?.trim() ?? '';
-        if (status != 'pending') {
-          continue;
-        }
+        if (status != 'pending') continue;
 
         final fromUid = (requestData['fromUid'] as String?)?.trim() ?? '';
-        if (fromUid.isEmpty) {
-          continue;
-        }
+        if (fromUid.isEmpty) continue;
 
-        final fromUserDoc = await _users.doc(fromUid).get();
-        if (!fromUserDoc.exists) {
-          continue;
-        }
+        pendingRequests.add({
+          ...requestData,
+          '_docId': requestDoc.id,
+          '_fromUid': fromUid,
+        });
+        fromUids.add(fromUid);
+      }
 
-        final createdAt = requestData['createdAt'];
+      final userDocs = <String, DocumentSnapshot<Map<String, dynamic>>>{};
+      if (fromUids.isNotEmpty) {
+        final results = await Future.wait<DocumentSnapshot<Map<String, dynamic>>>(
+          fromUids.map((uid) => _users.doc(uid).get()),
+        );
+        for (var i = 0; i < fromUids.length; i++) {
+          userDocs[fromUids[i]] = results[i];
+        }
+      }
+
+      final views = <FriendRequestView>[];
+      for (final req in pendingRequests) {
+        final fromUid = req['_fromUid'] as String;
+        final fromUserDoc = userDocs[fromUid];
+        if (fromUserDoc == null || !fromUserDoc.exists) continue;
+
+        final createdAt = req['createdAt'];
         views.add(
           FriendRequestView(
-            requestId: requestDoc.id,
+            requestId: req['_docId'] as String,
             fromUid: fromUid,
-            toUid: (requestData['toUid'] as String?)?.trim() ?? '',
-            status: status,
+            toUid: (req['toUid'] as String?)?.trim() ?? '',
+            status: (req['status'] as String?)?.trim() ?? '',
             createdAt:
                 createdAt is Timestamp ? createdAt.toDate() : DateTime.now(),
             fromUser: AppUserSummary.fromUserDoc(fromUserDoc),

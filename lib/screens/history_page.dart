@@ -447,12 +447,9 @@ class _AnimatedHistoryListState extends State<_AnimatedHistoryList>
     return Column(
       children: List.generate(count, (index) {
         final record = widget.records[index];
-        final areaTitle = resolveMapArea(record.areaId).title;
         final updatedAt = record.updatedAt ?? record.createdAt;
         final subtitle =
-            updatedAt == null
-                ? areaTitle
-                : '$areaTitle · ${_formatDateTime(updatedAt)}';
+            updatedAt == null ? '' : _formatDateTime(updatedAt);
         final isDeleting = widget.deletingMapId == record.mapId;
         final isOpening = widget.openingMapId == record.mapId;
 

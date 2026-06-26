@@ -8,11 +8,9 @@ import '../../../../core/theme/app_colors.dart';
 import '../../../../models/user_xp.dart';
 import '../../../../models/weekly_quest.dart';
 import '../../../../widgets/xp_card.dart';
-import '../../data/services/firestore_user_service.dart';
 import '../../data/services/friends_service.dart';
 import '../../data/services/badge_service.dart';
 import '../../domain/models/badge.dart' show AppBadge;
-import '../../../badges/domain/badge_definitions.dart';
 import '../../../badges/presentation/widgets/badge_hexagon.dart';
 import '../../../badges/presentation/pages/badge_showcase_page.dart';
 import 'edit_profile_page.dart';
@@ -66,10 +64,11 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
             .doc(widget.uid)
             .get()
             .then((doc) {
-          if (!mounted) return;
-          _userData = doc.data() ?? <String, dynamic>{};
-        }),
-        if (BadgeAwardService.cachedBadges == null) BadgeAwardService.initBadges(),
+              if (!mounted) return;
+              _userData = doc.data() ?? <String, dynamic>{};
+            }),
+        if (BadgeAwardService.cachedBadges == null)
+          BadgeAwardService.initBadges(),
       ]);
       if (!mounted) return;
       setState(() => _isLoading = false);
@@ -79,13 +78,20 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
     }
   }
 
-
-
   String get _displayName {
     if (_userData == null) return '';
     final name = (_userData!['name'] as String?)?.trim() ?? '';
     final surname = (_userData!['surname'] as String?)?.trim() ?? '';
-    return '$name $surname'.trim().split(' ').map((w) => w.isEmpty ? '' : w[0].toUpperCase() + w.substring(1).toLowerCase()).join(' ');
+    return '$name $surname'
+        .trim()
+        .split(' ')
+        .map(
+          (w) =>
+              w.isEmpty
+                  ? ''
+                  : w[0].toUpperCase() + w.substring(1).toLowerCase(),
+        )
+        .join(' ');
   }
 
   String get _username {
@@ -308,7 +314,11 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
             if (isAlreadyFriend) {
               button = ElevatedButton.icon(
                 onPressed: () => _showRemoveFriendDialog(),
-                icon: const Icon(Icons.person_remove_rounded, size: 20,color : Colors.white),
+                icon: const Icon(
+                  Icons.person_remove_rounded,
+                  size: 20,
+                  color: Colors.white,
+                ),
                 label: const Text('Arkadaş'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.card,
@@ -328,7 +338,11 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
                 icon:
                     isCancelling
                         ? _loadingIcon()
-                        : const Icon(Icons.close_rounded, size: 20,color : Colors.white),
+                        : const Icon(
+                          Icons.close_rounded,
+                          size: 20,
+                          color: Colors.white,
+                        ),
                 label: const Text('İstek Gönderildi'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.orangeAccent.withValues(alpha: 0.15),
@@ -348,7 +362,11 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
                 icon:
                     isSending
                         ? _loadingIcon()
-                        : const Icon(Icons.person_add_rounded, size: 20,color : Colors.white),
+                        : const Icon(
+                          Icons.person_add_rounded,
+                          size: 20,
+                          color: Colors.white,
+                        ),
                 label: const Text('İstek Gönder'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
@@ -418,12 +436,13 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
               await Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => EditProfilePage(
-                    initialData: _userData!,
-                    uid: widget.uid,
-                    onSignOut: widget.onSignOut,
-                    isSigningOut: widget.isSigningOut,
-                  ),
+                  builder:
+                      (context) => EditProfilePage(
+                        initialData: _userData!,
+                        uid: widget.uid,
+                        onSignOut: widget.onSignOut,
+                        isSigningOut: widget.isSigningOut,
+                      ),
                 ),
               );
               if (mounted) {
@@ -586,7 +605,11 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
 
   Widget _buildBadgesSection(bool isCurrentUser) {
     // 1. Get featured badge IDs from user data
-    final featuredBadgeIds = (_userData?['featuredBadges'] as List?)?.map((e) => e.toString()).toList() ?? [];
+    final featuredBadgeIds =
+        (_userData?['featuredBadges'] as List?)
+            ?.map((e) => e.toString())
+            .toList() ??
+        [];
 
     return Container(
       width: double.infinity,
@@ -627,16 +650,20 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => BadgeShowcasePage(
-                        uid: widget.uid,
-                        isCurrentUser: isCurrentUser,
-                      ),
+                      builder:
+                          (_) => BadgeShowcasePage(
+                            uid: widget.uid,
+                            isCurrentUser: isCurrentUser,
+                          ),
                     ),
                   );
                 },
                 style: TextButton.styleFrom(
                   minimumSize: Size.zero,
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 ),
                 child: const Text(
@@ -665,7 +692,7 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
 
               final earnedList = snapshot.data ?? const <AppBadge>[];
               final earnedIds = earnedList.map((e) => e.id).toSet();
-              
+
               if (earnedList.isEmpty) {
                 return Container(
                   width: double.infinity,
@@ -701,12 +728,20 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
                 );
               }
 
-              var displayDefs = featuredBadgeIds
-                  .where((id) => earnedIds.contains(id))
-                  .map((id) => availableBadges.firstWhere((d) => d.id == id, orElse: () => availableBadges.first))
-                  .where((d) => earnedIds.contains(d.id)) // double check just in case
-                  .toList();
-              
+              var displayDefs =
+                  featuredBadgeIds
+                      .where((id) => earnedIds.contains(id))
+                      .map(
+                        (id) => availableBadges.firstWhere(
+                          (d) => d.id == id,
+                          orElse: () => availableBadges.first,
+                        ),
+                      )
+                      .where(
+                        (d) => earnedIds.contains(d.id),
+                      ) // double check just in case
+                      .toList();
+
               // If none are featured, just show up to 4 most recently earned badges
               if (displayDefs.isEmpty) {
                 final sortedEarned = List<AppBadge>.from(earnedList)
@@ -715,9 +750,12 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
                     final bTime = b.earnedAt ?? DateTime(0);
                     return bTime.compareTo(aTime);
                   }); // newest first
-                
+
                 final recentIds = sortedEarned.take(4).map((e) => e.id).toSet();
-                displayDefs = availableBadges.where((d) => recentIds.contains(d.id)).toList();
+                displayDefs =
+                    availableBadges
+                        .where((d) => recentIds.contains(d.id))
+                        .toList();
               }
 
               return Column(
@@ -726,25 +764,28 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
                   Wrap(
                     spacing: 12,
                     runSpacing: 16,
-                    children: displayDefs.map((def) {
-                      return HexagonBadge(
-                        definition: def,
-                        isEarned: true,
-                        size: 64.0,
-                        onTap: () {
-                          // Profilde tıklayınca detay sayfasına yönlendir
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => BadgeShowcasePage(
-                                uid: widget.uid,
-                                isCurrentUser: isCurrentUser,
-                              ),
-                            ),
+                    children:
+                        displayDefs.map((def) {
+                          return HexagonBadge(
+                            definition: def,
+                            isEarned: true,
+                            size: 64.0,
+                            imageVariant: BadgeImageVariant.premium,
+                            onTap: () {
+                              // Profilde tıklayınca detay sayfasına yönlendir
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder:
+                                      (_) => BadgeShowcasePage(
+                                        uid: widget.uid,
+                                        isCurrentUser: isCurrentUser,
+                                      ),
+                                ),
+                              );
+                            },
                           );
-                        },
-                      );
-                    }).toList(),
+                        }).toList(),
                   ),
                 ],
               );
@@ -792,4 +833,3 @@ class _StatItem extends StatelessWidget {
     );
   }
 }
-

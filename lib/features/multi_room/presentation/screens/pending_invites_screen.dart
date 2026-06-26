@@ -18,6 +18,53 @@ class PendingInvitesScreen extends StatefulWidget {
 class _PendingInvitesScreenState extends State<PendingInvitesScreen> {
   final MultiRoomFirestoreService _service = MultiRoomFirestoreService();
   final Set<String> _busyInvites = <String>{};
+  List<Invite> _invites = [];
+  Map<String, _InviteMeta> _metaByInviteId = {};
+
+  Future<void> _loadMeta(List<Invite> invites) async {
+    final missing = <_InviteMeta>[];
+    for (final invite in invites) {
+      final cachedName = invite.fromUsername?.trim() ?? '';
+      final cachedRoom = invite.roomName?.trim() ?? '';
+      final roomName = cachedRoom.isNotEmpty ? cachedRoom : invite.roomId;
+      if (cachedName.isNotEmpty) {
+        _metaByInviteId[invite.id] = _InviteMeta(
+          roomName: roomName,
+          fromUsername: cachedName,
+        );
+      } else {
+        missing.add(_InviteMeta(
+          inviteId: invite.id,
+          roomName: roomName,
+          fromUid: invite.fromUserId,
+        ));
+      }
+    }
+
+    if (missing.isEmpty) return;
+
+    try {
+      final results = await Future.wait(
+        missing.map((m) => _service.fetchUsername(m.fromUid!)),
+      );
+      for (var i = 0; i < missing.length; i++) {
+        final m = missing[i];
+        final name = results[i].trim();
+        _metaByInviteId[m.inviteId!] = _InviteMeta(
+          roomName: m.roomName,
+          fromUsername: name.isNotEmpty ? name : 'Kullanici',
+        );
+      }
+    } catch (_) {
+      for (final m in missing) {
+        _metaByInviteId[m.inviteId!] = _InviteMeta(
+          roomName: m.roomName,
+          fromUsername: 'Kullanici',
+        );
+      }
+    }
+    if (mounted) setState(() {});
+  }
 
   Future<void> _acceptInvite(Invite invite) async {
     if (_busyInvites.contains(invite.id)) {
@@ -68,27 +115,6 @@ class _PendingInvitesScreenState extends State<PendingInvitesScreen> {
       if (mounted) {
         setState(() => _busyInvites.remove(invite.id));
       }
-    }
-  }
-
-  Future<_InviteMeta> _loadInviteMeta(Invite invite) async {
-    final cachedRoomName = invite.roomName?.trim() ?? '';
-    final roomName = cachedRoomName.isNotEmpty ? cachedRoomName : invite.roomId;
-
-    final cachedUsername = invite.fromUsername?.trim() ?? '';
-    if (cachedUsername.isNotEmpty) {
-      return _InviteMeta(roomName: roomName, fromUsername: cachedUsername);
-    }
-
-    try {
-      final fromUsername = await _service.fetchUsername(invite.fromUserId);
-      final normalized = fromUsername.trim();
-      return _InviteMeta(
-        roomName: roomName,
-        fromUsername: normalized.isNotEmpty ? normalized : 'Kullanici',
-      );
-    } catch (_) {
-      return _InviteMeta(roomName: roomName, fromUsername: 'Kullanici');
     }
   }
 
@@ -153,6 +179,13 @@ class _PendingInvitesScreenState extends State<PendingInvitesScreen> {
             );
           }
 
+          // Pre-load missing usernames in batch
+          if (_invites != invites) {
+            _invites = invites;
+            _metaByInviteId = {};
+            _loadMeta(invites);
+          }
+
           return ListView.separated(
             padding: const EdgeInsets.all(16),
             itemCount: invites.length,
@@ -160,6 +193,9 @@ class _PendingInvitesScreenState extends State<PendingInvitesScreen> {
             itemBuilder: (context, index) {
               final invite = invites[index];
               final isBusy = _busyInvites.contains(invite.id);
+              final meta = _metaByInviteId[invite.id];
+              final roomName = meta?.roomName ?? invite.roomId;
+              final fromUsername = meta?.fromUsername ?? 'Kullanici';
 
               return Container(
                 decoration: BoxDecoration(
@@ -169,17 +205,9 @@ class _PendingInvitesScreenState extends State<PendingInvitesScreen> {
                     color: AppColors.inputBorder.withValues(alpha: 0.45),
                   ),
                 ),
-                child: FutureBuilder<_InviteMeta>(
-                  future: _loadInviteMeta(invite),
-                  builder: (context, metaSnapshot) {
-                    final roomName =
-                        metaSnapshot.data?.roomName ?? invite.roomId;
-                    final fromUsername =
-                        metaSnapshot.data?.fromUsername ?? 'Kullanici';
-
-                    return Padding(
-                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
-                      child: Column(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
+                  child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
@@ -251,10 +279,8 @@ class _PendingInvitesScreenState extends State<PendingInvitesScreen> {
                           ),
                         ],
                       ),
-                    );
-                  },
-                ),
-              );
+                    ),
+                  );
             },
           );
         },
@@ -264,8 +290,15 @@ class _PendingInvitesScreenState extends State<PendingInvitesScreen> {
 }
 
 class _InviteMeta {
-  const _InviteMeta({required this.roomName, required this.fromUsername});
+  const _InviteMeta({
+    required this.roomName,
+    this.fromUsername = 'Kullanici',
+    this.inviteId,
+    this.fromUid,
+  });
 
   final String roomName;
   final String fromUsername;
+  final String? inviteId;
+  final String? fromUid;
 }

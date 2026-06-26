@@ -3,7 +3,6 @@ import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart' as geo;
@@ -29,7 +28,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../providers/game_provider.dart';
 import '../../../../widgets/xp_popup.dart';
 import '../../../../widgets/level_up_dialog.dart';
-import '../../../../debug/coop_test_overlay.dart';
 import '../../../../widgets/quest_completed_dialog.dart';
 
 class MultiMapScreenArgs {
@@ -116,6 +114,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
   bool _poisInitiallyLoaded = false;
   bool _poiLayerCreated = false;
   String? _uid;
+  String? _parsedPoisAreaId; // tracks which areaId was used to load POIs
 
   // Co-op sync & session state
   StreamSubscription<Set<String>>? _visitsSub;
@@ -271,6 +270,9 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
     final area = await _mapAreaService.fetchArea(room.cityId);
     if (!mounted || _room?.cityId != room.cityId) return;
     setState(() => _roomArea = area);
+    // Now that we have the real cityId/area, reload POIs if style is ready.
+    // This handles the race where style loaded before room data arrived.
+    if (_styleReady) unawaited(_loadAndShowPois());
   }
 
   String _historyMapIdForRoom(Room room) => 'multi_${room.id}';
@@ -417,6 +419,9 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
       }
 
       _schedulePersistMapState(delay: const Duration(milliseconds: 700));
+      // POIs might have loaded with a wrong/default areaId before this resolved.
+      // Force a reload now that _historyAreaId is set correctly.
+      if (_styleReady) unawaited(_loadAndShowPois());
     } catch (_) {
       // Room map history registration is best-effort.
     }
@@ -584,8 +589,15 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
   }
 
   Future<void> _ensurePoisParsed() async {
-    if (_parsedPois.isNotEmpty) return;
     final areaId = _historyAreaId ?? _room?.cityId ?? _resolveAreaForRoom(_room).id;
+    // If POIs were loaded for a different areaId, clear and reload.
+    if (_parsedPois.isNotEmpty && _parsedPoisAreaId != areaId) {
+      _parsedPois = [];
+      _parsedPoisById.clear();
+      _parsedPoisAreaId = null;
+      _poisInitiallyLoaded = false;
+    }
+    if (_parsedPois.isNotEmpty) return;
     final rawList = await PoiService().getPoisForCity(areaId);
     final categories = <String>{};
     final parsed = <Map<String, dynamic>>[];
@@ -626,6 +638,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
       } catch (_) {}
     }
     _parsedPois = parsed;
+    _parsedPoisAreaId = areaId;
     _availableCategories = categories;
     if (!_poisInitiallyLoaded) {
       _activeCategories = Set.from(categories);
@@ -636,7 +649,9 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
   void _toggleCategory(String category) {
     setState(() {
       if (_activeCategories.contains(category)) {
-        _activeCategories.remove(category);
+        if (_activeCategories.length > 1) {
+          _activeCategories.remove(category);
+        }
       } else {
         _activeCategories.add(category);
       }
@@ -647,7 +662,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
   void _toggleAllCategories() {
     setState(() {
       if (_activeCategories.length == _availableCategories.length) {
-        _activeCategories.clear();
+        _activeCategories = {_availableCategories.first};
       } else {
         _activeCategories = Set.from(_availableCategories);
       }
@@ -787,12 +802,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
                 label: 'Gezilen', value: '${_visitedPoiIds.length} mekan'),
             _SummaryRow(icon: Icons.timer_rounded,
                 label: 'Süre', value: durationStr),
-            _SummaryRow(
-              icon: Icons.remove_red_eye_rounded,
-              label: 'Açılan hücre',
-              value: '${_fogManager?.revealedCount ?? 0} / '
-                  '${_fogManager?.totalCount ?? 0}',
-            ),
+
           ],
         ),
         actions: [
@@ -1223,7 +1233,10 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
           },
           'geometry': <String, Object?>{
             'type': 'Point',
-            'coordinates': <double>[poi['lon'] as double, poi['lat'] as double],
+            'coordinates': <double>[
+              poi['lon'] as double,
+              poi['lat'] as double,
+            ],
           },
         });
       }
@@ -1245,10 +1258,12 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
           await map.style.addSource(GeoJsonSource(id: sourceId, data: geoJson));
         } on PlatformException catch (e) {
           if (_isAlreadyExistsError(e)) {
-            final existing = await map.style.getSource(sourceId);
-            if (existing is GeoJsonSource) await existing.updateGeoJSON(geoJson);
+            try {
+              final existing = await map.style.getSource(sourceId);
+              if (existing is GeoJsonSource) await existing.updateGeoJSON(geoJson);
+            } catch (_) {}
           } else {
-            rethrow;
+            _poiLayerCreated = false;
           }
         }
         try {
@@ -1282,7 +1297,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
             ),
           );
         } on PlatformException catch (e) {
-          if (!_isAlreadyExistsError(e)) rethrow;
+          if (!_isAlreadyExistsError(e)) {}
         }
         try {
           await map.style.addLayer(
@@ -1306,11 +1321,19 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
             ),
           );
         } on PlatformException catch (e) {
-          if (!_isAlreadyExistsError(e)) rethrow;
+          if (!_isAlreadyExistsError(e)) {}
         }
       } else {
-        final existing = await map.style.getSource(sourceId);
-        if (existing is GeoJsonSource) await existing.updateGeoJSON(geoJson);
+        try {
+          final existing = await map.style.getSource(sourceId);
+          if (existing is GeoJsonSource) await existing.updateGeoJSON(geoJson);
+        } catch (e) {
+          if (e.toString().contains('not in style')) {
+            _poiLayerCreated = false;
+            unawaited(_loadAndShowPois());
+            return;
+          }
+        }
       }
     } catch (e, st) {
       debugPrint('Error loading POIs: $e\n$st');
@@ -1861,15 +1884,6 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
         .map((uid) => _memberByUid[uid]?.username ?? uid)
         .take(3)
         .join(', ');
-    final fogManager = _fogManager;
-    final String fogSummary;
-    if (fogManager == null) {
-      fogSummary = 'Sis hazirlaniyor...';
-    } else {
-      fogSummary =
-          'Gezilen: ${_visitedPoiIds.length} / $_totalPoiCount  |  ${fogManager.revealedCount}/${fogManager.totalCount} hücre';
-    }
-
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) async {
@@ -1994,61 +2008,12 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
                 ),
               ),
             ),
-          Positioned(
-            top: 12,
-            left: 12,
-            right: 12,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: const Color(0xD9190D2A),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: AppColors.inputBorder.withValues(alpha: 0.5),
-                ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Durum: ${room?.status ?? 'yukleniyor'}',
-                      style: const TextStyle(
-                        color: AppColors.textMain,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Canli uyeler: ${_memberByUid.length} | Haritada: ${_inMapUids.length} | Konum gelen: ${_locationByUid.length}',
-                      style: const TextStyle(
-                        color: AppColors.textMuted,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      fogSummary,
-                      style: const TextStyle(
-                        color: AppColors.primary,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
           // Category filter chips
           if (_availableCategories.isNotEmpty)
             Positioned(
               left: 0,
               right: 0,
-              top: 118,
+              top: 12,
               child: Container(
                 margin: const EdgeInsets.symmetric(horizontal: 10),
                 padding: const EdgeInsets.symmetric(vertical: 6),
@@ -2113,7 +2078,34 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
             ),
           ),
         // Debug-only simulation overlay — stripped from release builds.
-        if (kDebugMode) CoopTestOverlay(roomId: widget.roomId),
+
+        // Zoom controls (matching solo mode).
+        Positioned(
+          right: 18,
+          bottom: 94,
+          child: _CoopZoomControls(
+            canZoomIn: _latestCameraState != null &&
+                _latestCameraState!.zoom < _maxZoom - 0.02,
+            canZoomOut: _latestCameraState != null &&
+                _latestCameraState!.zoom > _minZoom + 0.02,
+            onZoomIn: () async {
+              final map = _mapboxMap;
+              if (map == null) return;
+              final state = await map.getCameraState();
+              await map.setCamera(
+                CameraOptions(zoom: (state.zoom + 0.8).clamp(_minZoom, _maxZoom)),
+              );
+            },
+            onZoomOut: () async {
+              final map = _mapboxMap;
+              if (map == null) return;
+              final state = await map.getCameraState();
+              await map.setCamera(
+                CameraOptions(zoom: (state.zoom - 0.8).clamp(_minZoom, _maxZoom)),
+              );
+            },
+          ),
+        ),
 
         // Co-op XP popup: shown when a teammate's check-in awards XP to us.
         if (_coopXpGain != null)
@@ -2136,6 +2128,79 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
   }
 }
 
+class _CoopZoomControls extends StatelessWidget {
+  const _CoopZoomControls({
+    required this.canZoomIn,
+    required this.canZoomOut,
+    required this.onZoomIn,
+    required this.onZoomOut,
+  });
+
+  final bool canZoomIn;
+  final bool canZoomOut;
+  final VoidCallback onZoomIn;
+  final VoidCallback onZoomOut;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xE6211634), Color(0xE6150E26)],
+        ),
+        border: Border.all(
+          color: AppColors.inputBorder.withValues(alpha: 0.65),
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x66000000),
+            blurRadius: 18,
+            offset: Offset(0, 8),
+          ),
+        ],
+      ),
+      child: SizedBox(
+        width: 56,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              onPressed: canZoomIn ? onZoomIn : null,
+              splashRadius: 22,
+              icon: Icon(
+                Icons.add_rounded,
+                size: 26,
+                color: canZoomIn
+                    ? AppColors.textMain
+                    : AppColors.textMuted.withValues(alpha: 0.5),
+              ),
+            ),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 10),
+              height: 1,
+              color: AppColors.inputBorder.withValues(alpha: 0.45),
+            ),
+            IconButton(
+              onPressed: canZoomOut ? onZoomOut : null,
+              splashRadius: 22,
+              icon: Icon(
+                Icons.remove_rounded,
+                size: 26,
+                color: canZoomOut
+                    ? AppColors.textMain
+                    : AppColors.textMuted.withValues(alpha: 0.5),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _MultiCategoryChip extends StatelessWidget {
   const _MultiCategoryChip({
     required this.label,
@@ -2144,6 +2209,7 @@ class _MultiCategoryChip extends StatelessWidget {
     this.categoryColor,
     this.showAllIcon = false,
   });
+
 
   final String label;
   final bool isActive;

@@ -14,7 +14,9 @@ class FirestoreUserService {
       _firestore.collection('usernames');
 
   Future<Map<String, dynamic>> fetchUser(String uid) async {
-    final doc = await _users.doc(uid).get();
+    final doc = await _users.doc(uid).get(
+      const GetOptions(source: Source.serverAndCache),
+    );
     return doc.data() ?? <String, dynamic>{};
   }
 
@@ -201,11 +203,11 @@ class FirestoreUserService {
       }
       
       final friends = List<String>.from(data['friends'] ?? []);
-      for (final friendUid in friends) {
-        try {
-          await _users.doc(friendUid).collection('friends').doc(uid).delete();
-        } catch (_) {}
-      }
+      await Future.wait(
+        friends.map((friendUid) {
+          return _users.doc(friendUid).collection('friends').doc(uid).delete().catchError((_) {});
+        }),
+      );
 
       try {
         await _firestore.collection('leaderboard').doc(uid).delete();
