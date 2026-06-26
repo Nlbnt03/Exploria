@@ -227,7 +227,14 @@ class HistoryPageState extends State<HistoryPage> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          backgroundColor: AppColors.card,
+          backgroundColor: AppColors.bgBottom,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(
+              color: AppColors.inputBorder.withValues(alpha: 0.4),
+            ),
+          ),
           title: const Text(
             'Haritayı Sil',
             style: TextStyle(color: AppColors.textMain),
@@ -239,9 +246,15 @@ class HistoryPageState extends State<HistoryPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Vazgeç'),
+              child: const Text(
+                'Vazgeç',
+                style: TextStyle(color: AppColors.textMuted),
+              ),
             ),
             FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.primary,
+              ),
               onPressed: () => Navigator.pop(dialogContext, true),
               child: const Text('Sil'),
             ),
