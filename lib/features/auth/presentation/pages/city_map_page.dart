@@ -25,6 +25,7 @@ import '../../../../widgets/map_completed_dialog.dart';
 import '../../../badges/data/badge_award_service.dart';
 import '../../../badges/domain/badge_definitions.dart';
 import '../../../badges/presentation/widgets/badge_celebration_dialog.dart';
+import '../../../../widgets/quest_completed_dialog.dart';
 
 class CityMapPageArgs {
   const CityMapPageArgs({
@@ -925,14 +926,35 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
               }
 
               // Flush fog + map state to Firestore before navigating away.
-              // disposeController() is unawaited in dispose(), so without
-              // this explicit flush the save might race with the page pop.
               await _mapController?.flushPersist();
 
               if (context.mounted) {
-                Navigator.of(
-                  context,
-                ).popUntil((route) => route.settings.name == AppRouter.home);
+                // Collect pending quest completions before the page pops
+                // (after pop the map-page context is detached).
+                final notifier = ref.read(gameProvider.notifier);
+                final completions = notifier.consumePendingQuestCompletions();
+                final earnedXP = ref
+                        .read(gameProvider)
+                        .valueOrNull
+                        ?.weeklyQuests
+                        .earnedWeeklyXP ??
+                    0;
+
+                // navigator.context belongs to the Navigator widget itself —
+                // it stays valid after popUntil removes the map page route.
+                final navigator = Navigator.of(context);
+                navigator.popUntil(
+                  (route) => route.settings.name == AppRouter.home,
+                );
+
+                for (final info in completions) {
+                  if (!navigator.mounted) break;
+                  await QuestCompletedDialog.show(
+                    navigator.context,
+                    info,
+                    currentWeeklyXP: earnedXP,
+                  );
+                }
               }
             }
           },

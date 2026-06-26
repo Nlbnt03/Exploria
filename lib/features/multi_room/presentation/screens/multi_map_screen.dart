@@ -30,6 +30,7 @@ import '../../../../providers/game_provider.dart';
 import '../../../../widgets/xp_popup.dart';
 import '../../../../widgets/level_up_dialog.dart';
 import '../../../../debug/coop_test_overlay.dart';
+import '../../../../widgets/quest_completed_dialog.dart';
 
 class MultiMapScreenArgs {
   const MultiMapScreenArgs({required this.roomId});
@@ -731,7 +732,20 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
       await _service.setMyInMapPresence(widget.roomId, inMap: false);
       await _service.leaveRoom(widget.roomId);
       if (!mounted) return;
-      Navigator.pushNamedAndRemoveUntil(context, AppRouter.home, (_) => false);
+      final notifier = ref.read(gameProvider.notifier);
+      final completions = notifier.consumePendingQuestCompletions();
+      final earnedXP =
+          ref.read(gameProvider).valueOrNull?.weeklyQuests.earnedWeeklyXP ?? 0;
+      final navigator = Navigator.of(context);
+      navigator.pushNamedAndRemoveUntil(AppRouter.home, (_) => false);
+      for (final info in completions) {
+        if (!navigator.mounted) break;
+        await QuestCompletedDialog.show(
+          navigator.context,
+          info,
+          currentWeeklyXP: earnedXP,
+        );
+      }
     } on Exception catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(

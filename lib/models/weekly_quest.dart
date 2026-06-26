@@ -142,7 +142,25 @@ class WeeklyQuests {
     return "${monday.year}-${monday.month.toString().padLeft(2, '0')}-${monday.day.toString().padLeft(2, '0')}";
   }
   
-  bool get hasAnyIncomplete => 
-    !ilkAdim.done || !kasifRuhu.done || !cesitliKasif.done || 
-    !duzenliGezgin.done || !takimOyuncusu.done || !takimKasifi.done || !tamHafta.done;
+  bool get hasAnyIncomplete =>
+      !ilkAdim.done ||
+      !kasifRuhu.done ||
+      !cesitliKasif.done ||
+      !duzenliGezgin.done ||
+      !takimOyuncusu.done ||
+      !takimKasifi.done ||
+      !tamHafta.done;
+
+  /// XP earned from completed weekly quests (used for the progress bar).
+  int get earnedWeeklyXP {
+    var total = 0;
+    if (ilkAdim.done) total += 50;
+    if (kasifRuhu.done) total += 100;
+    if (cesitliKasif.done) total += 75;
+    if (duzenliGezgin.done) total += 75;
+    if (takimOyuncusu.done) total += 100;
+    if (takimKasifi.done) total += 100;
+    if (tamHafta.done) total += 300;
+    return total;
+  }
 }

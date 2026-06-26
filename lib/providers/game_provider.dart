@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/user_xp.dart';
 import '../models/leaderboard_entry.dart';
 import '../models/weekly_quest.dart';
+import '../models/weekly_quest_completion.dart';
 import '../features/auth/data/services/leaderboard_service.dart';
 import 'package:flutter/material.dart';
 import '../features/badges/data/badge_award_service.dart';
@@ -21,6 +22,16 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
   StreamSubscription? _sub;
   OnTitleChanged? onTitleChanged;
   bool _pendingPerfectionistBadgeCheck = false;
+
+  final List<WeeklyQuestCompletionInfo> _pendingQuestCompletions = [];
+
+  /// Returns and clears quests that were just completed.
+  /// Call immediately after [onPlaceVisited] to show celebration dialogs.
+  List<WeeklyQuestCompletionInfo> consumePendingQuestCompletions() {
+    final list = List<WeeklyQuestCompletionInfo>.from(_pendingQuestCompletions);
+    _pendingQuestCompletions.clear();
+    return list;
+  }
 
   @override
   FutureOr<UserXP> build() async {
@@ -207,6 +218,9 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
     try {
       bool isLevelUp = false;
       final leaderboardService = LeaderboardService();
+      // Declared outside so post-transaction code can read the result.
+      // Cleared at the top of the transaction body to survive retries.
+      final Set<String> newlyCompletedKeys = {};
       await FirebaseFirestore.instance.runTransaction((transaction) async {
         final docRef = FirebaseFirestore.instance.collection('users').doc(uid);
         final snapshot = await transaction.get(docRef);
@@ -223,10 +237,15 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
         int xpToAdd = xpValue ?? (isCoop ? 75 : 50);
         String today = "${DateTime.now().year}-${DateTime.now().month.toString().padLeft(2, '0')}-${DateTime.now().day.toString().padLeft(2, '0')}";
 
+        // newlyCompletedKeys is declared outside so we can read it after the
+        // transaction, but cleared at the top so retries don't duplicate entries.
+        newlyCompletedKeys.clear();
+
         WeeklyQuestItem ilkAdim = quests.ilkAdim;
         if (!ilkAdim.done) {
           ilkAdim = ilkAdim.copyWith(current: 1, done: true);
           xpToAdd += 50;
+          newlyCompletedKeys.add('ilkAdim');
         }
 
         WeeklyQuestItem kasifRuhu = quests.kasifRuhu;
@@ -234,7 +253,10 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
           int newCurrent = kasifRuhu.current + 1;
           bool newDone = newCurrent >= kasifRuhu.target;
           kasifRuhu = kasifRuhu.copyWith(current: newCurrent, done: newDone);
-          if (newDone) xpToAdd += 100;
+          if (newDone) {
+            xpToAdd += 100;
+            newlyCompletedKeys.add('kasifRuhu');
+          }
         }
 
         WeeklyQuestItem cesitliKasif = quests.cesitliKasif;
@@ -245,7 +267,10 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
           }
           bool newDone = updatedCategories.length >= cesitliKasif.target;
           cesitliKasif = cesitliKasif.copyWith(categories: updatedCategories, done: newDone);
-          if (newDone) xpToAdd += 75;
+          if (newDone) {
+            xpToAdd += 75;
+            newlyCompletedKeys.add('cesitliKasif');
+          }
         }
 
         WeeklyQuestItem duzenliGezgin = quests.duzenliGezgin;
@@ -256,22 +281,29 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
           }
           bool newDone = updatedDays.length >= duzenliGezgin.target;
           duzenliGezgin = duzenliGezgin.copyWith(activeDays: updatedDays, done: newDone);
-          if (newDone) xpToAdd += 75;
+          if (newDone) {
+            xpToAdd += 75;
+            newlyCompletedKeys.add('duzenliGezgin');
+          }
         }
 
         WeeklyQuestItem takimOyuncusu = quests.takimOyuncusu;
         WeeklyQuestItem takimKasifi = quests.takimKasifi;
-        
+
         if (isCoop) {
           if (!takimOyuncusu.done) {
             takimOyuncusu = takimOyuncusu.copyWith(current: 1, done: true);
             xpToAdd += 100;
+            newlyCompletedKeys.add('takimOyuncusu');
           }
           if (!takimKasifi.done) {
             int newCurrent = takimKasifi.current + 1;
             bool newDone = newCurrent >= takimKasifi.target;
             takimKasifi = takimKasifi.copyWith(current: newCurrent, done: newDone);
-            if (newDone) xpToAdd += 100;
+            if (newDone) {
+              xpToAdd += 100;
+              newlyCompletedKeys.add('takimKasifi');
+            }
           }
         }
 
@@ -283,7 +315,10 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
           }
           bool newDone = updatedDays.length >= tamHafta.target;
           tamHafta = tamHafta.copyWith(activeDays: updatedDays, done: newDone);
-          if (newDone) xpToAdd += 300;
+          if (newDone) {
+            xpToAdd += 300;
+            newlyCompletedKeys.add('tamHafta');
+          }
         }
 
         // New total XP
@@ -336,6 +371,13 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
         );
       });
       
+      // Populate pending quest completions AFTER the transaction succeeds
+      // so retries don't produce duplicates.
+      for (final key in newlyCompletedKeys) {
+        final info = WeeklyQuestCompletionInfo.definitions[key];
+        if (info != null) _pendingQuestCompletions.add(info);
+      }
+
       // BÖLÜM 2 — Rozet Kontrolü (Perfectionist)
       if (_pendingPerfectionistBadgeCheck) {
         _pendingPerfectionistBadgeCheck = false;
