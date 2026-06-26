@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart' as geo;
@@ -28,6 +29,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../providers/game_provider.dart';
 import '../../../../widgets/xp_popup.dart';
 import '../../../../widgets/level_up_dialog.dart';
+import '../../../../debug/coop_test_overlay.dart';
 
 class MultiMapScreenArgs {
   const MultiMapScreenArgs({required this.roomId});
@@ -2096,6 +2098,9 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
               ),
             ),
           ),
+        // Debug-only simulation overlay — stripped from release builds.
+        if (kDebugMode) CoopTestOverlay(roomId: widget.roomId),
+
         // Co-op XP popup: shown when a teammate's check-in awards XP to us.
         if (_coopXpGain != null)
           Positioned(
