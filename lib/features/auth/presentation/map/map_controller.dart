@@ -18,6 +18,7 @@ class CampusMapController extends ChangeNotifier {
     this.restoredState,
     this.onPersistStateRequested,
     this.areaMinZoom = 14.8,
+    this.skipLocationVerification = false,
   }) : _lastInsidePosition =
            restoredState?.lastInsidePosition ?? initialUserPosition,
        _currentZoom = restoredState?.zoom ?? 16.0,
@@ -34,6 +35,7 @@ class CampusMapController extends ChangeNotifier {
   final CampusMapState? restoredState;
   final Future<void> Function(CampusMapState state)? onPersistStateRequested;
   final double areaMinZoom;
+  final bool skipLocationVerification;
 
   GeoJsonSource? _fogSource;
   GeoJsonSource? _cloudSource;
@@ -84,6 +86,13 @@ class CampusMapController extends ChangeNotifier {
 
   Future<void> onMapCreated(MapboxMap mapboxMap) async {
     _mapboxMap = mapboxMap;
+    // Move map scale and compass out of the way of the bottom-left Suggest button
+    mapboxMap.scaleBar.updateSettings(
+      ScaleBarSettings(position: OrnamentPosition.BOTTOM_RIGHT),
+    );
+    mapboxMap.compass.updateSettings(
+      CompassSettings(position: OrnamentPosition.BOTTOM_RIGHT),
+    );
   }
 
   Future<void> onStyleLoaded() async {
@@ -463,6 +472,14 @@ class CampusMapController extends ChangeNotifier {
   }
 
   Future<void> _startLocationTracking() async {
+    if (skipLocationVerification) {
+      _trackingReady = false;
+      _statusMessage = null;
+      _isOutOfCampus = false;
+      notifyListeners();
+      return;
+    }
+
     _trackingReady = await locationService.start();
     if (!_trackingReady) {
       _statusMessage = 'Konum izni gerekli. Lütfen konum erişimini aç.';

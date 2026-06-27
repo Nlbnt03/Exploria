@@ -536,6 +536,33 @@ service cloud.firestore {
       allow write: if isSignedIn();
     }
 
+    match /placeSuggestions/{suggestionId} {
+      // Sadece kendi önerini okuyabilirsin.
+      allow read: if isSignedIn()
+        && resource.data.userId == request.auth.uid;
+
+      // Giriş yapmış herhangi bir kullanıcı öneri gönderebilir.
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasAll([
+          'userId', 'username', 'latitude', 'longitude',
+          'name', 'category', 'mapAreaId', 'status', 'createdAt'
+        ])
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.username is string
+        && request.resource.data.latitude is number
+        && request.resource.data.longitude is number
+        && request.resource.data.name is string
+        && request.resource.data.name.size() > 0
+        && request.resource.data.name.size() <= 200
+        && request.resource.data.category is string
+        && request.resource.data.category.size() > 0
+        && request.resource.data.mapAreaId is string
+        && request.resource.data.status == 'pending';
+
+      // Güncelleme ve silme istemciden yapılamaz (sadece admin / cloud functions).
+      allow update, delete: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

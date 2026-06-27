@@ -29,6 +29,9 @@ import '../../../../providers/game_provider.dart';
 import '../../../../widgets/xp_popup.dart';
 import '../../../../widgets/level_up_dialog.dart';
 import '../../../../widgets/quest_completed_dialog.dart';
+import '../../../place_suggestion/presentation/suggest_place_button.dart';
+import '../../../place_suggestion/presentation/place_suggestion_form_sheet.dart';
+import '../../../place_suggestion/presentation/animated_map_pin.dart';
 
 class MultiMapScreenArgs {
   const MultiMapScreenArgs({required this.roomId});
@@ -123,6 +126,14 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
   final Set<String> _pendingSharedFogCells = {};
   DateTime? _sessionStartTime;
   int? _coopXpGain; // XP to display as floating popup for B's screen
+
+  // Yer Öner — suggest mode state
+  bool _isSuggestMode = false;
+  Position? _suggestPin;
+  double? _suggestScreenX;
+  double? _suggestScreenY;
+  Key _pinKey = UniqueKey();
+
 
   @override
   void initState() {
@@ -832,6 +843,13 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
 
   Future<void> _onMapCreated(MapboxMap mapboxMap) async {
     _mapboxMap = mapboxMap;
+    // Move map scale and compass out of the way of the bottom-left Suggest button
+    mapboxMap.scaleBar.updateSettings(
+      ScaleBarSettings(position: OrnamentPosition.BOTTOM_RIGHT),
+    );
+    mapboxMap.compass.updateSettings(
+      CompassSettings(position: OrnamentPosition.BOTTOM_RIGHT),
+    );
   }
 
   // 80m base + 40m max accuracy allowance — mirrors VenueCheckInService thresholds.
@@ -1342,6 +1360,19 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
 
   void _handleMapTap(MapContentGestureContext context) {
     if (_mapboxMap == null) return;
+
+    if (_isSuggestMode) {
+      // In suggest mode, capture tapped coordinate as a pin.
+      final coord = context.point.coordinates;
+      final tp = context.touchPosition;
+      setState(() {
+        _suggestPin = coord;
+        _suggestScreenX = tp.x;
+        _suggestScreenY = tp.y;
+        _pinKey = UniqueKey();
+      });
+      return;
+    }
 
     final touchPosition = context.touchPosition;
     unawaited(_queryTappedFeatures(touchPosition));
@@ -2121,6 +2152,107 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
               ),
             ),
           ),
+
+        // ── Yer Öner button (shown when NOT in suggest mode) ────
+        if (!_isSuggestMode)
+          Positioned(
+            left: 16,
+            bottom: 94,
+            child: SuggestPlaceButton(
+              onTap: () => setState(() {
+                _isSuggestMode = true;
+                _suggestPin = null;
+                _suggestScreenX = null;
+                _suggestScreenY = null;
+              }),
+            ),
+          ),
+
+        // ── Suggest mode overlay ──────────────────────────────
+        if (_isSuggestMode) ...[
+          Positioned(
+            top: (_availableCategories.isNotEmpty) ? 64 : 14,
+            left: 14,
+            right: 14,
+            child: _CoopSuggestTooltipCard(),
+          ),
+          // Animated pin at the tapped screen position
+          if (_suggestScreenX != null && _suggestScreenY != null)
+            Positioned(
+              left: _suggestScreenX! - 28,
+              top: _suggestScreenY! - 56,
+              child: AnimatedMapPin(key: _pinKey),
+            ),
+          Positioned(
+            top: 8,
+            right: 8,
+            child: SafeArea(
+              child: Material(
+                color: const Color(0xCC12091F),
+                shape: const CircleBorder(),
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: () => setState(() {
+                    _isSuggestMode = false;
+                    _suggestPin = null;
+                    _suggestScreenX = null;
+                    _suggestScreenY = null;
+                  }),
+                  child: const Padding(
+                    padding: EdgeInsets.all(10),
+                    child: Icon(
+                      Icons.close_rounded,
+                      color: AppColors.textMain,
+                      size: 22,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: _CoopSuggestBottomBar(
+              pinSelected: _suggestPin != null,
+              onCancel: () => setState(() {
+                _isSuggestMode = false;
+                _suggestPin = null;
+                _suggestScreenX = null;
+                _suggestScreenY = null;
+              }),
+              onConfirm: () {
+                final pin = _suggestPin;
+                if (pin == null) return;
+                final lat = pin.lat.toDouble();
+                final lng = pin.lng.toDouble();
+                final areaId = _roomArea?.id ?? _room?.cityId ?? '';
+                setState(() {
+                  _isSuggestMode = false;
+                  _suggestScreenX = null;
+                  _suggestScreenY = null;
+                });
+                showModalBottomSheet<bool>(
+                  context: context,
+                  backgroundColor: Colors.transparent,
+                  isScrollControlled: true,
+                  builder: (_) => PlaceSuggestionFormSheet(
+                    latitude: lat,
+                    longitude: lng,
+                    mapAreaId: areaId,
+                    onChangeLocation: () => setState(() {
+                      _isSuggestMode = true;
+                      _suggestPin = null;
+                      _suggestScreenX = null;
+                      _suggestScreenY = null;
+                    }),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
         ],
       ),
       ),
@@ -2355,3 +2487,178 @@ const Map<String, Color> _coopCategoryColorMap = {
   'Spor Tesisleri': Color(0xFF10B981),
   'Yeme & İçme': Color(0xFFF43F5E),
 };
+
+// ─── Co-op suggest mode helpers ───────────────────────────────────────────────
+
+class _CoopSuggestTooltipCard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: const Color(0xF0130826),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppColors.inputBorder.withValues(alpha: 0.5),
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x66000000),
+            blurRadius: 14,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Center(
+              child: Icon(
+                Icons.location_on_rounded,
+                color: AppColors.primary,
+                size: 22,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Önerdiğin yeri işaretle',
+                  style: TextStyle(
+                    color: AppColors.textMain,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                  ),
+                ),
+                SizedBox(height: 2),
+                Text.rich(
+                  TextSpan(
+                    text: 'Haritada eksik olan mekana ',
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
+                    children: [
+                      TextSpan(
+                        text: 'dokunarak',
+                        style: TextStyle(
+                          color: AppColors.textMain,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      TextSpan(text: '\niğne bırak.'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CoopSuggestBottomBar extends StatelessWidget {
+  const _CoopSuggestBottomBar({
+    required this.pinSelected,
+    required this.onCancel,
+    required this.onConfirm,
+  });
+
+  final bool pinSelected;
+  final VoidCallback onCancel;
+  final VoidCallback onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xF0130826),
+          border: Border(
+            top: BorderSide(
+              color: AppColors.inputBorder.withValues(alpha: 0.4),
+            ),
+          ),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: onCancel,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.textMuted,
+                  side: BorderSide(
+                    color: AppColors.textMuted.withValues(alpha: 0.4),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: const Text(
+                  'Vazgeç',
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              flex: 2,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: pinSelected
+                      ? const LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [AppColors.primary, AppColors.secondary],
+                        )
+                      : null,
+                  color: pinSelected
+                      ? null
+                      : AppColors.textMuted.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: ElevatedButton(
+                  onPressed: pinSelected ? onConfirm : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    shadowColor: Colors.transparent,
+                    disabledBackgroundColor: Colors.transparent,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: Text(
+                    'Burayı işaretle',
+                    style: TextStyle(
+                      color: pinSelected ? Colors.white : AppColors.textMuted,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

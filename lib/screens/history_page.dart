@@ -267,7 +267,9 @@ class HistoryPageState extends State<HistoryPage> {
 
     setState(() => _deletingMapId = record.mapId);
     try {
-      await _mapProgressService.deleteMap(uid: widget.uid, mapId: record.mapId);
+      await _mapProgressService
+          .deleteMap(uid: widget.uid, mapId: record.mapId)
+          .timeout(const Duration(seconds: 10));
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(

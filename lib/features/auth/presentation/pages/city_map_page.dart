@@ -26,6 +26,9 @@ import '../../../badges/data/badge_award_service.dart';
 import '../../../badges/domain/badge_definitions.dart';
 import '../../../badges/presentation/widgets/badge_celebration_dialog.dart';
 import '../../../../widgets/quest_completed_dialog.dart';
+import '../../../place_suggestion/presentation/suggest_place_button.dart';
+import '../../../place_suggestion/presentation/place_suggestion_form_sheet.dart';
+import '../../../place_suggestion/presentation/animated_map_pin.dart';
 
 class CityMapPageArgs {
   const CityMapPageArgs({
@@ -89,7 +92,16 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
   bool _poisInitiallyLoaded = false;
   bool _poiLayerCreated = false;
 
+  // Yer Öner — suggest mode state
+  bool _isSuggestMode = false;
+  Position? _suggestPin;
+  double? _suggestScreenX;
+  double? _suggestScreenY;
+  Key _pinKey = UniqueKey();
+
   bool get _hasPoiData => true;
+
+  static const bool _kTestMode = false;
 
   @override
   void initState() {
@@ -171,6 +183,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
       onPersistStateRequested:
           (state) => _persistMapState(uid: uid, mapState: state),
       areaMinZoom: _selectedArea.minZoom,
+      skipLocationVerification: _kTestMode || _selectedArea.skipLocationVerification,
     );
     mapController.addListener(_onControllerChanged);
 
@@ -982,7 +995,20 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                   onMapCreated:
                       (mapboxMap) =>
                           unawaited(mapController.onMapCreated(mapboxMap)),
-                  onTapListener: mapController.handleMapTap,
+                  onTapListener: (ctx) {
+                    if (_isSuggestMode) {
+                      final coord = ctx.point.coordinates;
+                      final tp = ctx.touchPosition;
+                      setState(() {
+                        _suggestPin = coord;
+                        _suggestScreenX = tp.x;
+                        _suggestScreenY = tp.y;
+                        _pinKey = UniqueKey();
+                      });
+                    } else {
+                      mapController.handleMapTap(ctx);
+                    }
+                  },
                   onStyleLoadedListener:
                       (_) => unawaited(
                         mapController.onStyleLoaded().then(
@@ -1119,6 +1145,107 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                     onZoomOut: () => unawaited(mapController.zoomBy(-0.8)),
                   ),
                 ),
+                // ── Yer Öner button (shown when NOT in suggest mode) ────
+                if (!_isSuggestMode)
+                  Positioned(
+                    left: 16,
+                    bottom: 94,
+                    child: SuggestPlaceButton(
+                      onTap: () => setState(() {
+                        _isSuggestMode = true;
+                        _suggestPin = null;
+                        _suggestScreenX = null;
+                        _suggestScreenY = null;
+                      }),
+                    ),
+                  ),
+                // ── Suggest mode overlay ──────────────────────────────
+                if (_isSuggestMode) ...[
+                  // Tooltip card at the top
+                  Positioned(
+                    top: (_availableCategories.isNotEmpty) ? 64 : 14,
+                    left: 14,
+                    right: 14,
+                    child: _SuggestTooltipCard(),
+                  ),
+                  // Animated pin at the tapped screen position
+                  if (_suggestScreenX != null && _suggestScreenY != null)
+                    Positioned(
+                      left: _suggestScreenX! - 28,
+                      top: _suggestScreenY! - 56,
+                      child: AnimatedMapPin(key: _pinKey),
+                    ),
+                  // Close (X) button top-right
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: SafeArea(
+                      child: Material(
+                        color: const Color(0xCC12091F),
+                        shape: const CircleBorder(),
+                        child: InkWell(
+                          customBorder: const CircleBorder(),
+                          onTap: () => setState(() {
+                            _isSuggestMode = false;
+                            _suggestPin = null;
+                            _suggestScreenX = null;
+                            _suggestScreenY = null;
+                          }),
+                          child: const Padding(
+                            padding: EdgeInsets.all(10),
+                            child: Icon(
+                              Icons.close_rounded,
+                              color: AppColors.textMain,
+                              size: 22,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Bottom action bar
+                  Positioned(
+                    left: 0,
+                    right: 0,
+                    bottom: 0,
+                    child: _SuggestBottomBar(
+                      pinSelected: _suggestPin != null,
+                      onCancel: () => setState(() {
+                        _isSuggestMode = false;
+                        _suggestPin = null;
+                        _suggestScreenX = null;
+                        _suggestScreenY = null;
+                      }),
+                      onConfirm: () {
+                        final pin = _suggestPin;
+                        if (pin == null) return;
+                        final lat = pin.lat.toDouble();
+                        final lng = pin.lng.toDouble();
+                        setState(() {
+                          _isSuggestMode = false;
+                          _suggestScreenX = null;
+                          _suggestScreenY = null;
+                        });
+                        showModalBottomSheet<bool>(
+                          context: context,
+                          backgroundColor: Colors.transparent,
+                          isScrollControlled: true,
+                          builder: (_) => PlaceSuggestionFormSheet(
+                            latitude: lat,
+                            longitude: lng,
+                            mapAreaId: _selectedArea.id,
+                            onChangeLocation: () => setState(() {
+                              _isSuggestMode = true;
+                              _suggestPin = null;
+                              _suggestScreenX = null;
+                              _suggestScreenY = null;
+                            }),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -1452,3 +1579,185 @@ const Map<String, Color> _categoryColorMap = {
   'Spor Tesisleri': Color(0xFF10B981),
   'Yeme & İçme': Color(0xFFF43F5E),
 };
+
+// ─── Suggest mode helpers ──────────────────────────────────────────────────────
+
+class _SuggestTooltipCard extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      decoration: BoxDecoration(
+        color: const Color(0xF0130826),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: AppColors.inputBorder.withValues(alpha: 0.5),
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x66000000),
+            blurRadius: 14,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Center(
+              child: Icon(
+                Icons.location_on_rounded,
+                color: AppColors.primary,
+                size: 22,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Önerdiğin yeri işaretle',
+                  style: TextStyle(
+                    color: AppColors.textMain,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 14,
+                  ),
+                ),
+                SizedBox(height: 2),
+                Text.rich(
+                  TextSpan(
+                    text: 'Haritada eksik olan mekana ',
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 12,
+                      height: 1.4,
+                    ),
+                    children: [
+                      TextSpan(
+                        text: 'dokunarak',
+                        style: TextStyle(
+                          color: AppColors.textMain,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      TextSpan(text: '\niğne bırak.'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SuggestBottomBar extends StatelessWidget {
+  const _SuggestBottomBar({
+    required this.pinSelected,
+    required this.onCancel,
+    required this.onConfirm,
+  });
+
+  final bool pinSelected;
+  final VoidCallback onCancel;
+  final VoidCallback onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xF0130826),
+          border: Border(
+            top: BorderSide(
+              color: AppColors.inputBorder.withValues(alpha: 0.4),
+            ),
+          ),
+        ),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            // Vazgeç
+            Expanded(
+              child: OutlinedButton(
+                onPressed: onCancel,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.textMuted,
+                  side: BorderSide(
+                    color: AppColors.textMuted.withValues(alpha: 0.4),
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: const Text(
+                  'Vazgeç',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            // Burayı işaretle
+            Expanded(
+              flex: 2,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: pinSelected
+                      ? const LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [AppColors.primary, AppColors.secondary],
+                        )
+                      : null,
+                  color: pinSelected
+                      ? null
+                      : AppColors.textMuted.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: ElevatedButton(
+                  onPressed: pinSelected ? onConfirm : null,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    shadowColor: Colors.transparent,
+                    disabledBackgroundColor: Colors.transparent,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                  ),
+                  child: Text(
+                    'Burayı işaretle',
+                    style: TextStyle(
+                      color: pinSelected
+                          ? Colors.white
+                          : AppColors.textMuted,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+

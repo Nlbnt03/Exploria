@@ -172,29 +172,35 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
 
     setState(() => _isOpeningMap = true);
     try {
-      final accessResult = await LocationService.requestSinglePosition();
-      if (!mounted) return;
+      Position? currentPosition;
 
-      if (!accessResult.isGranted) {
-        _showGateMessage(accessResult.status);
-        return;
-      }
+      const kTestMode = false;
 
-      final Position currentPosition = accessResult.position!;
-      final isInsideArea = isPointInsidePolygon(
-        currentPosition,
-        selectedArea.boundary,
-      );
-      if (!isInsideArea) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '${selectedArea.title} içinde değilsin. Haritayı açmak için seçilen alanın içine gir.',
-            ),
-            behavior: SnackBarBehavior.floating,
-          ),
+      if (!kTestMode && !selectedArea.skipLocationVerification) {
+        final accessResult = await LocationService.requestSinglePosition();
+        if (!mounted) return;
+
+        if (!accessResult.isGranted) {
+          _showGateMessage(accessResult.status);
+          return;
+        }
+
+        currentPosition = accessResult.position!;
+        final isInsideArea = isPointInsidePolygon(
+          currentPosition,
+          selectedArea.boundary,
         );
-        return;
+        if (!isInsideArea) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                '${selectedArea.title} içinde değilsin. Haritayı açmak için seçilen alanın içine gir.',
+              ),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+          return;
+        }
       }
 
       final mapId = await _createMapForSelection(

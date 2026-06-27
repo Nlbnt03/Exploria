@@ -30,6 +30,7 @@ class MapAreaConfig {
     required this.boundary,
     this.gridSizeMeters = 50,
     this.minZoom = 14.8,
+    this.skipLocationVerification = false,
   });
 
   final String id;
@@ -43,6 +44,7 @@ class MapAreaConfig {
   final List<Position> boundary;
   final double gridSizeMeters;
   final double minZoom;
+  final bool skipLocationVerification;
 
   static MapAreaConfig fromFirestoreData(String id, Map<String, dynamic> data) {
     final bounds = Map<String, dynamic>.from(
@@ -73,6 +75,8 @@ class MapAreaConfig {
     final city = (data['city'] as String?)?.trim() ?? '';
     final cityCategory =
         (data['cityCategory'] as String?)?.trim().toLowerCase() ?? 'diger';
+    final skipLoc =
+        data['skipLocationVerification'] as bool? ?? false;
 
     return MapAreaConfig(
       id: id,
@@ -84,6 +88,7 @@ class MapAreaConfig {
       styleUri: defaultMapStyleUri,
       center: Position((west + east) / 2, (south + north) / 2),
       boundary: boundary,
+      skipLocationVerification: skipLoc,
     );
   }
 }
