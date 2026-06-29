@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../widgets/adaptive_banner.dart';
 import '../../data/services/firestore_user_service.dart';
 import '../../data/services/friends_service.dart';
 import '../../../multi_room/services/multi_room_firestore_service.dart';
@@ -15,6 +16,7 @@ import 'user_profile_page.dart';
 import '../../../../models/user_xp.dart';
 import '../../../../providers/game_provider.dart';
 import '../../../../providers/leaderboard_provider.dart';
+import '../../../../widgets/daily_reward_strip.dart';
 import '../../../../screens/history_page.dart';
 import '../../../../screens/quests_screen.dart';
 import '../../../../screens/social_page.dart';
@@ -148,103 +150,103 @@ class _HomePageState extends ConsumerState<HomePage> {
       canPop: false,
       child: Scaffold(
         backgroundColor: AppColors.bgBottom,
-        body: Container(
-          width: double.infinity,
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [AppColors.bgTop, AppColors.bgBottom],
-            ),
-          ),
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              SafeArea(
-                child: IndexedStack(index: _selectedIndex, children: tabs),
-              ),
-              Positioned(
-                left: 16,
-                right: 16,
-                bottom: 16,
+        body: Column(
+          children: [
+            Expanded(
+              child: Container(
+                width: double.infinity,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [AppColors.bgTop, AppColors.bgBottom],
+                  ),
+                ),
                 child: SafeArea(
-                  top: false,
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: const Color(0xD6190D2A),
-                      borderRadius: BorderRadius.circular(18),
-                      border: Border.all(
-                        color: AppColors.inputBorder.withValues(alpha: 0.45),
-                      ),
+                  child: IndexedStack(index: _selectedIndex, children: tabs),
+                ),
+              ),
+            ),
+            if (_selectedIndex != 0) const AdaptiveBanner(),
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xD6190D2A),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: AppColors.inputBorder.withValues(alpha: 0.45),
                     ),
-                    child: BottomNavigationBar(
-                      currentIndex: _selectedIndex,
-                      onTap:
-                          (index) => setState(() {
-                            _selectedIndex = index;
-                            if (index != 2) {
-                              _focusIncomingRequests = false;
-                            }
-                          }),
-                      type: BottomNavigationBarType.fixed,
-                      backgroundColor: Colors.transparent,
-                      elevation: 0,
-                      selectedItemColor: AppColors.primary,
-                      unselectedItemColor: AppColors.textMuted,
-                      selectedLabelStyle: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 10,
+                  ),
+                  child: BottomNavigationBar(
+                    currentIndex: _selectedIndex,
+                    onTap:
+                        (index) => setState(() {
+                          _selectedIndex = index;
+                          if (index != 2) {
+                            _focusIncomingRequests = false;
+                          }
+                        }),
+                    type: BottomNavigationBarType.fixed,
+                    backgroundColor: Colors.transparent,
+                    elevation: 0,
+                    selectedItemColor: AppColors.primary,
+                    unselectedItemColor: AppColors.textMuted,
+                    selectedLabelStyle: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 10,
+                    ),
+                    unselectedLabelStyle: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 10,
+                    ),
+                    items: [
+                      const BottomNavigationBarItem(
+                        icon: Icon(Icons.home_outlined),
+                        activeIcon: Icon(Icons.home),
+                        label: 'Ana Sayfa',
                       ),
-                      unselectedLabelStyle: const TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontSize: 10,
-                      ),
-                      items: [
-                        const BottomNavigationBarItem(
-                          icon: Icon(Icons.home_outlined),
-                          activeIcon: Icon(Icons.home),
-                          label: 'Ana Sayfa',
-                        ),
-                        BottomNavigationBarItem(
-                          icon: Stack(
-                            clipBehavior: Clip.none,
-                            children: [
-                              const Icon(Icons.emoji_events_outlined),
-                              if (hasIncompleteQuests)
-                                Positioned(
-                                  right: -2,
-                                  top: -2,
-                                  child: Container(
-                                    width: 8,
-                                    height: 8,
-                                    decoration: const BoxDecoration(
-                                      color: Colors.red,
-                                      shape: BoxShape.circle,
-                                    ),
+                      BottomNavigationBarItem(
+                        icon: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            const Icon(Icons.emoji_events_outlined),
+                            if (hasIncompleteQuests)
+                              Positioned(
+                                right: -2,
+                                top: -2,
+                                child: Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.red,
+                                    shape: BoxShape.circle,
                                   ),
                                 ),
-                            ],
-                          ),
-                          activeIcon: const Icon(Icons.emoji_events),
-                          label: 'Görevler',
+                              ),
+                          ],
                         ),
-                        const BottomNavigationBarItem(
-                          icon: Icon(Icons.groups_outlined),
-                          activeIcon: Icon(Icons.groups_rounded),
-                          label: 'Sosyal',
-                        ),
-                        const BottomNavigationBarItem(
-                          icon: Icon(Icons.person_outline_rounded),
-                          activeIcon: Icon(Icons.person_rounded),
-                          label: 'Profil',
-                        ),
-                      ],
-                    ),
+                        activeIcon: const Icon(Icons.emoji_events),
+                        label: 'Görevler',
+                      ),
+                      const BottomNavigationBarItem(
+                        icon: Icon(Icons.groups_outlined),
+                        activeIcon: Icon(Icons.groups_rounded),
+                        label: 'Sosyal',
+                      ),
+                      const BottomNavigationBarItem(
+                        icon: Icon(Icons.person_outline_rounded),
+                        activeIcon: Icon(Icons.person_rounded),
+                        label: 'Profil',
+                      ),
+                    ],
                   ),
                 ),
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
@@ -344,7 +346,9 @@ class _HomeTab extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           _HomePageWeeklyQuestsSummary(onTap: onGoToQuests),
-          const SizedBox(height: 14),
+          const SizedBox(height: 12),
+          const DailyRewardStrip(),
+          const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
@@ -757,27 +761,27 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
             children: [
               // ── Level / XP Section ──
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+                padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
                         Container(
-                          width: 40,
-                          height: 40,
+                          width: 34,
+                          height: 34,
                           decoration: BoxDecoration(
                             color: userXP.titleColor.withValues(alpha: 0.2),
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(10),
                           ),
                           child: Center(
                             child: Text(
                               userXP.titleEmoji,
-                              style: const TextStyle(fontSize: 22),
+                              style: const TextStyle(fontSize: 18),
                             ),
                           ),
                         ),
-                        const SizedBox(width: 10),
+                        const SizedBox(width: 8),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -786,16 +790,15 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
                                 userXP.titleName,
                                 style: TextStyle(
                                   color: userXP.titleColor,
-                                  fontSize: 18,
+                                  fontSize: 15,
                                   fontWeight: FontWeight.w800,
                                 ),
                               ),
-                              const SizedBox(height: 1),
                               Text(
                                 '${userXP.currentXP} XP',
                                 style: TextStyle(
                                   color: Colors.white.withValues(alpha: 0.7),
-                                  fontSize: 13,
+                                  fontSize: 11,
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
@@ -804,7 +807,7 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
                         ),
                         if (userXP.currentTitle != UserTitle.efsane)
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(20),
@@ -813,14 +816,14 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
                               '${userXP.xpToNext} XP kaldı',
                               style: TextStyle(
                                 color: Colors.white.withValues(alpha: 0.7),
-                                fontSize: 11,
+                                fontSize: 10,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
                           )
                         else
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
                               color: Colors.amber.withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(20),
@@ -829,24 +832,24 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
                               '⭐ MAX',
                               style: TextStyle(
                                 color: Colors.amber,
-                                fontSize: 11,
+                                fontSize: 10,
                                 fontWeight: FontWeight.w800,
                               ),
                             ),
                           ),
                       ],
                     ),
-                    const SizedBox(height: 10),
+                    const SizedBox(height: 8),
                     TweenAnimationBuilder<double>(
                       tween: Tween<double>(begin: 0, end: userXP.progressPercentage),
                       duration: const Duration(milliseconds: 1200),
                       curve: Curves.easeOutCubic,
                       builder: (context, value, child) {
                         return ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
+                          borderRadius: BorderRadius.circular(5),
                           child: LinearProgressIndicator(
                             value: value,
-                            minHeight: 8,
+                            minHeight: 6,
                             backgroundColor: Colors.white.withValues(alpha: 0.08),
                             valueColor: AlwaysStoppedAnimation<Color>(userXP.titleColor),
                           ),
@@ -858,7 +861,7 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
               ),
               // ── Divider ──
               Container(
-                margin: const EdgeInsets.symmetric(horizontal: 16),
+                margin: const EdgeInsets.symmetric(horizontal: 14),
                 height: 1,
                 color: Colors.white.withValues(alpha: 0.08),
               ),
@@ -872,7 +875,7 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
                     bottomRight: Radius.circular(16),
                   ),
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
+                    padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -880,14 +883,14 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
                           children: [
                             const Text(
                               '🏆',
-                              style: TextStyle(fontSize: 18),
+                              style: TextStyle(fontSize: 15),
                             ),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: 6),
                             Text(
                               'Haftalık Görevler',
                               style: TextStyle(
                                 color: userXP.titleColor,
-                                fontSize: 15,
+                                fontSize: 13,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
@@ -896,7 +899,7 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
                               '$completedCount/$totalQuests',
                               style: TextStyle(
                                 color: Colors.white.withValues(alpha: 0.7),
-                                fontSize: 13,
+                                fontSize: 11,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
@@ -904,35 +907,35 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
                             Icon(
                               Icons.arrow_forward_ios_rounded,
                               color: Colors.white.withValues(alpha: 0.4),
-                              size: 12,
+                              size: 11,
                             ),
                           ],
                         ),
-                        const SizedBox(height: 8),
+                        const SizedBox(height: 5),
                         TweenAnimationBuilder<double>(
                           tween: Tween<double>(begin: 0, end: questProgress),
                           duration: const Duration(milliseconds: 1200),
                           curve: Curves.easeOutCubic,
                           builder: (context, value, child) {
                             return ClipRRect(
-                              borderRadius: BorderRadius.circular(6),
+                              borderRadius: BorderRadius.circular(5),
                               child: LinearProgressIndicator(
                                 value: value.isNaN ? 0 : value,
-                                minHeight: 6,
+                                minHeight: 5,
                                 backgroundColor: Colors.white.withValues(alpha: 0.08),
                                 valueColor: AlwaysStoppedAnimation<Color>(userXP.titleColor.withValues(alpha: 0.7)),
                               ),
                             );
                           },
                         ),
-                        const SizedBox(height: 6),
+                        const SizedBox(height: 4),
                         Text(
-                          earnedQuestXP > 0 
-                            ? 'Bu hafta görevlerden +$earnedQuestXP XP' 
+                          earnedQuestXP > 0
+                            ? 'Bu hafta görevlerden +$earnedQuestXP XP'
                             : 'Görevlere tıklayarak detay gör',
                           style: TextStyle(
                             color: Colors.white.withValues(alpha: 0.5),
-                            fontSize: 11,
+                            fontSize: 10,
                           ),
                         ),
                       ],

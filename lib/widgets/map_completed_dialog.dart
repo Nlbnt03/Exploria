@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math' as math;
 import '../../core/theme/app_colors.dart';
+import '../core/services/interstitial_ad_manager.dart';
 import '../features/badges/data/badge_award_service.dart';
 import '../features/badges/domain/badge_definitions.dart';
 import '../features/badges/presentation/widgets/badge_celebration_dialog.dart';
@@ -32,7 +33,7 @@ class MapCompletedDialog extends StatefulWidget {
   }) {
     showGeneralDialog(
       context: context,
-      barrierDismissible: true,
+      barrierDismissible: false,
       barrierLabel: 'MapCompleted',
       barrierColor: Colors.black.withAlpha(200),
       transitionDuration: const Duration(milliseconds: 600),
@@ -225,7 +226,10 @@ class _MapCompletedDialogState extends State<MapCompletedDialog> with TickerProv
               ),
               const SizedBox(height: 32),
               ElevatedButton(
-                onPressed: () => Navigator.pop(context),
+                onPressed: () async {
+                  await InterstitialAdManager.instance.show();
+                  if (mounted) Navigator.pop(context);
+                },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
                   foregroundColor: Colors.white,

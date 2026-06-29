@@ -157,7 +157,7 @@ class SocialPageState extends State<SocialPage>
             ],
           ),
         ),
-      ],
-    );
-  }
-}
+       ],
+     );
+   }
+ }

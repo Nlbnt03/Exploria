@@ -6,12 +6,14 @@ class MapAreaFirestoreService {
     : _firestore = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _firestore;
+  static const _defaultTimeout = Duration(seconds: 15);
 
   Future<List<MapAreaConfig>> fetchAreas() async {
     final snap = await _firestore
         .collection('maps')
         .where('isPublished', isEqualTo: true)
-        .get(const GetOptions(source: Source.serverAndCache));
+        .get(const GetOptions(source: Source.server))
+        .timeout(_defaultTimeout);
 
     final areas = <MapAreaConfig>[];
     for (final doc in snap.docs) {
@@ -32,7 +34,8 @@ class MapAreaFirestoreService {
     final doc = await _firestore
         .collection('maps')
         .doc(cityId)
-        .get(const GetOptions(source: Source.serverAndCache));
+        .get(const GetOptions(source: Source.server))
+        .timeout(_defaultTimeout);
     final data = doc.data();
     if (!doc.exists || data == null || data['isPublished'] != true) {
       return null;

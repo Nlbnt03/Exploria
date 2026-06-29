@@ -47,5 +47,7 @@
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Konumun GTÜ kampüs içi keşif ve sis sistemini çalıştırmak için kullanılır.</string>
+	<key>GADApplicationIdentifier</key>
+	<string>ca-app-pub-3400076691045068~1357714627</string>
 </dict>
 </plist>

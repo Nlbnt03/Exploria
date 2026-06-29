@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/widgets.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -7,7 +10,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart' as firestore;
 
 import '../firebase_options.dart';
+import '../core/services/interstitial_ad_manager.dart';
 import '../core/services/notification_service.dart';
+import '../core/services/rewarded_ad_manager.dart';
 import 'app.dart';
 
 const _defaultMapboxAccessToken =
@@ -20,6 +25,17 @@ Future<void> bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ensureFirebaseInitialized();
   await NotificationService.instance.initialize();
+  unawaited(
+    MobileAds.instance.initialize().then((_) {
+      MobileAds.instance.updateRequestConfiguration(
+        RequestConfiguration(
+          testDeviceIds: ['C1C254FBA484927B27A7D7AE274D5207'],
+        ),
+      );
+      InterstitialAdManager.instance.init();
+      RewardedAdManager.instance.init();
+    }),
+  );
 
   MapboxMapsOptions.setTileStoreUsageMode(TileStoreUsageMode.DISABLED);
   MapboxOptions.setAccessToken(

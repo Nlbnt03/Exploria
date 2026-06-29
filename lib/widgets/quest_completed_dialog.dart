@@ -1,7 +1,9 @@
 import 'dart:math' as math;
 
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
+import '../core/services/rewarded_ad_manager.dart';
 import '../core/theme/app_colors.dart';
 import '../models/weekly_quest_completion.dart';
 
@@ -53,6 +55,9 @@ class _QuestCompletedDialogState extends State<QuestCompletedDialog>
 
   final List<_Piece> _pieces = [];
   static const int _pieceCount = 90;
+
+  bool _isDoubling = false;
+  bool _isDoubled = false;
 
   @override
   void initState() {
@@ -118,6 +123,160 @@ class _QuestCompletedDialogState extends State<QuestCompletedDialog>
     _confettiCtrl.dispose();
     _starPulseCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _onDoubleXP() async {
+    if (_isDoubling || _isDoubled) return;
+    setState(() => _isDoubling = true);
+
+    final result = await RewardedAdManager.instance.show();
+    if (!mounted) return;
+
+    if (result != RewardResult.success) {
+      setState(() => _isDoubling = false);
+      if (result == RewardResult.notLoaded) {
+        _snack('Reklam yüklenemedi, tekrar dene', isError: true);
+      }
+      return;
+    }
+
+    try {
+      final response = await FirebaseFunctions.instance
+          .httpsCallable('doubleQuestReward')
+          .call<Map<Object?, Object?>>({'questKey': widget.info.questKey});
+      if (!mounted) return;
+
+      final data = response.data;
+      if (data['success'] == true) {
+        setState(() {
+          _isDoubled = true;
+          _isDoubling = false;
+        });
+        _snack('+${widget.info.xpReward} XP bonus kazandın! 🎉');
+      } else {
+        setState(() => _isDoubling = false);
+        _snack('Bonus alınamadı, tekrar dene', isError: true);
+      }
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return;
+      setState(() => _isDoubling = false);
+      _snack(
+        e.code == 'already-exists'
+            ? 'Bu görev zaten çift XP aldı'
+            : 'Bonus alınamadı, tekrar dene',
+        isError: true,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _isDoubling = false);
+      _snack('Bonus alınamadı, tekrar dene', isError: true);
+    }
+  }
+
+  void _snack(String msg, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg, style: const TextStyle(fontWeight: FontWeight.w600)),
+        backgroundColor:
+            isError ? const Color(0xFFD32F2F) : const Color(0xFF39B89B),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  Widget _buildDoubleXPButton() {
+    if (_isDoubled) {
+      return Container(
+        height: 44,
+        decoration: BoxDecoration(
+          color: const Color(0xFF39B89B).withValues(alpha: 0.15),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFF39B89B).withValues(alpha: 0.4)),
+        ),
+        child: Center(
+          child: Text(
+            '🎉  +${widget.info.xpReward} XP Bonus Kazandın!',
+            style: const TextStyle(
+              color: Color(0xFF5BD9C4),
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      );
+    }
+
+    if (_isDoubling) {
+      return Container(
+        height: 44,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                valueColor:
+                    const AlwaysStoppedAnimation(Color(0xFF5BD9C4)),
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Text(
+              'Yükleniyor…',
+              style: TextStyle(
+                color: Colors.white54,
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return GestureDetector(
+      onTap: _onDoubleXP,
+      child: Container(
+        height: 44,
+        decoration: BoxDecoration(
+          gradient: const LinearGradient(
+            colors: [Color(0xFF5BD9C4), Color(0xFF39B89B)],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+          ),
+          borderRadius: BorderRadius.circular(14),
+          boxShadow: [
+            BoxShadow(
+              color: const Color(0xFF5BD9C4).withValues(alpha: 0.25),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 18),
+            const SizedBox(width: 6),
+            Text(
+              'Reklam izle → +${widget.info.xpReward} XP daha kazan',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   @override
@@ -285,7 +444,9 @@ class _QuestCompletedDialogState extends State<QuestCompletedDialog>
                               height: 1.4,
                             ),
                           ),
-                          const SizedBox(height: 24),
+                          const SizedBox(height: 16),
+                          _buildDoubleXPButton(),
+                          const SizedBox(height: 16),
 
                           // Haftalık progress
                           Column(

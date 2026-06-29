@@ -252,9 +252,7 @@ class HistoryPageState extends State<HistoryPage> {
               ),
             ),
             FilledButton(
-              style: FilledButton.styleFrom(
-                backgroundColor: AppColors.primary,
-              ),
+              style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
               onPressed: () => Navigator.pop(dialogContext, true),
               child: const Text('Sil'),
             ),
@@ -277,7 +275,8 @@ class HistoryPageState extends State<HistoryPage> {
           behavior: SnackBarBehavior.floating,
         ),
       );
-    } catch (_) {
+    } catch (e) {
+      debugPrint('[History] Harita silme hatası: $e');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -450,8 +449,7 @@ class _AnimatedHistoryListState extends State<_AnimatedHistoryList>
       children: List.generate(count, (index) {
         final record = widget.records[index];
         final updatedAt = record.updatedAt ?? record.createdAt;
-        final subtitle =
-            updatedAt == null ? '' : _formatDateTime(updatedAt);
+        final subtitle = updatedAt == null ? '' : _formatDateTime(updatedAt);
         final isDeleting = widget.deletingMapId == record.mapId;
         final isOpening = widget.openingMapId == record.mapId;
 

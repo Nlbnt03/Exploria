@@ -26,6 +26,7 @@ import '../../../badges/data/badge_award_service.dart';
 import '../../../badges/domain/badge_definitions.dart';
 import '../../../badges/presentation/widgets/badge_celebration_dialog.dart';
 import '../../../../widgets/quest_completed_dialog.dart';
+import '../../../../core/services/interstitial_ad_manager.dart';
 import '../../../place_suggestion/presentation/suggest_place_button.dart';
 import '../../../place_suggestion/presentation/place_suggestion_form_sheet.dart';
 import '../../../place_suggestion/presentation/animated_map_pin.dart';
@@ -101,7 +102,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
 
   bool get _hasPoiData => true;
 
-  static const bool _kTestMode = false;
+  static const bool _kTestMode = true;
 
   @override
   void initState() {
@@ -119,43 +120,22 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
   }
 
   Future<void> _prepareMapSession() async {
-    if (widget.mapAreaConfig == null) {
-      final firestoreArea = await _mapAreaService.fetchArea(widget.areaId);
-      if (firestoreArea != null) {
-        _selectedArea = firestoreArea;
-        if (widget.initialUserPosition == null) {
-          _initialCenter = firestoreArea.center;
-        }
-      }
-    }
-
-    CampusMapState? restoredState;
     final uid = _uid;
 
-    if (uid != null) {
-      try {
-        restoredState = await _mapProgressService.fetchMapState(
-          uid: uid,
-          mapId: _mapId,
-        );
-        debugPrint(
-          '[Restore] uid=$uid, mapId=$_mapId, visitedPois=${restoredState?.visitedPoiIds.length ?? 0}, revealedCells=${restoredState?.revealedCellIds.length ?? 0}',
-        );
-      } catch (e) {
-        debugPrint('[Restore] Hata: $e');
-      }
-
-      try {
-        await _mapProgressService.markMapOpened(
-          uid: uid,
-          mapId: _mapId,
-          areaId: _selectedArea.id,
-          mapName: _mapName,
-        );
-      } catch (_) {
-        // Opening registration should not block map launch.
-      }
+    try {
+      await Future.wait([
+        _loadAreaConfig(),
+        _loadMapState(uid),
+      ]).timeout(const Duration(seconds: 25));
+    } on TimeoutException {
+      debugPrint('[Session] Timeout aşıldı, varsayılan değerlerle devam ediliyor.');
+    } catch (e) {
+      debugPrint('[Session] Hazırlık hatası: $e');
     }
+
+    if (!mounted) return;
+
+    final restoredState = _cachedRestoredState;
 
     // For real areas, GPS position (passed from selection screen) takes
     // priority over saved camera state so the map always opens on the user.
@@ -202,6 +182,49 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
     });
 
     _poiTapSub = mapController.onPoiTapped.listen(_onPoiTapped);
+  }
+
+  CampusMapState? _cachedRestoredState;
+
+  Future<void> _loadAreaConfig() async {
+    if (widget.mapAreaConfig != null) return;
+    try {
+      final firestoreArea = await _mapAreaService.fetchArea(widget.areaId);
+      if (firestoreArea != null) {
+        _selectedArea = firestoreArea;
+        if (widget.initialUserPosition == null) {
+          _initialCenter = firestoreArea.center;
+        }
+      }
+    } catch (e) {
+      debugPrint('[Session] Area config yüklenemedi: $e');
+    }
+  }
+
+  Future<void> _loadMapState(String? uid) async {
+    if (uid == null) return;
+    try {
+      _cachedRestoredState = await _mapProgressService.fetchMapState(
+        uid: uid,
+        mapId: _mapId,
+      );
+      debugPrint(
+        '[Restore] uid=$uid, mapId=$_mapId, visitedPois=${_cachedRestoredState?.visitedPoiIds.length ?? 0}, revealedCells=${_cachedRestoredState?.revealedCellIds.length ?? 0}',
+      );
+    } catch (e) {
+      debugPrint('[Restore] Hata: $e');
+    }
+
+    try {
+      unawaited(_mapProgressService.markMapOpened(
+        uid: uid,
+        mapId: _mapId,
+        areaId: _selectedArea.id,
+        mapName: _mapName,
+      ));
+    } catch (_) {
+      // Opening registration should not block map launch.
+    }
   }
 
   void _onPoiTapped(Map<String, dynamic> payload) {
@@ -597,67 +620,76 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
   Future<void> _ensurePoisParsed() async {
     if (_parsedPois.isNotEmpty) return;
 
-    final rawList = await PoiService().getPoisForCity(widget.areaId);
-    debugPrint('[Map] ${widget.areaId} için ${rawList.length} POI alındı.');
+    try {
+      final rawList = await PoiService().getPoisForCity(widget.areaId);
+      debugPrint('[Map] ${widget.areaId} için ${rawList.length} POI alındı.');
 
-    final categories = <String>{};
-    final parsed = <Map<String, dynamic>>[];
+      if (!mounted) return;
+      final categories = <String>{};
+      final parsed = <Map<String, dynamic>>[];
 
-    for (final map in rawList) {
-      try {
-        final name = (map['name'] as String?)?.trim() ?? '';
-        final type = (map['category'] as String?)?.trim() ?? 'unknown';
-        final xpValue = (map['xpValue'] as num?)?.toInt() ?? 0;
-        // Derive rarity from xpValue
-        final String rarity;
-        if (xpValue >= 100) {
-          rarity = 'must-see';
-        } else if (xpValue >= 75) {
-          rarity = 'önerilen';
-        } else if (xpValue >= 50) {
-          rarity = 'rare';
-        } else {
-          rarity = map['rarity'] as String? ?? 'common';
+      for (final map in rawList) {
+        try {
+          final name = (map['name'] as String?)?.trim() ?? '';
+          final type = (map['category'] as String?)?.trim() ?? 'unknown';
+          final xpValue = (map['xpValue'] as num?)?.toInt() ?? 0;
+          final String rarity;
+          if (xpValue >= 100) {
+            rarity = 'must-see';
+          } else if (xpValue >= 75) {
+            rarity = 'önerilen';
+          } else if (xpValue >= 50) {
+            rarity = 'rare';
+          } else {
+            rarity = map['rarity'] as String? ?? 'common';
+          }
+          final category = type;
+          final description = map['description'] as String? ?? '';
+          final photoUrl = map['imageUrl'] as String? ?? '';
+          // Support both 'longitude'/'latitude' and 'lon'/'lat' field names
+          final lon = (map['longitude'] as num?)?.toDouble()
+              ?? (map['lon'] as num?)?.toDouble()
+              ?? 0;
+          final lat = (map['latitude'] as num?)?.toDouble()
+              ?? (map['lat'] as num?)?.toDouble()
+              ?? 0;
+
+          if (lon == 0 && lat == 0) {
+            debugPrint('[Map] Koordinat bulunamadı, POI atlanıyor: $name');
+            continue;
+          }
+
+          final featureId = map['id']?.toString() ?? name;
+          categories.add(type);
+
+          parsed.add(<String, dynamic>{
+            'featureId': featureId,
+            'name': name,
+            'type': type,
+            'rarity': rarity,
+            'category': category,
+            'xp': xpValue,
+            'description': description,
+            'photo_url': photoUrl,
+            'lon': lon,
+            'lat': lat,
+          });
+        } catch (e) {
+          debugPrint('[Map] POI parse hatası (atlanıyor): $e — veri: $map');
         }
-        final category = type;
-        final description = map['description'] as String? ?? '';
-        final photoUrl = map['imageUrl'] as String? ?? '';
-        final lon = (map['longitude'] as num?)?.toDouble() ?? 0;
-        final lat = (map['latitude'] as num?)?.toDouble() ?? 0;
-
-        if (lon == 0 && lat == 0) {
-          debugPrint('[Map] Koordinat bulunamadı, POI atlanıyor: $name');
-          continue;
-        }
-
-        final featureId = map['id']?.toString() ?? name;
-        categories.add(type);
-
-        parsed.add(<String, dynamic>{
-          'featureId': featureId,
-          'name': name,
-          'type': type,
-          'rarity': rarity,
-          'category': category,
-          'xp': xpValue,
-          'description': description,
-          'photo_url': photoUrl,
-          'lon': lon,
-          'lat': lat,
-        });
-      } catch (e) {
-        debugPrint('[Map] POI parse hatası (atlanıyor): $e — veri: $map');
       }
-    }
 
-    debugPrint(
-      '[Map] ${widget.areaId}: ${parsed.length} geçerli POI parse edildi.',
-    );
-    _parsedPois = parsed;
-    _availableCategories = categories;
-    if (!_poisInitiallyLoaded) {
-      _activeCategories = Set.from(categories);
-      _poisInitiallyLoaded = true;
+      debugPrint(
+        '[Map] ${widget.areaId}: ${parsed.length} geçerli POI parse edildi.',
+      );
+      _parsedPois = parsed;
+      _availableCategories = categories;
+      if (!_poisInitiallyLoaded) {
+        _activeCategories = Set.from(categories);
+        _poisInitiallyLoaded = true;
+      }
+    } catch (e) {
+      debugPrint('[Map] POI verisi alınamadı: $e');
     }
   }
 
@@ -867,8 +899,14 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
           onPopInvokedWithResult: (didPop, _) async {
             if (didPop) return;
             final shouldPop = await _showExitConfirmation();
-            if (shouldPop && context.mounted) {
-              // BÖLÜM 2 — Rozet Kontrolü (Haritadan Çıkarken)
+            if (!shouldPop || !context.mounted) return;
+
+            final navigator = Navigator.of(context);
+            final uid = _uid;
+            List<BadgeDefinition> newBadgeDefs = [];
+
+            try {
+              // Rozet kontrolü context'i
               final bContext = BadgeCheckContext(
                 totalVisited: _visitedPoiIds.length,
                 historicBuildingVisited:
@@ -897,7 +935,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                                   )),
                         )
                         .length,
-                distinctCitiesVisited: 1, // Mevcut scope içinde tek şehir
+                distinctCitiesVisited: 1,
                 coopSessionsCompleted: 0,
                 distinctCoopPartners: 0,
                 coopMapJustCompleted: false,
@@ -920,33 +958,59 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                 weeklyLeaderboardRank: 999,
               );
 
-              final newBadgeDefs = await _badgeAwardService.checkNewBadges(
-                uid: _uid!,
-                context: bContext,
-              );
+              // Rozet kontrolü ve fog persist reklam izlenirken
+              // arka planda tamamlansın diye Future'ları başlat.
+              final badgeFuture = uid != null
+                  ? _badgeAwardService.checkNewBadges(
+                      uid: uid,
+                      context: bContext,
+                    )
+                  : Future<List<BadgeDefinition>>.value(const []);
+              final flushFuture = _mapController?.flushPersist();
 
-              if (newBadgeDefs.isNotEmpty && context.mounted) {
-                // Award in background — user sees the dialog immediately after check.
+              // Geçiş reklamı
+              await InterstitialAdManager.instance.show();
+
+              // ANA SAYFAYA HEMEN YÖNLENDİR —
+              // rozet/vs arka planda tamamlansın, kullanıcı beklemesin.
+              if (navigator.mounted) {
+                navigator.pushNamedAndRemoveUntil(
+                  AppRouter.home,
+                  (route) => false,
+                );
+              }
+
+              // Arka plan işlerini bekle (ana sayfadayken)
+              try {
+                newBadgeDefs = await badgeFuture;
+              } catch (e) {
+                debugPrint('[Exit] Rozet kontrolü hatası: $e');
+              }
+              try {
+                await flushFuture;
+              } catch (e) {
+                debugPrint('[Exit] Flush hatası: $e');
+              }
+
+              if (newBadgeDefs.isNotEmpty && uid != null && navigator.mounted) {
                 unawaited(
                   _badgeAwardService.awardBadges(
-                    uid: _uid!,
+                    uid: uid,
                     badges: newBadgeDefs,
                     gameNotifier: ref.read(gameProvider.notifier),
                   ),
                 );
                 await BadgeCelebrationDialog.show(
-                  context,
+                  navigator.context,
                   newBadgeDefs.map((d) => d.id).toList(),
                   showAsPill: true,
                 );
               }
-
-              // Flush fog + map state to Firestore before navigating away.
-              await _mapController?.flushPersist();
-
-              if (context.mounted) {
-                // Collect pending quest completions before the page pops
-                // (after pop the map-page context is detached).
+            } catch (e) {
+              debugPrint('[Exit] Beklenmeyen hata: $e');
+            } finally {
+              // Her durumda kullanıcı ana sayfaya ulaşmış olur.
+              if (navigator.mounted) {
                 final notifier = ref.read(gameProvider.notifier);
                 final completions = notifier.consumePendingQuestCompletions();
                 final earnedXP = ref
@@ -955,13 +1019,6 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                         ?.weeklyQuests
                         .earnedWeeklyXP ??
                     0;
-
-                // navigator.context belongs to the Navigator widget itself —
-                // it stays valid after popUntil removes the map page route.
-                final navigator = Navigator.of(context);
-                navigator.popUntil(
-                  (route) => route.settings.name == AppRouter.home,
-                );
 
                 for (final info in completions) {
                   if (!navigator.mounted) break;
@@ -1013,6 +1070,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                       (_) => unawaited(
                         mapController.onStyleLoaded().then(
                           (_) => _loadAndShowPois(),
+                          onError: (e) => debugPrint('[Map] POI yükleme hatası: $e'),
                         ),
                       ),
                   onCameraChangeListener: mapController.onCameraChanged,
@@ -1357,6 +1415,7 @@ class _MapLoadingSplashState extends State<_MapLoadingSplash>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
   late final Animation<double> _pulse;
+  bool _timedOut = false;
 
   @override
   void initState() {
@@ -1366,6 +1425,9 @@ class _MapLoadingSplashState extends State<_MapLoadingSplash>
       duration: const Duration(milliseconds: 1400),
     )..repeat(reverse: true);
     _pulse = CurvedAnimation(parent: _controller, curve: Curves.easeInOut);
+    Future.delayed(const Duration(seconds: 30), () {
+      if (mounted) setState(() => _timedOut = true);
+    });
   }
 
   @override
@@ -1379,8 +1441,6 @@ class _MapLoadingSplashState extends State<_MapLoadingSplash>
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, _) {
-        final dots = '. ' * (_controller.value * 3).floor().clamp(1, 3);
-        final compactDots = dots.replaceAll(' ', '');
         return Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -1458,13 +1518,23 @@ class _MapLoadingSplashState extends State<_MapLoadingSplash>
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '${widget.mapName} hazırlanıyor$compactDots',
-                    style: const TextStyle(
-                      color: AppColors.textMuted,
+                    _timedOut
+                        ? 'Bağlantı sorunu oluştu.'
+                        : '${widget.mapName} hazırlanıyor${'.' * (_controller.value * 3).floor().clamp(1, 3)}',
+                    style: TextStyle(
+                      color: _timedOut ? const Color(0xFFE57373) : AppColors.textMuted,
                       fontSize: 14,
                     ),
                     textAlign: TextAlign.center,
                   ),
+                  if (_timedOut) ...[
+                    const SizedBox(height: 24),
+                    TextButton.icon(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.arrow_back),
+                      label: const Text('Geri dön'),
+                    ),
+                  ],
                 ],
               ),
             ),

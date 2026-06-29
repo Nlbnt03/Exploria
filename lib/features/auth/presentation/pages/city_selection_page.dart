@@ -174,7 +174,7 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
     try {
       Position? currentPosition;
 
-      const kTestMode = false;
+      const kTestMode = true;
 
       if (!kTestMode && !selectedArea.skipLocationVerification) {
         final accessResult = await LocationService.requestSinglePosition();
@@ -232,7 +232,8 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
     setState(() => _isOpeningMap = true);
     List<String> existingNames = [];
     try {
-      existingNames = await _mapProgressService.fetchAllMapNames(uid);
+      existingNames = await _mapProgressService.fetchAllMapNames(uid)
+          .timeout(const Duration(seconds: 10));
     } catch (_) {
       // Ignore errors when fetching existing map names
     } finally {
@@ -277,7 +278,16 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
         uid: uid,
         areaId: areaId,
         mapName: mapName,
+      ).timeout(const Duration(seconds: 15));
+    } on TimeoutException {
+      if (!mounted) return null;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Harita oluşturulamadı, bağlantı zaman aşımına uğradı.'),
+          behavior: SnackBarBehavior.floating,
+        ),
       );
+      return null;
     } on FirebaseException catch (e) {
       if (!mounted) return null;
       final message = switch (e.code) {

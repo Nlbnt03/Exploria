@@ -119,8 +119,12 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
           ),
         ),
         child: SizedBox.expand(
-          child: SafeArea(
-            child: _isLoading ? const ProfileShimmer() : _buildContent(),
+          child: Column(
+            children: [
+              Expanded(
+                child: _isLoading ? const ProfileShimmer() : _buildContent(),
+              ),
+            ],
           ),
         ),
       ),

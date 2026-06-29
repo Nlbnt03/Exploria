@@ -96,36 +96,43 @@ class CampusMapController extends ChangeNotifier {
   }
 
   Future<void> onStyleLoaded() async {
+
     final map = _mapboxMap;
     if (map == null) return;
 
-    await fogManager.initialize();
-    fogManager.restoreRevealedCells(
-      restoredState?.revealedCellIds ?? const <String>[],
-    );
+    try {
+      await fogManager.initialize();
+      fogManager.restoreRevealedCells(
+        restoredState?.revealedCellIds ?? const <String>[],
+      );
 
-    await map.setBounds(
-      CameraBoundsOptions(
-        bounds: fogManager.bounds.toCoordinateBounds(),
-        minZoom: minZoom,
-        maxZoom: maxZoom,
-        minPitch: 0,
-        maxPitch: 75,
-      ),
-    );
+      await map.setBounds(
+        CameraBoundsOptions(
+          bounds: fogManager.bounds.toCoordinateBounds(),
+          minZoom: minZoom,
+          maxZoom: maxZoom,
+          minPitch: 0,
+          maxPitch: 75,
+        ),
+      );
 
-    await _upsertFogSourceAndLayer();
-    await _enableLocationPuck();
-    await _configureOrnaments(map);
+      await _upsertFogSourceAndLayer();
+      await _enableLocationPuck();
+      await _configureOrnaments(map);
 
-    _latestCameraState = await map.getCameraState();
-    _currentZoom = _latestCameraState?.zoom ?? _currentZoom;
-    _styleReady = true;
-    notifyListeners();
+      _latestCameraState = await map.getCameraState();
+      _currentZoom = _latestCameraState?.zoom ?? _currentZoom;
+      _styleReady = true;
+      notifyListeners();
 
-    await _startLocationTracking();
-    _scheduleFogRefresh();
-    _schedulePersist(delay: const Duration(milliseconds: 500));
+      await _startLocationTracking();
+      _scheduleFogRefresh();
+      _schedulePersist(delay: const Duration(milliseconds: 500));
+    } catch (e) {
+      debugPrint('[Map] Style yükleme hatası: $e');
+      _styleReady = true;
+      notifyListeners();
+    }
   }
 
   void handleMapTap(MapContentGestureContext context) {
@@ -190,12 +197,23 @@ class CampusMapController extends ChangeNotifier {
     const circleLayerId = 'poi-circle-layer';
     const labelLayerId = 'poi-label-layer';
 
-    final source = GeoJsonSource(id: sourceId, data: geoJson);
+    GeoJsonSource source;
     try {
+      source = GeoJsonSource(id: sourceId, data: geoJson);
       await map.style.addSource(source);
-    } on PlatformException catch (e) {
-      if (!_isAlreadyExistsError(e)) rethrow;
+    } on PlatformException {
+      final existing = await map.style.getSource(sourceId);
+      if (existing is GeoJsonSource) {
+        source = existing;
+        await source.updateGeoJSON(geoJson);
+      } else {
+        return;
+      }
     }
+
+    // If layers already exist (e.g. source existed but layers were orphaned),
+    // the addLayer calls below will fail silently and we're done.
+    // If they don't exist, they'll be created now.
 
     // --- Circle layer with color by type, size by rarity ---
     try {
@@ -260,8 +278,8 @@ class CampusMapController extends ChangeNotifier {
           ],
         ),
       );
-    } on PlatformException catch (e) {
-      if (!_isAlreadyExistsError(e)) rethrow;
+    } on PlatformException {
+      // Layer eklenemezse POI'ler gösterilmez ama harita çalışmaya devam eder.
     }
 
     // --- Label layer ---
@@ -291,8 +309,8 @@ class CampusMapController extends ChangeNotifier {
           iconAllowOverlap: false,
         ),
       );
-    } on PlatformException catch (e) {
-      if (!_isAlreadyExistsError(e)) rethrow;
+    } on PlatformException {
+      // Layer eklenemezse POI'ler gösterilmez ama harita çalışmaya devam eder.
     }
   }
 

@@ -538,14 +538,10 @@ class MultiRoomFirestoreService {
       });
 
       batch.set(
-        _firestore.collection('userMapStates').doc(uid),
+        _firestore.collection('userMapStates').doc(uid).collection('states').doc(mapId),
         {
-          'mapStates': {
-            mapId: {
-              'visitedPoiIds': FieldValue.arrayUnion([venueId]),
-              'updatedAt': FieldValue.serverTimestamp(),
-            },
-          },
+          'visitedPoiIds': FieldValue.arrayUnion([venueId]),
+          'updatedAt': FieldValue.serverTimestamp(),
         },
         SetOptions(merge: true),
       );

@@ -507,6 +507,16 @@ service cloud.firestore {
         && isOwner(uid);
 
       allow delete: if false;
+
+      match /states/{mapId} {
+        allow read: if isSignedIn() && isOwner(uid);
+
+        allow create, update: if isSignedIn()
+          && isOwner(uid);
+
+        allow delete: if isSignedIn()
+          && isOwner(uid);
+      }
     }
 
     match /pois/{poiId} {

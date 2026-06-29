@@ -9,6 +9,8 @@ class PoiService {
   PoiService({FirebaseFirestore? firestore})
     : _firestore = firestore ?? FirebaseFirestore.instance;
 
+  static const _defaultTimeout = Duration(seconds: 90);
+
   /// Bir kerelik kullanilacak, lokal JSON listesini Firestore'a tasiyan arac.
   Future<void> migrateLocalPoisToFirestore() async {
     final areaJsonMap = {
@@ -70,7 +72,7 @@ class PoiService {
 
   /// Belirli bir sehir (area) icin POI verilerini Firestore'dan ceker.
   Future<List<Map<String, dynamic>>> getPoisForCity(String cityId) async {
-    return _fetchWithRetry(cityId, attempts: 0);
+    return _fetchWithRetry(cityId, attempts: 0).timeout(_defaultTimeout, onTimeout: () => []);
   }
 
   Future<List<Map<String, dynamic>>> _fetchWithRetry(String cityId, {required int attempts}) async {

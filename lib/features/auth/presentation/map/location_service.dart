@@ -65,6 +65,7 @@ class LocationService {
       final current = await geo.Geolocator.getCurrentPosition(
         locationSettings: const geo.LocationSettings(
           accuracy: geo.LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
         ),
       );
       return LocationAccessResult(

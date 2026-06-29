@@ -341,8 +341,236 @@ export const onRoomInviteWritten = onDocumentWritten(
 );
 
 // ────────────────────────────────────────────────────────────
-// 4. ADMIN PANEL GENEL BİLDİRİMİ (TOPIC)
+// 4. HAFTALIK XP SIFIRLAMA
+//    Her Pazartesi 00:00 İstanbul saatinde tüm kullanıcıları sıfırlar.
 // ────────────────────────────────────────────────────────────
+export const resetWeeklyXP = onSchedule(
+  { schedule: "0 0 * * 1", timeZone: "Europe/Istanbul" },
+  async () => {
+    const db = admin.firestore();
+
+    const [leaderboardSnap, usersSnap] = await Promise.all([
+      db.collection("leaderboard").get(),
+      db.collection("users").get(),
+    ]);
+
+    const allWrites: FirebaseFirestore.WriteBatch[] = [];
+
+    const chunk = <T>(arr: T[], size: number): T[][] =>
+      Array.from({ length: Math.ceil(arr.length / size) }, (_, i) =>
+        arr.slice(i * size, i * size + size)
+      );
+
+    // Leaderboard sıfırla
+    for (const docs of chunk(leaderboardSnap.docs, 499)) {
+      const batch = db.batch();
+      docs.forEach((doc) =>
+        batch.update(doc.ref, {
+          weeklyXP: 0,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        })
+      );
+      allWrites.push(batch);
+    }
+
+    // Users weeklyXP sıfırla
+    for (const docs of chunk(usersSnap.docs, 499)) {
+      const batch = db.batch();
+      docs.forEach((doc) =>
+        batch.update(doc.ref, {
+          weeklyXP: 0,
+          weeklyXPUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        })
+      );
+      allWrites.push(batch);
+    }
+
+    await Promise.all(allWrites.map((b) => b.commit()));
+    console.log(
+      `[WeeklyReset] ${leaderboardSnap.size} leaderboard + ${usersSnap.size} users sıfırlandı.`
+    );
+  }
+);
+
+// ────────────────────────────────────────────────────────────
+// 5. ADMIN PANEL GENEL BİLDİRİMİ (TOPIC)
+// ────────────────────────────────────────────────────────────
+
+// ────────────────────────────────────────────────────────────
+// YARDIMCI: XP değerine göre unvan ve renk döndür
+// ────────────────────────────────────────────────────────────
+function getUserTitleAndColor(xp: number): { title: string; colorHex: string } {
+  if (xp >= 20000) return { title: "Efsane",     colorHex: "ffff1744" };
+  if (xp >= 9000)  return { title: "Usta Kaşif", colorHex: "fff5a623" };
+  if (xp >= 4000)  return { title: "Seyyah",     colorHex: "ffec4899" };
+  if (xp >= 1500)  return { title: "Kaşif",      colorHex: "ff2196f3" };
+  if (xp >= 500)   return { title: "Gezgin",     colorHex: "ff10b981" };
+  return             { title: "Yolcu",      colorHex: "ff94a3b8" };
+}
+
+// ────────────────────────────────────────────────────────────
+// 6. GÜNLÜK ÖDÜLLÜ REKLAM — XP EKLE
+//    Client: rewarded reklamı göster → bu fonksiyonu çağır.
+//    Günlük limit: 3 izleme / gün. XP sunucu tarafında eklenir.
+// ────────────────────────────────────────────────────────────
+export const claimDailyAdReward = functions.https.onCall(async (request) => {
+  if (!request.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Token yok");
+  }
+
+  const userId = request.auth.uid;
+  const db = admin.firestore();
+  const userRef = db.collection("users").doc(userId);
+
+  const now = new Date();
+  const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  const dailyXP = 25;
+  const maxDaily = 3;
+
+  let watchedToday = 0;
+
+  try {
+    await db.runTransaction(async (transaction) => {
+      const userDoc = await transaction.get(userRef);
+      if (!userDoc.exists) {
+        throw new functions.https.HttpsError("not-found", "Kullanıcı bulunamadı");
+      }
+
+      const data = userDoc.data()!;
+      const storedDate = (data.dailyAdsResetDate as string) ?? "";
+      let watched = storedDate === today ? ((data.dailyAdsWatched as number) ?? 0) : 0;
+
+      if (watched >= maxDaily) {
+        throw new functions.https.HttpsError("resource-exhausted", "Günlük limit doldu");
+      }
+
+      const currentXP      = (data.xp as number) ?? 0;
+      const currentWeeklyXP = (data.weeklyXP as number) ?? 0;
+      const username        = (data.username as string) ?? "";
+      const newXP           = currentXP + dailyXP;
+      const newWeeklyXP     = currentWeeklyXP + dailyXP;
+      watchedToday          = watched + 1;
+
+      transaction.set(userRef, {
+        xp: newXP,
+        weeklyXP: newWeeklyXP,
+        weeklyXPUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        dailyAdsWatched: watchedToday,
+        dailyAdsResetDate: today,
+      }, { merge: true });
+
+      // Leaderboard sync
+      const { title, colorHex } = getUserTitleAndColor(newXP);
+      const leaderboardRef = db.collection("leaderboard").doc(userId);
+      transaction.set(leaderboardRef, {
+        weeklyXP: newWeeklyXP,
+        totalXP: newXP,
+        title,
+        titleColorHex: colorHex,
+        username,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    });
+
+    console.log(`[DailyAdReward] ${userId} → +${dailyXP} XP (${watchedToday}/${maxDaily} today)`);
+    return { success: true, xpAdded: dailyXP, watchedToday, maxDaily };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error("[DailyAdReward] Hata:", error);
+    throw new functions.https.HttpsError("internal", "Sunucu hatası");
+  }
+});
+
+// ────────────────────────────────────────────────────────────
+// 7. GÖREV XP'SİNİ 2'YE KATLA
+//    Client: rewarded reklamı göster → bu fonksiyonu çağır.
+//    Her görev haftada yalnızca bir kez katlanabilir.
+//    Takip: weeklyQuests.doubledKeys (dizi) — hafta sıfırlandığında temizlenir.
+// ────────────────────────────────────────────────────────────
+export const doubleQuestReward = functions.https.onCall(async (request) => {
+  if (!request.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Token yok");
+  }
+
+  const userId   = request.auth.uid;
+  const questKey = request.data?.questKey as string | undefined;
+
+  // Server-authoritative quest XP map
+  const questXpMap: Record<string, number> = {
+    ilkAdim:        50,
+    kasifRuhu:     100,
+    cesitliKasif:   75,
+    duzenliGezgin:  75,
+    takimOyuncusu: 100,
+    takimKasifi:   100,
+    tamHafta:      300,
+  };
+
+  if (!questKey || !(questKey in questXpMap)) {
+    throw new functions.https.HttpsError("invalid-argument", "Geçersiz görev anahtarı");
+  }
+
+  const bonusXP = questXpMap[questKey];
+  const db      = admin.firestore();
+  const userRef = db.collection("users").doc(userId);
+
+  try {
+    await db.runTransaction(async (transaction) => {
+      const userDoc = await transaction.get(userRef);
+      if (!userDoc.exists) {
+        throw new functions.https.HttpsError("not-found", "Kullanıcı bulunamadı");
+      }
+
+      const data         = userDoc.data()!;
+      const weeklyQuests = (data.weeklyQuests as Record<string, unknown>) ?? {};
+
+      // Quest tamamlanmış mı?
+      const questData = (weeklyQuests[questKey] as Record<string, unknown>) ?? {};
+      if (questData.done !== true) {
+        throw new functions.https.HttpsError("failed-precondition", "Görev henüz tamamlanmadı");
+      }
+
+      // Bu hafta zaten katlandı mı?
+      const doubledKeys = (weeklyQuests.doubledKeys as string[]) ?? [];
+      if (doubledKeys.includes(questKey)) {
+        throw new functions.https.HttpsError("already-exists", "Bu görev zaten çift XP aldı");
+      }
+
+      const currentXP       = (data.xp as number) ?? 0;
+      const currentWeeklyXP = (data.weeklyXP as number) ?? 0;
+      const username         = (data.username as string) ?? "";
+      const newXP            = currentXP + bonusXP;
+      const newWeeklyXP      = currentWeeklyXP + bonusXP;
+
+      transaction.set(userRef, {
+        xp: newXP,
+        weeklyXP: newWeeklyXP,
+        weeklyXPUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        // doubledKeys'i weeklyQuests haritasına ekle (hafta sıfırında temizlenir)
+        "weeklyQuests.doubledKeys": admin.firestore.FieldValue.arrayUnion(questKey),
+      }, { merge: true });
+
+      // Leaderboard sync
+      const { title, colorHex } = getUserTitleAndColor(newXP);
+      const leaderboardRef = db.collection("leaderboard").doc(userId);
+      transaction.set(leaderboardRef, {
+        weeklyXP: newWeeklyXP,
+        totalXP: newXP,
+        title,
+        titleColorHex: colorHex,
+        username,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    });
+
+    console.log(`[DoubleQuestReward] ${userId} → ${questKey} +${bonusXP} XP bonus`);
+    return { success: true, xpAdded: bonusXP };
+  } catch (error) {
+    if (error instanceof functions.https.HttpsError) throw error;
+    console.error("[DoubleQuestReward] Hata:", error);
+    throw new functions.https.HttpsError("internal", "Sunucu hatası");
+  }
+});
 export const onAdminNotificationWritten = onDocumentWritten(
   "adminNotifications/{notificationId}",
   async (event) => {

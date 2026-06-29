@@ -25,6 +25,7 @@ import '../../models/member.dart';
 import '../../models/room.dart';
 import '../../services/multi_room_firestore_service.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../../core/services/interstitial_ad_manager.dart';
 import '../../../../providers/game_provider.dart';
 import '../../../../widgets/xp_popup.dart';
 import '../../../../widgets/level_up_dialog.dart';
@@ -757,6 +758,8 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
       if (mounted) await _showSessionSummary();
       await _service.setMyInMapPresence(widget.roomId, inMap: false);
       await _service.leaveRoom(widget.roomId);
+      if (!mounted) return;
+      await InterstitialAdManager.instance.show();
       if (!mounted) return;
       final notifier = ref.read(gameProvider.notifier);
       final completions = notifier.consumePendingQuestCompletions();

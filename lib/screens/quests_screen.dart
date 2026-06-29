@@ -65,90 +65,96 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
           style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
         ),
       ),
-      body: userXPAsync.when(
-        data: (userXP) {
-          final quests = userXP.weeklyQuests;
-          
-          return ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _XPSummary(
-                quests: quests,
-                timeRemaining: _timeRemaining,
-                titleColor: userXP.titleColor,
-              ),
-              const SizedBox(height: 24),
-              const _SectionHeader(title: 'Keşif Görevleri', icon: Icons.explore),
-              const SizedBox(height: 12),
-              QuestCard(
-                title: 'İlk Adım',
-                description: 'Haftanın ilk mekanını keşfet.',
-                xpReward: 50,
-                category: QuestCategory.kesif,
-                questItem: quests.ilkAdim,
-              ),
-              const SizedBox(height: 10),
-              QuestCard(
-                title: 'Kaşif Ruhu',
-                description: 'Toplamda 5 farklı mekan ziyaret et.',
-                xpReward: 100,
-                category: QuestCategory.kesif,
-                questItem: quests.kasifRuhu,
-              ),
-              const SizedBox(height: 10),
-              QuestCard(
-                title: 'Çeşitli Kaşif',
-                description: '2 farklı kategorideki (örn: Cami, Müze) mekanları ziyaret et.',
-                xpReward: 75,
-                category: QuestCategory.kesif,
-                questItem: quests.cesitliKasif,
-              ),
-              const SizedBox(height: 24),
-              const _SectionHeader(title: 'Sosyal Görevler', icon: Icons.groups),
-              const SizedBox(height: 12),
-              QuestCard(
-                title: 'Takım Oyuncusu',
-                description: 'Bir mekanı Co-op modunda keşfet.',
-                xpReward: 100,
-                category: QuestCategory.sosyal,
-                questItem: quests.takimOyuncusu,
-              ),
-              const SizedBox(height: 10),
-              QuestCard(
-                title: 'Takım Kaşifi',
-                description: 'Co-op modunda 5 farklı mekanı keşfet.',
-                xpReward: 100,
-                category: QuestCategory.sosyal,
-                questItem: quests.takimKasifi,
-              ),
-              const SizedBox(height: 24),
-              const _SectionHeader(title: 'Haftalık Özel Görevler', icon: Icons.star),
-              const SizedBox(height: 12),
-              QuestCard(
-                title: 'Düzenli Gezgin',
-                description: 'Hafta boyunca 3 farklı gün mekan ziyaret et.',
-                xpReward: 75,
-                category: QuestCategory.ozel,
-                questItem: quests.duzenliGezgin,
-              ),
-              const SizedBox(height: 10),
-              QuestCard(
-                title: 'Tam Hafta',
-                description: 'Hafta boyunca tam 5 farklı gün aktif olup mekan gez.',
-                xpReward: 300,
-                category: QuestCategory.ozel,
-                questItem: quests.tamHafta,
-              ),
-              const SizedBox(height: 40),
-            ],
-          );
-        },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => Center(child: Text('Bir hata oluştu: $error', style: const TextStyle(color: Colors.white))),
-      ),
-    );
-  }
-}
+      body: Column(
+        children: [
+          Expanded(
+            child: userXPAsync.when(
+              data: (userXP) {
+                final quests = userXP.weeklyQuests;
+                
+                return ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    _XPSummary(
+                      quests: quests,
+                      timeRemaining: _timeRemaining,
+                      titleColor: userXP.titleColor,
+                    ),
+                    const SizedBox(height: 24),
+                    const _SectionHeader(title: 'Keşif Görevleri', icon: Icons.explore),
+                    const SizedBox(height: 12),
+                    QuestCard(
+                      title: 'İlk Adım',
+                      description: 'Haftanın ilk mekanını keşfet.',
+                      xpReward: 50,
+                      category: QuestCategory.kesif,
+                      questItem: quests.ilkAdim,
+                    ),
+                    const SizedBox(height: 10),
+                    QuestCard(
+                      title: 'Kaşif Ruhu',
+                      description: 'Toplamda 5 farklı mekan ziyaret et.',
+                      xpReward: 100,
+                      category: QuestCategory.kesif,
+                      questItem: quests.kasifRuhu,
+                    ),
+                    const SizedBox(height: 10),
+                    QuestCard(
+                      title: 'Çeşitli Kaşif',
+                      description: '2 farklı kategorideki (örn: Cami, Müze) mekanları ziyaret et.',
+                      xpReward: 75,
+                      category: QuestCategory.kesif,
+                      questItem: quests.cesitliKasif,
+                    ),
+                    const SizedBox(height: 24),
+                    const _SectionHeader(title: 'Sosyal Görevler', icon: Icons.groups),
+                    const SizedBox(height: 12),
+                    QuestCard(
+                      title: 'Takım Oyuncusu',
+                      description: 'Bir mekanı Co-op modunda keşfet.',
+                      xpReward: 100,
+                      category: QuestCategory.sosyal,
+                      questItem: quests.takimOyuncusu,
+                    ),
+                    const SizedBox(height: 10),
+                    QuestCard(
+                      title: 'Takım Kaşifi',
+                      description: 'Co-op modunda 5 farklı mekanı keşfet.',
+                      xpReward: 100,
+                      category: QuestCategory.sosyal,
+                      questItem: quests.takimKasifi,
+                    ),
+                    const SizedBox(height: 24),
+                    const _SectionHeader(title: 'Haftalık Özel Görevler', icon: Icons.star),
+                    const SizedBox(height: 12),
+                    QuestCard(
+                      title: 'Düzenli Gezgin',
+                      description: 'Hafta boyunca 3 farklı gün mekan ziyaret et.',
+                      xpReward: 75,
+                      category: QuestCategory.ozel,
+                      questItem: quests.duzenliGezgin,
+                    ),
+                    const SizedBox(height: 10),
+                    QuestCard(
+                      title: 'Tam Hafta',
+                      description: 'Hafta boyunca tam 5 farklı gün aktif olup mekan gez.',
+                      xpReward: 300,
+                      category: QuestCategory.ozel,
+                      questItem: quests.tamHafta,
+                    ),
+                    const SizedBox(height: 40),
+                  ],
+                );
+              },
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (error, _) => Center(child: Text('Bir hata oluştu: $error', style: const TextStyle(color: Colors.white))),
+            ),
+          ),
+         ],
+       ),
+     );
+   }
+ }
 
 class _SectionHeader extends StatelessWidget {
   final String title;
