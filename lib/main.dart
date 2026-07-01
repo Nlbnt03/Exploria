@@ -1,5 +1,13 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+
 import 'app/bootstrap.dart';
 
 Future<void> main() async {
-  await bootstrap();
+  runZonedGuarded(() async {
+    await bootstrap();
+  }, (error, stack) {
+    debugPrint('[Uncaught] $error\n$stack');
+  });
 }

@@ -52,9 +52,10 @@ class CampusMapController extends ChangeNotifier {
   bool _persistInFlight = false;
   bool _persistQueued = false;
   bool _isDisposed = false;
+  bool _isBackground = false;
   int? _lastPersistFingerprint;
   int _cellCountAtLastPersist = 0;
-  static const int _batchCellThreshold = 10;
+  int _batchCellThreshold = 10;
 
   List<String> visitedPoiIds;
 
@@ -404,15 +405,34 @@ class CampusMapController extends ChangeNotifier {
     await _persistState(force: true);
   }
 
+  /// Switches between foreground (responsive) and background (battery-save) mode.
+  Future<void> setBackgroundMode(bool background) async {
+    _isBackground = background;
+    _batchCellThreshold = background ? 25 : 10;
+    await locationService.setBackgroundMode(background);
+  }
+
+  /// Moves camera to the last known inside-position (called on foreground resume).
+  Future<void> snapToLastInsidePosition() async {
+    final map = _mapboxMap;
+    final pos = _lastInsidePosition;
+    if (map == null || pos == null || _isOutOfCampus) return;
+    await map.easeTo(
+      CameraOptions(center: Point(coordinates: pos)),
+      MapAnimationOptions(duration: 300, startDelay: 0),
+    );
+  }
+
   Future<void> disposeController() async {
     _persistDebounce?.cancel();
     _fogUpdateDebounce?.cancel();
     _revealAnimationTicker?.cancel();
     await _locationSubscription?.cancel();
+    _locationSubscription = null;
+    locationService.unregisterConsumer();
     unawaited(_poiTappedController.close());
     await _persistState(force: true);
     _isDisposed = true;
-    await locationService.dispose();
   }
 
   Future<void> _upsertFogSourceAndLayer() async {
@@ -498,9 +518,11 @@ class CampusMapController extends ChangeNotifier {
       return;
     }
 
+    locationService.registerConsumer();
     _trackingReady = await locationService.start();
     if (!_trackingReady) {
       _statusMessage = 'Konum izni gerekli. Lütfen konum erişimini aç.';
+      locationService.unregisterConsumer();
       notifyListeners();
       return;
     }
@@ -552,6 +574,12 @@ class CampusMapController extends ChangeNotifier {
       notifyListeners();
     } else if (fogManager.hasPendingRevealAnimation) {
       _startRevealAnimationTicker();
+    }
+
+    if (_isBackground) {
+      _lastInsidePosition = currentLocation;
+      _schedulePersist();
+      return;
     }
 
     final shouldMoveCamera =
@@ -714,11 +742,16 @@ class CampusMapController extends ChangeNotifier {
     });
   }
 
-  void _schedulePersist({Duration delay = const Duration(seconds: 2)}) {
+  void _schedulePersist({Duration? delay}) {
     if (_isDisposed || onPersistStateRequested == null) return;
 
+    final effectiveDelay = delay ??
+        (_isBackground
+            ? const Duration(seconds: 8)
+            : const Duration(seconds: 2));
+
     _persistDebounce?.cancel();
-    _persistDebounce = Timer(delay, () => unawaited(_persistState()));
+    _persistDebounce = Timer(effectiveDelay, () => unawaited(_persistState()));
   }
 
   Future<void> _persistState({bool force = false}) async {
@@ -741,8 +774,8 @@ class CampusMapController extends ChangeNotifier {
       await persistCallback(snapshot);
       _lastPersistFingerprint = fingerprint;
       _cellCountAtLastPersist = fogManager.revealedCount;
-    } catch (_) {
-      // Persistence failures should not block the map experience.
+    } catch (e) {
+      debugPrint('[Map] Persist hatası: $e');
     } finally {
       _persistInFlight = false;
       if (_persistQueued) {

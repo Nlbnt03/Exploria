@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
@@ -14,6 +15,19 @@ import '../core/services/interstitial_ad_manager.dart';
 import '../core/services/notification_service.dart';
 import '../core/services/rewarded_ad_manager.dart';
 import 'app.dart';
+
+/// Catches Flutter framework errors that would otherwise be silently handled.
+void setupGlobalErrorHandler() {
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    debugPrint('[Fatal] ${details.exception}');
+  };
+
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('[Platform Error] $error\n$stack');
+    return true;
+  };
+}
 
 const _defaultMapboxAccessToken =
     'pk.eyJ1IjoieW5hbGJhbnQiLCJhIjoiY21xanl2MzJxMGJiZDN4cXh5bmFwMmpxMiJ9.TWXe1GbepbTJ9XJTtcTsJg';
@@ -36,6 +50,8 @@ Future<void> bootstrap() async {
       RewardedAdManager.instance.init();
     }),
   );
+
+  setupGlobalErrorHandler();
 
   MapboxMapsOptions.setTileStoreUsageMode(TileStoreUsageMode.DISABLED);
   MapboxOptions.setAccessToken(

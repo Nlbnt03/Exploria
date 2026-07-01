@@ -87,6 +87,9 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
   MapAreaConfig? _roomArea;
   Position? _lastInsidePosition;
   StreamSubscription<geo.Position>? _locationSub;
+  Timer? _locationWriteTimer;
+  double? _lastKnownLat;
+  double? _lastKnownLng;
   Timer? _fogRefreshDebounce;
   Timer? _fogAnimationTicker;
   Timer? _persistMapStateDebounce;
@@ -509,9 +512,8 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
         if (pos.accuracy > 20.0) return;
         if (pos.speed > 8.0) return; // > ~29 km/h → likely in a vehicle
         final position = Position(pos.longitude, pos.latitude);
-        unawaited(
-          _service.updateMyLocation(widget.roomId, pos.latitude, pos.longitude),
-        );
+        _lastKnownLat = pos.latitude;
+        _lastKnownLng = pos.longitude;
         _revealFogForPosition(position);
         if (!_cameraMovedToFirstPoint && _styleReady) {
           _cameraMovedToFirstPoint = true;
@@ -528,12 +530,32 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
       onError: (_) {},
       cancelOnError: false,
     );
+
+    // Periodic Firestore write (every 5 seconds) instead of per-GPS-event
+    _locationWriteTimer?.cancel();
+    _locationWriteTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (_) async {
+        if (!_isTracking || _lastKnownLat == null || _lastKnownLng == null) {
+          return;
+        }
+        await _service.updateMyLocation(
+          widget.roomId,
+          _lastKnownLat!,
+          _lastKnownLng!,
+        );
+      },
+    );
   }
 
   void _stopTracking() {
     _isTracking = false;
     _locationSub?.cancel();
     _locationSub = null;
+    _locationWriteTimer?.cancel();
+    _locationWriteTimer = null;
+    _lastKnownLat = null;
+    _lastKnownLng = null;
   }
 
   Future<bool> _ensureLocationPermission() async {
@@ -1889,6 +1911,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _locationSub?.cancel();
+    _locationWriteTimer?.cancel();
     _isTracking = false;
     _fogRefreshDebounce?.cancel();
     _fogAnimationTicker?.cancel();

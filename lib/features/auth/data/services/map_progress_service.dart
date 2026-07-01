@@ -124,6 +124,8 @@ class MapProgressService {
 
   Stream<List<UserMapRecord>> watchMapHistory(String uid) {
     return _statesCollection(uid)
+        .orderBy('updatedAt', descending: true)
+        .limit(100)
         .snapshots()
         .map((snapshot) => _parseMapHistory(snapshot.docs))
         .timeout(

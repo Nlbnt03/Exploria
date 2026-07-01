@@ -22,6 +22,7 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
   StreamSubscription? _sub;
   OnTitleChanged? onTitleChanged;
   bool _pendingPerfectionistBadgeCheck = false;
+  bool _isProcessingSnapshot = false;
 
   final List<WeeklyQuestCompletionInfo> _pendingQuestCompletions = [];
 
@@ -71,31 +72,33 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
     // Listen to changes
     _sub?.cancel();
     _sub = docRef.snapshots().listen((snapshot) {
-      if (!snapshot.exists) return; // Prevent creating if user is deleted somehow
-      
-      final newXP = _parseUserXP(snapshot);
-      
-      // Check for title change
-      if (_previousTitle != null && newXP.currentTitle != _previousTitle) {
-        onTitleChanged?.call(newXP.currentTitle);
-      }
-      _previousTitle = newXP.currentTitle;
-      
-      // We check if weekStart is outdated, if so we update firestore (which will trigger another snapshot)
-      final defaultStart = WeeklyQuests.getWeekStart(DateTime.now());
-      if (newXP.weeklyQuests.weekStart != defaultStart) {
-        // Reset quests and weeklyXP in firestore
-        docRef.set({
-          'weeklyQuests': WeeklyQuests.empty().toMap(),
-          'weeklyXP': 0,
-          'weeklyXPUpdatedAt': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-        // Also reset leaderboard entry
-        LeaderboardService().resetWeeklyXP(uid);
-        return; // the next snapshot will handle state
-      }
+      if (_isProcessingSnapshot) return;
+      _isProcessingSnapshot = true;
+      try {
+        if (!snapshot.exists) return;
 
-      state = AsyncValue.data(newXP);
+        final newXP = _parseUserXP(snapshot);
+
+        if (_previousTitle != null && newXP.currentTitle != _previousTitle) {
+          onTitleChanged?.call(newXP.currentTitle);
+        }
+        _previousTitle = newXP.currentTitle;
+
+        final defaultStart = WeeklyQuests.getWeekStart(DateTime.now());
+        if (newXP.weeklyQuests.weekStart != defaultStart) {
+          docRef.set({
+            'weeklyQuests': WeeklyQuests.empty().toMap(),
+            'weeklyXP': 0,
+            'weeklyXPUpdatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+          LeaderboardService().resetWeeklyXP(uid);
+          return;
+        }
+
+        state = AsyncValue.data(newXP);
+      } finally {
+        _isProcessingSnapshot = false;
+      }
     });
 
     return userXP;

@@ -149,23 +149,25 @@ class MultiRoomFirestoreService {
   Stream<T> _withAutoRetry<T>(Stream<T> Function() factory, {Duration delay = const Duration(seconds: 3)}) {
     StreamController<T>? controller;
     StreamSubscription<T>? sub;
+    var disposed = false;
 
     void start() {
+      if (disposed) return;
       sub = factory().listen(
         (data) {
-          controller?.add(data);
+          if (!disposed) controller?.add(data);
         },
         onError: (Object e) {
           debugPrint('[Firestore] Stream error, retrying in $delay: $e');
           sub?.cancel();
           Future.delayed(delay, () {
-            if (controller != null && !controller.isClosed) start();
+            if (!disposed && controller != null && !controller.isClosed) start();
           });
         },
         onDone: () {
           debugPrint('[Firestore] Stream closed, reopening in $delay');
           Future.delayed(delay, () {
-            if (controller != null && !controller.isClosed) start();
+            if (!disposed && controller != null && !controller.isClosed) start();
           });
         },
       );
@@ -173,6 +175,7 @@ class MultiRoomFirestoreService {
 
     controller = StreamController<T>(
       onCancel: () {
+        disposed = true;
         sub?.cancel();
         controller?.close();
       },
@@ -528,8 +531,17 @@ class MultiRoomFirestoreService {
       },
     );
 
+    // Only include existing user documents to avoid batch failure.
+    final validMembers = <String>[];
     for (final uid in memberUids) {
       if (uid == currentUid) continue;
+
+      final doc = await _firestore.collection('users').doc(uid).get();
+      if (!doc.exists) {
+        debugPrint('Coop check-in: silinmiş kullanıcı atlandı: $uid');
+        continue;
+      }
+      validMembers.add(uid);
 
       batch.update(_firestore.collection('users').doc(uid), {
         'xp': FieldValue.increment(xpValue),
@@ -547,6 +559,7 @@ class MultiRoomFirestoreService {
       );
     }
 
+    if (validMembers.isEmpty) return;
     await batch.commit();
   }
 
@@ -555,6 +568,8 @@ class MultiRoomFirestoreService {
     return _rooms
         .doc(roomId)
         .collection('visits')
+        .orderBy('visitedAt', descending: true)
+        .limit(50)
         .snapshots()
         .map((snap) => snap.docs.map((d) => d.id).toSet());
   }

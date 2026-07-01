@@ -68,6 +68,10 @@ class LeaderboardService {
   Stream<List<LeaderboardEntry>> _combineStreams(
     List<Stream<List<LeaderboardEntry>>> streams,
   ) {
+    if (streams.isEmpty) {
+      return Stream.value(const <LeaderboardEntry>[]);
+    }
+
     final controller = StreamController<List<LeaderboardEntry>>();
     final latestData = List<List<LeaderboardEntry>?>.filled(streams.length, null);
     final subscriptions = <StreamSubscription>[];

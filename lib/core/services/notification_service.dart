@@ -116,9 +116,15 @@ class NotificationService {
   // ─── Mesaj dinleyicileri ───────────────────────────────────────────────────
   void _setupMessageListeners() {
     // Foreground: in-app bildirim göster
-    FirebaseMessaging.onMessage.listen((message) {
-      _showLocalNotification(message);
-    });
+    FirebaseMessaging.onMessage.listen(
+      (message) {
+        _showLocalNotification(message);
+      },
+      onError: (error, stackTrace) {
+        debugPrint('[FCM] Foreground listener hatası: $error');
+      },
+      cancelOnError: false,
+    );
 
     // Arka-plan/kapalı → bildirime tıklandı
     FirebaseMessaging.onMessageOpenedApp.listen((message) {

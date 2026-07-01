@@ -10,6 +10,12 @@ class BadgeAwardService {
   final _badgeService = BadgeService();
   final _firestore = FirebaseFirestore.instance;
   static List<BadgeDefinition>? cachedBadges;
+  static DateTime? _cacheTime;
+  static const _cacheTTL = Duration(minutes: 15);
+
+  static bool get _isCacheStale =>
+      _cacheTime == null ||
+      DateTime.now().difference(_cacheTime!) > _cacheTTL;
 
   Future<List<String>> checkAndAwardBadges({
     required String uid,
@@ -31,7 +37,7 @@ class BadgeAwardService {
       final existingBadges = await _badgeService.fetchBadges(uid);
       final existingIds = existingBadges.map((b) => b.id).toSet();
 
-      if (cachedBadges == null) {
+      if (cachedBadges == null || _isCacheStale) {
         final snap =
             await _firestore
                 .collection('badges')
@@ -41,6 +47,7 @@ class BadgeAwardService {
             snap.docs
                 .map((doc) => BadgeDefinition.fromJson(doc.data(), doc.id))
                 .toList();
+        _cacheTime = DateTime.now();
       }
 
       return cachedBadges!
@@ -137,6 +144,7 @@ class BadgeAwardService {
         snap.docs
             .map((doc) => BadgeDefinition.fromJson(doc.data(), doc.id))
             .toList();
+    _cacheTime = DateTime.now();
     debugPrint(
       '[Badges] ${cachedBadges!.length} rozet projenin önbelleğine yüklendi.',
     );

@@ -174,7 +174,7 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
     try {
       Position? currentPosition;
 
-      const kTestMode = true;
+      const kTestMode = false;
 
       if (!kTestMode && !selectedArea.skipLocationVerification) {
         final accessResult = await LocationService.requestSinglePosition();

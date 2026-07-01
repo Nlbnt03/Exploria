@@ -1,11 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart' as geo;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../../data/services/poi_service.dart';
 import '../../../../app/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -102,7 +105,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
 
   bool get _hasPoiData => true;
 
-  static const bool _kTestMode = true;
+  static const bool _kTestMode = false;
 
   @override
   void initState() {
@@ -182,6 +185,120 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
     });
 
     _poiTapSub = mapController.onPoiTapped.listen(_onPoiTapped);
+
+    unawaited(_requestBackgroundPermissionIfNeeded());
+  }
+
+  Future<void> _requestBackgroundPermissionIfNeeded() async {
+    if (_kTestMode || _selectedArea.skipLocationVerification) return;
+    if (!mounted) return;
+
+    final hasBackground = await LocationService.hasBackgroundPermission();
+    if (hasBackground) return;
+
+    final permission = await geo.Geolocator.checkPermission();
+    if (permission != geo.LocationPermission.whileInUse &&
+        permission != geo.LocationPermission.always) {
+      return;
+    }
+
+    if (!mounted) return;
+
+    final agree = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.bgBottom,
+        title: const Text(
+          'Arka Planda Takip',
+          style: TextStyle(color: AppColors.textMain),
+        ),
+        content: const Text(
+          'Uygulamayı kapattığınızda veya ekranı kilitlemenizde haritadaki '
+          'ilerlemeniz duracaktır. İlerlemenizin arka planda da devam etmesi '
+          'için konum iznini "Her Zaman" olarak ayarlayabilirsiniz.\n\n'
+          'Arka planda takibi etkinleştirmek ister misiniz?',
+          style: TextStyle(color: AppColors.textMuted),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text(
+              'Hayır',
+              style: TextStyle(color: AppColors.textMuted),
+            ),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text(
+              'Evet, Etkinleştir',
+              style: TextStyle(color: AppColors.primary),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (agree == true && mounted) {
+      await LocationService.requestAlwaysPermission();
+    }
+
+    if (mounted) {
+      unawaited(_requestIgnoreBatteryOptimizations());
+    }
+  }
+
+  Future<void> _requestIgnoreBatteryOptimizations() async {
+    if (_kTestMode) return;
+    if (!mounted || !Platform.isAndroid) return;
+
+    try {
+      final status = await geo.Geolocator.isLocationServiceEnabled();
+      if (!status) return;
+
+      final alreadyGranted = await Permission.ignoreBatteryOptimizations.status;
+      if (alreadyGranted.isGranted) return;
+
+      if (!mounted) return;
+      final agree = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.bgBottom,
+          title: const Text(
+            'Pil Tasarrufu İstisnası',
+            style: TextStyle(color: AppColors.textMain),
+          ),
+          content: const Text(
+            'Bazı telefonlar (Xiaomi, Huawei, Samsung vb.) uygulamaları '
+            'arka planda kısıtlayarak konum takibini durdurabilir. '
+            'Kesintisiz takip için pil optimizasyonu istisnası eklemek '
+            'ister misiniz?',
+            style: TextStyle(color: AppColors.textMuted),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text(
+                'İptal',
+                style: TextStyle(color: AppColors.textMuted),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text(
+                'İzin Ver',
+                style: TextStyle(color: AppColors.primary),
+              ),
+            ),
+          ],
+        ),
+      );
+
+      if (agree == true && mounted) {
+        await Permission.ignoreBatteryOptimizations.request();
+      }
+    } catch (_) {
+      // Battery optimization request is best-effort.
+    }
   }
 
   CampusMapState? _cachedRestoredState;
@@ -509,7 +626,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                                     '[Gezdim] onPlaceVisited HATA: $e',
                                   );
                                 }
-                                _loadAndShowPois();
+                                await _loadAndShowPois();
 
                                 // Harita tamamlandı mı kontrol et
                                 if (_totalPoiCount > 0 &&
@@ -556,7 +673,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                                 );
                                 setSheetState(() {});
                                 setState(() {});
-                                _loadAndShowPois();
+                                await _loadAndShowPois();
 
                                 // XP düşür
                                 debugPrint('[Gezdim] removeXP çağrılıyor...');
@@ -804,7 +921,19 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
       _mapController?.flushPersist();
+      if (state == AppLifecycleState.paused) {
+        _mapController?.setBackgroundMode(true);
+      }
+    } else if (state == AppLifecycleState.resumed) {
+      _mapController?.setBackgroundMode(false);
+      _mapController?.snapToLastInsidePosition();
     }
+  }
+
+  @override
+  void deactivate() {
+    _mapController?.flushPersist();
+    super.deactivate();
   }
 
   @override

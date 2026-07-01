@@ -12,6 +12,22 @@ class VenueCheckInService {
   static const double baseThreshold = 80.0;
   static const double maxAccuracyAllowance = 40.0;
 
+  // Cached connectivity — subscribe once, avoid platform channel on every check-in.
+  static ConnectivityResult? _lastConnectivity;
+  static bool _connectivityInitialized = false;
+
+  static void _ensureConnectivityInit() {
+    if (_connectivityInitialized) return;
+    _connectivityInitialized = true;
+    Connectivity().onConnectivityChanged.listen((results) {
+      _lastConnectivity = results.isNotEmpty ? results.first : ConnectivityResult.none;
+    });
+    // Seed with initial value (best-effort, may not complete before first check-in).
+    Connectivity().checkConnectivity().then((results) {
+      _lastConnectivity = results.isNotEmpty ? results.first : ConnectivityResult.none;
+    });
+  }
+
   Future<CheckInState> processCheckIn({
     required String venueId,
     required String mapId,
@@ -28,9 +44,9 @@ class VenueCheckInService {
       //return CheckInState.success;
       // ------------------------------------------------------------------------------------------
 
-      // 1. Offline Kontrol
-      final connectivityResults = await Connectivity().checkConnectivity();
-      if (connectivityResults.contains(ConnectivityResult.none)) {
+      // 1. Offline Kontrol (cached — platform kanalına gitmez)
+      _ensureConnectivityInit();
+      if (_lastConnectivity == ConnectivityResult.none) {
         return CheckInState.offline;
       }
 

@@ -32,13 +32,14 @@ class _FriendsTabState extends State<FriendsTab> {
   final TextEditingController _searchController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final GlobalKey _incomingSectionKey = GlobalKey();
-
   List<AppUserSummary> _searchResults = const <AppUserSummary>[];
   bool _isSearching = false;
   final Set<String> _sendingRequestTo = <String>{};
   final Set<String> _cancellingRequestTo = <String>{};
   final Set<String> _processingRequests = <String>{};
   final Set<String> _removingFriends = <String>{};
+  bool _showAllFriends = false;
+  static const int _initialFriendLimit = 1;
 
   @override
   void initState() {
@@ -62,14 +63,10 @@ class _FriendsTabState extends State<FriendsTab> {
   }
 
   void _focusIncomingIfNeeded() {
-    if (!widget.focusIncomingRequests) {
-      return;
-    }
+    if (!widget.focusIncomingRequests) return;
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
 
       final incomingContext = _incomingSectionKey.currentContext;
       if (incomingContext != null) {
@@ -117,16 +114,12 @@ class _FriendsTabState extends State<FriendsTab> {
     } catch (e) {
       _showMessage('Arama yapılırken hata oluştu: $e');
     } finally {
-      if (mounted) {
-        setState(() => _isSearching = false);
-      }
+      if (mounted) setState(() => _isSearching = false);
     }
   }
 
   Future<void> _sendRequest(String toUid) async {
-    if (_sendingRequestTo.contains(toUid)) {
-      return;
-    }
+    if (_sendingRequestTo.contains(toUid)) return;
 
     setState(() => _sendingRequestTo.add(toUid));
     try {
@@ -140,9 +133,7 @@ class _FriendsTabState extends State<FriendsTab> {
     } catch (e) {
       _showMessage('İstek gönderilemedi: $e');
     } finally {
-      if (mounted) {
-        setState(() => _sendingRequestTo.remove(toUid));
-      }
+      if (mounted) setState(() => _sendingRequestTo.remove(toUid));
     }
   }
 
@@ -161,16 +152,12 @@ class _FriendsTabState extends State<FriendsTab> {
     } catch (e) {
       _showMessage('İstek geri alınamadı: $e');
     } finally {
-      if (mounted) {
-        setState(() => _cancellingRequestTo.remove(toUid));
-      }
+      if (mounted) setState(() => _cancellingRequestTo.remove(toUid));
     }
   }
 
   Future<void> _acceptRequest(String requestId) async {
-    if (_processingRequests.contains(requestId)) {
-      return;
-    }
+    if (_processingRequests.contains(requestId)) return;
 
     setState(() => _processingRequests.add(requestId));
     try {
@@ -184,16 +171,12 @@ class _FriendsTabState extends State<FriendsTab> {
     } catch (e) {
       _showMessage('İstek kabul edilemedi: $e');
     } finally {
-      if (mounted) {
-        setState(() => _processingRequests.remove(requestId));
-      }
+      if (mounted) setState(() => _processingRequests.remove(requestId));
     }
   }
 
   Future<void> _rejectRequest(String requestId) async {
-    if (_processingRequests.contains(requestId)) {
-      return;
-    }
+    if (_processingRequests.contains(requestId)) return;
 
     setState(() => _processingRequests.add(requestId));
     try {
@@ -207,16 +190,12 @@ class _FriendsTabState extends State<FriendsTab> {
     } catch (e) {
       _showMessage('İstek reddedilemedi: $e');
     } finally {
-      if (mounted) {
-        setState(() => _processingRequests.remove(requestId));
-      }
+      if (mounted) setState(() => _processingRequests.remove(requestId));
     }
   }
 
   Future<void> _removeFriend(String friendUid) async {
-    if (_removingFriends.contains(friendUid)) {
-      return;
-    }
+    if (_removingFriends.contains(friendUid)) return;
 
     setState(() => _removingFriends.add(friendUid));
     try {
@@ -230,9 +209,7 @@ class _FriendsTabState extends State<FriendsTab> {
     } catch (e) {
       _showMessage('Arkadaş çıkarılamadı: $e');
     } finally {
-      if (mounted) {
-        setState(() => _removingFriends.remove(friendUid));
-      }
+      if (mounted) setState(() => _removingFriends.remove(friendUid));
     }
   }
 
@@ -268,94 +245,131 @@ class _FriendsTabState extends State<FriendsTab> {
     }
   }
 
+  // ── Card decoration ─────────────────────────────────────────────
+
+  static const BoxDecoration _cardDeco = BoxDecoration(
+    color: AppColors.card,
+    borderRadius: BorderRadius.all(Radius.circular(20)),
+    border: Border.fromBorderSide(
+      BorderSide(color: AppColors.inputBorder, width: 0.5),
+    ),
+  );
+
+  // ── Build ───────────────────────────────────────────────────────
+
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
       controller: _scrollController,
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 126),
+      padding: const EdgeInsets.fromLTRB(20, 8, 20, 126),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Arkadaşlarım',
-            style: TextStyle(
-              color: AppColors.textMain,
-              fontSize: 32,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
+          _buildRoomInvitesCard(),
           const SizedBox(height: 14),
-          _buildRoomInvitesButton(),
-          const SizedBox(height: 16),
           _buildSearchSection(),
-          const SizedBox(height: 16),
-          Container(
-            key: _incomingSectionKey,
-            child: _buildIncomingRequestsSection(),
-          ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 14),
+          Container(key: _incomingSectionKey, child: _buildIncomingRequestsSection()),
+          const SizedBox(height: 14),
           _buildFriendsSection(),
         ],
       ),
     );
   }
 
-  Widget _buildRoomInvitesButton() {
+  // ── Room Invites Card ───────────────────────────────────────────
+
+  Widget _buildRoomInvitesCard() {
     final currentUid =
         widget.uid.trim().isNotEmpty
             ? widget.uid
             : (_multiRoomService.currentUid ?? '');
+
     return StreamBuilder<int>(
       stream: _multiRoomService.listenPendingInvitesCountFor(currentUid),
       builder: (context, snapshot) {
         final inviteCount = snapshot.data ?? 0;
 
-        return SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed:
-                widget.onOpenRoomInvites ??
-                () => Navigator.pushNamed(context, AppRouter.pendingInvites),
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                const Icon(Icons.mark_email_unread_outlined),
-                if (inviteCount > 0)
-                  Positioned(
-                    right: -8,
-                    top: -8,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 5,
-                        vertical: 1,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary,
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        inviteCount > 99 ? '99+' : '$inviteCount',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                  ),
+        return GestureDetector(
+          onTap:
+              widget.onOpenRoomInvites ??
+              () => Navigator.pushNamed(context, AppRouter.pendingInvites),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: _cardDeco.copyWith(
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primary.withValues(alpha: 0.08),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
               ],
             ),
-            label: Text(
-              inviteCount > 0
-                  ? 'Oda Davetleri ($inviteCount)'
-                  : 'Oda Davetleri',
-            ),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.textMain,
-              side: BorderSide(
-                color: AppColors.inputBorder.withValues(alpha: 0.7),
-              ),
-              padding: const EdgeInsets.symmetric(vertical: 14),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [AppColors.primary, AppColors.secondary],
+                    ),
+                    borderRadius: BorderRadius.all(Radius.circular(12)),
+                  ),
+                  child: const Icon(
+                    Icons.door_front_door_outlined,
+                    color: Colors.white,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Oda Davetleri',
+                        style: TextStyle(
+                          color: AppColors.textMain,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Seni keşfe çağıran arkadaşlar',
+                        style: TextStyle(
+                          color: AppColors.textMuted.withValues(alpha: 0.8),
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (inviteCount > 0)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 4,
+                    ),
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [AppColors.primary, AppColors.secondary],
+                      ),
+                      borderRadius: BorderRadius.all(Radius.circular(12)),
+                    ),
+                    child: Text(
+                      inviteCount > 99 ? '99+' : '$inviteCount',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  )
+                else
+                  Icon(Icons.chevron_right, color: AppColors.textMuted),
+              ],
             ),
           ),
         );
@@ -363,10 +377,14 @@ class _FriendsTabState extends State<FriendsTab> {
     );
   }
 
+  // ── Search Section ──────────────────────────────────────────────
+
   Widget _buildSearchSection() {
-    return _SectionCard(
-      title: 'Kullanıcı Ara',
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: _cardDeco,
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
@@ -385,59 +403,37 @@ class _FriendsTabState extends State<FriendsTab> {
                     filled: true,
                     fillColor: AppColors.inputFill,
                     border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: AppColors.inputBorder.withValues(alpha: 0.65),
-                      ),
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
                     ),
                     enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(
-                        color: AppColors.inputBorder.withValues(alpha: 0.65),
-                      ),
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
                     ),
                     focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(14),
                       borderSide: const BorderSide(
                         color: AppColors.primary,
                         width: 1.3,
                       ),
                     ),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 14,
+                    ),
                   ),
                 ),
               ),
               const SizedBox(width: 10),
-              SizedBox(
-                height: 48,
-                child: ElevatedButton(
-                  onPressed: _isSearching ? null : _searchUsers,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
-                  child:
-                      _isSearching
-                          ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                          : const Text(
-                            'Ara',
-                            style: TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                ),
+              _gradientButton(
+                label: 'Ara',
+                loading: _isSearching,
+                onPressed: _isSearching ? null : _searchUsers,
               ),
             ],
           ),
           const SizedBox(height: 12),
-          if (_searchResults.isEmpty)
+          if (_searchResults.isEmpty && !_isSearching)
             const Align(
               alignment: Alignment.centerLeft,
               child: Text(
@@ -445,7 +441,7 @@ class _FriendsTabState extends State<FriendsTab> {
                 style: TextStyle(color: AppColors.textMuted, fontSize: 13),
               ),
             )
-          else
+          else if (_searchResults.isNotEmpty)
             StreamBuilder<Set<String>>(
               stream: _friendsService.watchOutgoingPendingRequestToUids(
                 widget.uid,
@@ -459,176 +455,25 @@ class _FriendsTabState extends State<FriendsTab> {
                     return Column(
                       children:
                           _searchResults.map((user) {
-                            final isSending = _sendingRequestTo.contains(
-                              user.uid,
-                            );
-                            final isCancelling = _cancellingRequestTo
-                                .contains(user.uid);
-                            final isAlreadyRequested = pendingToUids.contains(
-                              user.uid,
-                            );
-                            final isAlreadyFriend = friendUids.contains(
-                              user.uid,
-                            );
-
-                            return Container(
-                              margin: const EdgeInsets.only(bottom: 10),
-                              padding: const EdgeInsets.all(12),
-                              decoration: BoxDecoration(
-                                color: AppColors.inputFill.withValues(
-                                  alpha: 0.85,
-                                ),
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(
-                                  color: AppColors.inputBorder.withValues(
-                                    alpha: 0.35,
-                                  ),
-                                ),
+                            return _SearchResultCard(
+                              user: user,
+                              isSending: _sendingRequestTo.contains(user.uid),
+                              isCancelling: _cancellingRequestTo.contains(
+                                user.uid,
                               ),
-                              child: Row(
-                                children: [
-                                  CircleAvatar(
-                                    radius: 20,
-                                    backgroundColor: AppColors.primary
-                                        .withValues(alpha: 0.2),
-                                    child: Text(
-                                      user.username.isEmpty
-                                          ? 'U'
-                                          : user.username[0].toUpperCase(),
-                                      style: const TextStyle(
-                                        color: AppColors.textMain,
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: GestureDetector(
-                                      onTap: () {
-                                        Navigator.pushNamed(
-                                          context,
-                                          AppRouter.userProfile,
-                                          arguments: UserProfilePageArgs(
-                                            uid: user.uid,
-                                          ),
-                                        );
-                                      },
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            user.fullName.isEmpty
-                                                ? user.username
-                                                : user.fullName,
-                                            style: const TextStyle(
-                                              color: AppColors.textMain,
-                                              fontWeight: FontWeight.w700,
-                                              fontSize: 15,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 2),
-                                          Text(
-                                            '@${user.username}',
-                                            style: const TextStyle(
-                                              color: AppColors.textMuted,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                  if (isAlreadyFriend)
-                                    OutlinedButton(
-                                      onPressed: null,
-                                      style: OutlinedButton.styleFrom(
-                                        minimumSize: const Size(56, 30),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 10,
-                                          vertical: 4,
-                                        ),
-                                        foregroundColor: AppColors.textMuted,
-                                        textStyle: const TextStyle(fontSize: 12),
-                                        side: BorderSide(
-                                          color: AppColors.inputBorder
-                                              .withValues(alpha: 0.4),
-                                        ),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                        ),
-                                      ),
-                                      child: const Text('Arkadaşın'),
-                                    )
-                                  else if (isAlreadyRequested)
-                                    OutlinedButton(
-                                      onPressed: isCancelling
-                                          ? null
-                                          : () => _cancelRequest(user.uid),
-                                      style: OutlinedButton.styleFrom(
-                                        minimumSize: const Size(56, 30),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 10,
-                                          vertical: 4,
-                                        ),
-                                        foregroundColor: Colors.orangeAccent,
-                                        textStyle: const TextStyle(fontSize: 11),
-                                        side: BorderSide(
-                                          color: Colors.orangeAccent
-                                              .withValues(alpha: 0.5),
-                                        ),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                        ),
-                                      ),
-                                      child: isCancelling
-                                          ? const SizedBox(
-                                            width: 12,
-                                            height: 12,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 1.5,
-                                              color: Colors.orangeAccent,
-                                            ),
-                                          )
-                                          : const Text('Gönderildi'),
-                                    )
-                                  else
-                                    ElevatedButton(
-                                      onPressed: isSending
-                                          ? null
-                                          : () => _sendRequest(user.uid),
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor:
-                                            AppColors.primary.withValues(
-                                              alpha: 0.92,
-                                            ),
-                                        foregroundColor: Colors.white,
-                                        minimumSize: const Size(56, 30),
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 12,
-                                          vertical: 4,
-                                        ),
-                                        textStyle: const TextStyle(fontSize: 12),
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(8),
-                                        ),
-                                      ),
-                                      child: isSending
-                                          ? const SizedBox(
-                                            width: 12,
-                                            height: 12,
-                                            child: CircularProgressIndicator(
-                                              strokeWidth: 1.5,
-                                              color: Colors.white,
-                                            ),
-                                          )
-                                          : const Text('İstek'),
-                                    ),
-                                ],
+                              isAlreadyRequested: pendingToUids.contains(
+                                user.uid,
                               ),
+                              isAlreadyFriend: friendUids.contains(user.uid),
+                              onSend: () => _sendRequest(user.uid),
+                              onCancel: () => _cancelRequest(user.uid),
+                              onTap: () {
+                                Navigator.pushNamed(
+                                  context,
+                                  AppRouter.userProfile,
+                                  arguments: UserProfilePageArgs(uid: user.uid),
+                                );
+                              },
                             );
                           }).toList(),
                     );
@@ -641,167 +486,135 @@ class _FriendsTabState extends State<FriendsTab> {
     );
   }
 
+  // ── Incoming Requests Section ───────────────────────────────────
+
   Widget _buildIncomingRequestsSection() {
-    return _SectionCard(
-      title: 'Gelen İstekler',
-      child: StreamBuilder<List<FriendRequestView>>(
-        stream: _friendsService.watchIncomingRequests(widget.uid),
-        builder: (context, snapshot) {
-          if (snapshot.hasError) {
-            return const Text(
+    return StreamBuilder<List<FriendRequestView>>(
+      stream: _friendsService.watchIncomingRequests(widget.uid),
+      builder: (context, snapshot) {
+        if (snapshot.hasError) {
+          return Container(
+            padding: const EdgeInsets.all(16),
+            decoration: _cardDeco,
+            child: const Text(
               'Gelen istekler yüklenirken bir hata oluştu.',
               style: TextStyle(color: AppColors.textMuted, fontSize: 13),
-            );
-          }
+            ),
+          );
+        }
 
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Center(
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return Container(
+            padding: const EdgeInsets.all(16),
+            decoration: _cardDeco,
+            child: const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
                 child: CircularProgressIndicator(color: AppColors.primary),
               ),
-            );
-          }
+            ),
+          );
+        }
 
-          final requests = snapshot.data ?? const <FriendRequestView>[];
-          if (requests.isEmpty) {
-            return const Text(
-              'Bekleyen arkadaşlık isteğin yok.',
-              style: TextStyle(color: AppColors.textMuted, fontSize: 13),
-            );
-          }
+        final requests = snapshot.data ?? const <FriendRequestView>[];
 
-          return Column(
-            children:
-                requests.map((request) {
-                  final isProcessing = _processingRequests.contains(
-                    request.requestId,
-                  );
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.inputFill.withValues(alpha: 0.85),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: AppColors.inputBorder.withValues(alpha: 0.35),
+        return Container(
+          padding: const EdgeInsets.all(16),
+          decoration: _cardDeco,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Text(
+                    'Gelen İstekler',
+                    style: TextStyle(
+                      color: AppColors.textMain,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  if (requests.isNotEmpty) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 7,
+                        vertical: 2,
+                      ),
+                      decoration: const BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [AppColors.primary, AppColors.secondary],
+                        ),
+                        borderRadius: BorderRadius.all(Radius.circular(8)),
+                      ),
+                      child: Text(
+                        '${requests.length}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
                     ),
-                    child: Column(
-                      children: [
-                        Row(
-                          children: [
-                            CircleAvatar(
-                              radius: 20,
-                              backgroundColor: AppColors.primary.withValues(
-                                alpha: 0.2,
-                              ),
-                              child: Text(
-                                request.fromUser.username.isEmpty
-                                    ? 'U'
-                                    : request.fromUser.username[0]
-                                        .toUpperCase(),
-                                style: const TextStyle(
-                                  color: AppColors.textMain,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    request.fromUser.fullName.isEmpty
-                                        ? request.fromUser.username
-                                        : request.fromUser.fullName,
-                                    style: const TextStyle(
-                                      color: AppColors.textMain,
-                                      fontWeight: FontWeight.w700,
-                                      fontSize: 15,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    '@${request.fromUser.username}',
-                                    style: const TextStyle(
-                                      color: AppColors.textMuted,
-                                      fontSize: 13,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
+                  ],
+                  const Spacer(),
+                  if (requests.isNotEmpty)
+                    GestureDetector(
+                      onTap: () {
+                        _scrollController.animateTo(
+                          _scrollController.position.maxScrollExtent,
+                          duration: const Duration(milliseconds: 300),
+                          curve: Curves.easeOutCubic,
+                        );
+                      },
+                      child: const Text(
+                        'Tümü',
+                        style: TextStyle(
+                          color: AppColors.primary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
                         ),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton(
-                                onPressed:
-                                    isProcessing
-                                        ? null
-                                        : () =>
-                                            _rejectRequest(request.requestId),
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: AppColors.textMain,
-                                  side: BorderSide(
-                                    color: AppColors.inputBorder.withValues(
-                                      alpha: 0.5,
-                                    ),
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                ),
-                                child: const Text('Reddet'),
-                              ),
-                            ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: ElevatedButton(
-                                onPressed:
-                                    isProcessing
-                                        ? null
-                                        : () =>
-                                            _acceptRequest(request.requestId),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppColors.primary,
-                                  foregroundColor: Colors.white,
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                ),
-                                child:
-                                    isProcessing
-                                        ? const SizedBox(
-                                          width: 16,
-                                          height: 16,
-                                          child: CircularProgressIndicator(
-                                            strokeWidth: 2,
-                                            color: Colors.white,
-                                          ),
-                                        )
-                                        : const Text('Kabul Et'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                      ),
                     ),
-                  );
-                }).toList(),
-          );
-        },
-      ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              if (requests.isEmpty)
+                const Text(
+                  'Bekleyen arkadaşlık isteğin yok.',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                )
+              else
+                ...requests.map(
+                  (request) => _RequestCard(
+                    request: request,
+                    isProcessing: _processingRequests.contains(
+                      request.requestId,
+                    ),
+                    onAccept: () => _acceptRequest(request.requestId),
+                    onReject: () => _rejectRequest(request.requestId),
+                    onTap: () {
+                      Navigator.pushNamed(
+                        context,
+                        AppRouter.userProfile,
+                        arguments: UserProfilePageArgs(uid: request.fromUid),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 
+  // ── Friends Section ─────────────────────────────────────────────
+
   Widget _buildFriendsSection() {
-    return _SectionCard(
-      title: 'Arkadaş Listen',
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: _cardDeco,
       child: StreamBuilder<List<AppUserSummary>>(
         stream: _friendsService.watchFriends(widget.uid),
         builder: (context, snapshot) {
@@ -813,172 +626,591 @@ class _FriendsTabState extends State<FriendsTab> {
           }
 
           if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Center(
+            return const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
                 child: CircularProgressIndicator(color: AppColors.primary),
               ),
             );
           }
 
           final friends = snapshot.data ?? const <AppUserSummary>[];
-          if (friends.isEmpty) {
-            return const Text(
-              'Henüz arkadaşın yok. Üstteki arama bölümünden istek gönderebilirsin.',
-              style: TextStyle(color: AppColors.textMuted, fontSize: 13),
-            );
-          }
+          final displayedFriends = _showAllFriends
+              ? friends
+              : friends.take(_initialFriendLimit).toList();
 
           return Column(
-            children:
-                friends.map((friend) {
-                  final isRemoving = _removingFriends.contains(friend.uid);
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.inputFill.withValues(alpha: 0.85),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: AppColors.inputBorder.withValues(alpha: 0.35),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Text(
+                    'Arkadaşların',
+                    style: TextStyle(
+                      color: AppColors.textMain,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 2,
+                    ),
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [AppColors.primary, AppColors.secondary],
+                      ),
+                      borderRadius: BorderRadius.all(Radius.circular(8)),
+                    ),
+                    child: Text(
+                      '${friends.length}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
-                    child: Row(
-                      children: [
-                        CircleAvatar(
-                          radius: 20,
-                          backgroundColor: AppColors.primary.withValues(
-                            alpha: 0.2,
-                          ),
-                          child: Text(
-                            friend.username.isEmpty
-                                ? 'U'
-                                : friend.username[0].toUpperCase(),
-                            style: const TextStyle(
-                              color: AppColors.textMain,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
+                  ),
+                  const Spacer(),
+                  if (friends.length > _initialFriendLimit)
+                    GestureDetector(
+                      onTap: () => setState(
+                        () => _showAllFriends = !_showAllFriends,
+                      ),
+                      child: Text(
+                        _showAllFriends ? 'Daha Az Göster' : 'Tümünü Göster (${friends.length})',
+                        style: const TextStyle(
+                          color: AppColors.primary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
                         ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: GestureDetector(
-                            onTap: () {
-                              Navigator.pushNamed(
-                                context,
-                                AppRouter.userProfile,
-                                arguments: UserProfilePageArgs(
-                                  uid: friend.uid,
-                                ),
-                              );
-                            },
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  friend.fullName.isEmpty
-                                      ? friend.username
-                                      : friend.fullName,
-                                  style: const TextStyle(
-                                    color: AppColors.textMain,
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 16,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                const SizedBox(height: 2),
-                                Text(
-                                  '@${friend.username}',
-                                  style: const TextStyle(
-                                    color: AppColors.textMuted,
-                                    fontSize: 13,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        OutlinedButton(
-                          onPressed:
-                              isRemoving
-                                  ? null
-                                  : () => _removeFriend(friend.uid),
-                          style: OutlinedButton.styleFrom(
-                            minimumSize: const Size(56, 30),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 4,
-                            ),
-                            foregroundColor: Colors.white,
-                            textStyle: const TextStyle(fontSize: 12),
-                            side: BorderSide(
-                              color: AppColors.inputBorder.withValues(
-                                alpha: 0.6,
-                              ),
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                          child:
-                              isRemoving
-                                  ? const SizedBox(
-                                    width: 12,
-                                    height: 12,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 1.5,
-                                      color: Colors.white,
-                                    ),
-                                  )
-                                  : const Text('Çıkar'),
-                        ),
-                      ],
+                      ),
                     ),
-                  );
-                }).toList(),
+                ],
+              ),
+              const SizedBox(height: 14),
+              if (friends.isEmpty)
+                const Text(
+                  'Henüz arkadaşın yok. Üstteki arama bölümünden istek gönderebilirsin.',
+                  style: TextStyle(color: AppColors.textMuted, fontSize: 13),
+                )
+              else ...[
+                ...displayedFriends.map(
+                  (friend) => _FriendCard(
+                    friend: friend,
+                    isRemoving: _removingFriends.contains(friend.uid),
+                    onRemove: () => _removeFriend(friend.uid),
+                    onTap: () {
+                      Navigator.pushNamed(
+                        context,
+                        AppRouter.userProfile,
+                        arguments: UserProfilePageArgs(uid: friend.uid),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ],
           );
         },
       ),
     );
   }
+
+  // ── Helpers ─────────────────────────────────────────────────────
+
+  Widget _gradientButton({
+    required String label,
+    required bool loading,
+    required VoidCallback? onPressed,
+  }) {
+    return Container(
+      height: 48,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [AppColors.primary, AppColors.secondary],
+        ),
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: ElevatedButton(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          foregroundColor: Colors.white,
+          shadowColor: Colors.transparent,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+        ),
+        child:
+            loading
+                ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+                : Text(
+                  label,
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+      ),
+    );
+  }
 }
 
-class _SectionCard extends StatelessWidget {
-  const _SectionCard({required this.title, required this.child});
+// ═══════════════════════════════════════════════════════════════════
+// Reusable card widgets
+// ═══════════════════════════════════════════════════════════════════
 
-  final String title;
-  final Widget child;
+class _SearchResultCard extends StatelessWidget {
+  const _SearchResultCard({
+    required this.user,
+    required this.isSending,
+    required this.isCancelling,
+    required this.isAlreadyRequested,
+    required this.isAlreadyFriend,
+    required this.onSend,
+    required this.onCancel,
+    required this.onTap,
+  });
+
+  final AppUserSummary user;
+  final bool isSending;
+  final bool isCancelling;
+  final bool isAlreadyRequested;
+  final bool isAlreadyFriend;
+  final VoidCallback onSend;
+  final VoidCallback onCancel;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: AppColors.card,
+        color: AppColors.inputFill.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: AppColors.inputBorder.withValues(alpha: 0.45),
+          color: AppColors.inputBorder.withValues(alpha: 0.2),
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Text(
-            title,
-            style: const TextStyle(
-              color: AppColors.textMain,
-              fontSize: 18,
-              fontWeight: FontWeight.w700,
+          _AvatarCircle(username: user.username, uid: user.uid),
+          const SizedBox(width: 10),
+          Expanded(
+            child: GestureDetector(
+              onTap: onTap,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    user.fullName.isEmpty ? user.username : user.fullName,
+                    style: const TextStyle(
+                      color: AppColors.textMain,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '@${user.username}',
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 13,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
             ),
           ),
-          const SizedBox(height: 10),
-          child,
+          if (isAlreadyFriend)
+            _smallButton(
+              label: 'Arkadaşın',
+              backgroundColor: Colors.transparent,
+              foregroundColor: AppColors.textMuted,
+              borderColor: AppColors.inputBorder.withValues(alpha: 0.3),
+              enabled: false,
+            )
+          else if (isAlreadyRequested)
+            _smallButton(
+              label: 'Gönderildi',
+              backgroundColor: Colors.transparent,
+              foregroundColor: Colors.orangeAccent,
+              borderColor: Colors.orangeAccent.withValues(alpha: 0.4),
+              loading: isCancelling,
+              onPressed: onCancel,
+            )
+          else
+            _smallButton(
+              label: 'İstek',
+              backgroundColor: AppColors.primary.withValues(alpha: 0.92),
+              foregroundColor: Colors.white,
+              loading: isSending,
+              onPressed: onSend,
+            ),
         ],
       ),
     );
   }
+}
+
+class _RequestCard extends StatelessWidget {
+  const _RequestCard({
+    required this.request,
+    required this.isProcessing,
+    required this.onAccept,
+    required this.onReject,
+    required this.onTap,
+  });
+
+  final FriendRequestView request;
+  final bool isProcessing;
+  final VoidCallback onAccept;
+  final VoidCallback onReject;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.inputFill.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: AppColors.inputBorder.withValues(alpha: 0.2),
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              _AvatarCircle(
+                username: request.fromUser.username,
+                uid: request.fromUid,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: GestureDetector(
+                  onTap: onTap,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        request.fromUser.fullName.isEmpty
+                            ? request.fromUser.username
+                            : request.fromUser.fullName,
+                        style: const TextStyle(
+                          color: AppColors.textMain,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        '@${request.fromUser.username}',
+                        style: const TextStyle(
+                          color: AppColors.textMuted,
+                          fontSize: 13,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  height: 40,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: AppColors.inputBorder.withValues(alpha: 0.4),
+                    ),
+                  ),
+                  child: ElevatedButton(
+                    onPressed: isProcessing ? null : onReject,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.transparent,
+                      foregroundColor: AppColors.textMuted,
+                      shadowColor: Colors.transparent,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Reddet',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Container(
+                  height: 40,
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(12),
+                    gradient: const LinearGradient(
+                      colors: [AppColors.greenAccept, Color(0xFF66BB6A)],
+                    ),
+                  ),
+                  child: ElevatedButton(
+                    onPressed: isProcessing ? null : onAccept,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.transparent,
+                      foregroundColor: Colors.white,
+                      shadowColor: Colors.transparent,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child:
+                        isProcessing
+                            ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
+                            : const Text(
+                              'Kabul Et',
+                              style: TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FriendCard extends StatelessWidget {
+  const _FriendCard({
+    required this.friend,
+    required this.isRemoving,
+    required this.onRemove,
+    required this.onTap,
+  });
+
+  final AppUserSummary friend;
+  final bool isRemoving;
+  final VoidCallback onRemove;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(12, 12, 4, 12),
+      decoration: BoxDecoration(
+        color: AppColors.inputFill.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: AppColors.inputBorder.withValues(alpha: 0.2),
+        ),
+      ),
+      child: Row(
+        children: [
+          _AvatarCircle(username: friend.username, uid: friend.uid),
+          const SizedBox(width: 10),
+          Expanded(
+            child: GestureDetector(
+              onTap: onTap,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    friend.fullName.isEmpty
+                        ? friend.username
+                        : friend.fullName,
+                    style: const TextStyle(
+                      color: AppColors.textMain,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '@${friend.username}',
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 13,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          PopupMenuButton<String>(
+            icon: Icon(
+              Icons.more_horiz_rounded,
+              color: AppColors.textMuted.withValues(alpha: 0.7),
+              size: 24,
+            ),
+            onSelected: (value) {
+              if (value == 'remove') onRemove();
+            },
+            color: const Color(0xFF1F0A30),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+              side: BorderSide(
+                color: AppColors.inputBorder.withValues(alpha: 0.3),
+              ),
+            ),
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'remove',
+                height: 40,
+                child:
+                    isRemoving
+                        ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.redAccent,
+                          ),
+                        )
+                        : const Row(
+                          children: [
+                            Icon(
+                              Icons.person_remove_outlined,
+                              color: Colors.redAccent,
+                              size: 18,
+                            ),
+                            SizedBox(width: 8),
+                            Text(
+                              'Çıkar',
+                              style: TextStyle(
+                                color: Colors.redAccent,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _AvatarCircle extends StatelessWidget {
+  const _AvatarCircle({required this.username, required this.uid});
+
+  final String username;
+  final String uid;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 44,
+      height: 44,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [AppColors.primary, AppColors.secondary],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        shape: BoxShape.circle,
+      ),
+      child: Center(
+        child: Text(
+          username.isEmpty
+              ? uid.isNotEmpty
+                  ? uid[0].toUpperCase()
+                  : '?'
+              : username[0].toUpperCase(),
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w700,
+            fontSize: 16,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+Widget _smallButton({
+  required String label,
+  required Color backgroundColor,
+  required Color foregroundColor,
+  Color? borderColor,
+  bool enabled = true,
+  bool loading = false,
+  VoidCallback? onPressed,
+}) {
+  final btnStyle = ElevatedButton.styleFrom(
+    backgroundColor: backgroundColor,
+    foregroundColor: foregroundColor,
+    shadowColor: Colors.transparent,
+    elevation: 0,
+    minimumSize: const Size(56, 30),
+    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+    textStyle: const TextStyle(fontSize: 12),
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(10),
+      side: borderColor != null ? BorderSide(color: borderColor) : BorderSide.none,
+    ),
+  );
+
+  if (!enabled) {
+    return ElevatedButton(
+      onPressed: null,
+      style: btnStyle,
+      child: Text(label),
+    );
+  }
+
+  return ElevatedButton(
+    onPressed: loading ? null : onPressed,
+    style: btnStyle,
+    child:
+        loading
+            ? const SizedBox(
+              width: 12,
+              height: 12,
+              child: CircularProgressIndicator(
+                strokeWidth: 1.5,
+                color: Colors.white,
+              ),
+            )
+            : Text(label),
+  );
 }
