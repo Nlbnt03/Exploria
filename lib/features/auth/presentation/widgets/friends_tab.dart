@@ -1179,6 +1179,8 @@ Widget _smallButton({
   final btnStyle = ElevatedButton.styleFrom(
     backgroundColor: backgroundColor,
     foregroundColor: foregroundColor,
+    disabledBackgroundColor: backgroundColor,
+    disabledForegroundColor: foregroundColor,
     shadowColor: Colors.transparent,
     elevation: 0,
     minimumSize: const Size(56, 30),
