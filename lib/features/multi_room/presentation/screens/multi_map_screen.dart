@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -7,6 +8,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -58,6 +60,12 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
   static const String _fogLayerId = 'multi-room-fog-layer';
   static const String _cloudSourceId = 'multi-room-cloud-source';
   static const String _cloudLayerId = 'multi-room-cloud-layer';
+
+  static final geo.ForegroundNotificationConfig _foregroundNotification =
+      geo.ForegroundNotificationConfig(
+    notificationTitle: 'Keşfedio',
+    notificationText: 'Oda arkadaşlarınla ilerleme takip ediliyor...',
+  );
 
   final MultiRoomFirestoreService _service = MultiRoomFirestoreService();
   final MapProgressService _mapProgressService = MapProgressService();
@@ -463,6 +471,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
     }
 
     _isTracking = true;
+    unawaited(_requestIgnoreBatteryOptimizations());
 
     // Send the current position immediately so teammates see this user's dot
     // right away — without this, distanceFilter suppresses the first update
@@ -501,10 +510,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
     }
 
     _locationSub = geo.Geolocator.getPositionStream(
-      locationSettings: const geo.LocationSettings(
-        accuracy: geo.LocationAccuracy.high,
-        distanceFilter: 4,
-      ),
+      locationSettings: _buildTrackingLocationSettings(),
     ).listen(
       (pos) {
         if (!_isTracking) return;
@@ -570,6 +576,78 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
 
     return permission == geo.LocationPermission.always ||
         permission == geo.LocationPermission.whileInUse;
+  }
+
+  geo.LocationSettings _buildTrackingLocationSettings() {
+    if (Platform.isAndroid) {
+      return geo.AndroidSettings(
+        accuracy: geo.LocationAccuracy.high,
+        distanceFilter: 4,
+        foregroundNotificationConfig: _foregroundNotification,
+      );
+    }
+    if (Platform.isIOS) {
+      return geo.AppleSettings(
+        accuracy: geo.LocationAccuracy.high,
+        distanceFilter: 4,
+        showBackgroundLocationIndicator: true,
+        pauseLocationUpdatesAutomatically: false,
+      );
+    }
+    return const geo.LocationSettings(
+      accuracy: geo.LocationAccuracy.high,
+      distanceFilter: 4,
+    );
+  }
+
+  Future<void> _requestIgnoreBatteryOptimizations() async {
+    if (!mounted || !Platform.isAndroid) return;
+
+    try {
+      final alreadyGranted = await Permission.ignoreBatteryOptimizations.status;
+      if (alreadyGranted.isGranted) return;
+
+      if (!mounted) return;
+      final agree = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: AppColors.bgBottom,
+          title: const Text(
+            'Pil Tasarrufu İstisnası',
+            style: TextStyle(color: AppColors.textMain),
+          ),
+          content: const Text(
+            'Bazı telefonlar (Xiaomi, Huawei, Samsung vb.) uygulamaları '
+            'arka planda kısıtlayarak konum takibini durdurabilir. '
+            'Oda arkadaşlarınla kesintisiz takip için pil optimizasyonu '
+            'istisnası eklemek ister misiniz?',
+            style: TextStyle(color: AppColors.textMuted),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text(
+                'İptal',
+                style: TextStyle(color: AppColors.textMuted),
+              ),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text(
+                'İzin Ver',
+                style: TextStyle(color: AppColors.primary),
+              ),
+            ),
+          ],
+        ),
+      );
+
+      if (agree == true && mounted) {
+        await Permission.ignoreBatteryOptimizations.request();
+      }
+    } catch (_) {
+      // Battery optimization request is best-effort.
+    }
   }
 
   void _revealFogForPosition(Position position) {
