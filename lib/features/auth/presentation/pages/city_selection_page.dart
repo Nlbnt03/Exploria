@@ -68,7 +68,7 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
               .map(
                 (e) => MapAreaGroup(
                   title: '${e.key} Haritaları',
-                  icon: 0xe3ab, // Icons.location_city_rounded
+                  icon: Icons.location_city_rounded,
                   areas: e.value,
                 ),
               )
@@ -466,10 +466,7 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
                                                   BorderRadius.circular(12),
                                             ),
                                             child: Icon(
-                                              IconData(
-                                                group.icon,
-                                                fontFamily: 'MaterialIcons',
-                                              ),
+                                              group.icon,
                                               color: AppColors.primary,
                                               size: 22,
                                             ),

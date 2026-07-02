@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'package:flutter/material.dart' show IconData, Icons;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
 const String defaultMapStyleUri =
@@ -46,7 +47,11 @@ class MapAreaConfig {
   final double minZoom;
   final bool skipLocationVerification;
 
-  static MapAreaConfig fromFirestoreData(String id, Map<String, dynamic> data) {
+  static MapAreaConfig fromFirestoreData(
+    String id,
+    Map<String, dynamic> data, {
+    int? poiCountOverride,
+  }) {
     final bounds = Map<String, dynamic>.from(
       data['bounds'] as Map? ?? const <String, dynamic>{},
     );
@@ -78,13 +83,16 @@ class MapAreaConfig {
     final skipLoc =
         data['skipLocationVerification'] as bool? ?? false;
 
+    final totalPois =
+        poiCountOverride ?? (data['totalPois'] as num?)?.toInt() ?? 0;
+
     return MapAreaConfig(
       id: id,
       title: mapName.isEmpty ? id : mapName,
-      subtitle: '${(data['totalPois'] as num?)?.toInt() ?? 0} mekan',
+      subtitle: '$totalPois mekan',
       city: city.isEmpty ? 'Diğer' : city,
       cityCategory: cityCategory.isEmpty ? 'diger' : cityCategory,
-      totalPois: (data['totalPois'] as num?)?.toInt() ?? 0,
+      totalPois: totalPois,
       styleUri: defaultMapStyleUri,
       center: Position((west + east) / 2, (south + north) / 2),
       boundary: boundary,
@@ -295,14 +303,14 @@ class MapAreaGroup {
   });
 
   final String title;
-  final int icon; // IconData.codePoint (to keep const)
+  final IconData icon;
   final List<MapAreaConfig> areas;
 }
 
 final List<MapAreaGroup> selectableMapGroups = <MapAreaGroup>[
   MapAreaGroup(
     title: 'İstanbul Haritaları',
-    icon: 0xe3ab, // Icons.location_city_rounded
+    icon: Icons.location_city_rounded,
     areas: [
       selectableMapAreas.firstWhere((a) => a.id == mapAreaFatih),
       selectableMapAreas.firstWhere((a) => a.id == mapAreaBeyoglu),
@@ -312,7 +320,7 @@ final List<MapAreaGroup> selectableMapGroups = <MapAreaGroup>[
   ),
   MapAreaGroup(
     title: 'Gebze Haritaları',
-    icon: 0xe559, // Icons.school_rounded
+    icon: Icons.school_rounded,
     areas: [
       selectableMapAreas.firstWhere((a) => a.id == mapAreaGtu),
       selectableMapAreas.firstWhere((a) => a.id == mapAreaGebzeKyk),
@@ -320,7 +328,7 @@ final List<MapAreaGroup> selectableMapGroups = <MapAreaGroup>[
   ),
   MapAreaGroup(
     title: 'Ankara Haritaları',
-    icon: 0xe3ab, // Icons.location_city_rounded
+    icon: Icons.location_city_rounded,
     areas: [selectableMapAreas.firstWhere((a) => a.id == mapAreaAnkara)],
   ),
 ];
