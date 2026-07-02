@@ -132,6 +132,24 @@ service cloud.firestore {
           && resource.data.friendsCount is int
           && request.resource.data.friendsCount >= resource.data.friendsCount
           && request.resource.data.friendsCount <= resource.data.friendsCount + 1
+        ) ||
+        // Karşı taraf, arkadaşlıktan çıkarma işleminde kendisini bu
+        // kullanıcının 'friends' dizisinden çıkarabilir (simetrik temizlik).
+        (
+          !isOwner(uid)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+            ['friends', 'friendsCount', 'updatedAt']
+          )
+          && request.resource.data.friends is list
+          && resource.data.friends is list
+          && resource.data.friends.hasAll([request.auth.uid])
+          && !request.resource.data.friends.hasAll([request.auth.uid])
+          && resource.data.friends.hasAll(request.resource.data.friends)
+          && request.resource.data.friends.size() >= resource.data.friends.size() - 1
+          && request.resource.data.friendsCount is int
+          && resource.data.friendsCount is int
+          && request.resource.data.friendsCount <= resource.data.friendsCount
+          && request.resource.data.friendsCount >= resource.data.friendsCount - 1
         )
       );
 
@@ -236,6 +254,15 @@ service cloud.firestore {
         (
           request.auth.uid == resource.data.fromUid
           && resource.data.status == 'pending'
+          && request.resource.data.fromUid == resource.data.fromUid
+          && request.resource.data.toUid == resource.data.toUid
+          && request.resource.data.status == 'cancelled'
+        ) ||
+        // Taraflardan biri arkadaşlıktan çıkarınca, kabul edilmiş eski istek
+        // sıfırlanır ki taraflar birbirine tekrar istek gönderebilsin.
+        (
+          (request.auth.uid == resource.data.fromUid || request.auth.uid == resource.data.toUid)
+          && resource.data.status == 'accepted'
           && request.resource.data.fromUid == resource.data.fromUid
           && request.resource.data.toUid == resource.data.toUid
           && request.resource.data.status == 'cancelled'

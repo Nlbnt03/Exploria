@@ -561,13 +561,20 @@ class FriendsService {
     }
 
     final currentUserRef = _users.doc(currentUid);
+    final friendUserRef = _users.doc(friendUid);
     final myFriendRef = _friendsOf(currentUid).doc(friendUid);
     final friendSideRef = _friendsOf(friendUid).doc(currentUid);
+    // Arkadaşlığın kurulduğu yöne göre iki olası istek dokümanı da olabilir.
+    final requestRefA = _friendRequests.doc('${currentUid}_$friendUid');
+    final requestRefB = _friendRequests.doc('${friendUid}_$currentUid');
 
     await _firestore.runTransaction((tx) async {
       final currentUserSnap = await tx.get(currentUserRef);
+      final friendUserSnap = await tx.get(friendUserRef);
       final myFriendSnap = await tx.get(myFriendRef);
       final friendSideSnap = await tx.get(friendSideRef);
+      final requestSnapA = await tx.get(requestRefA);
+      final requestSnapB = await tx.get(requestRefB);
 
       if (!myFriendSnap.exists && !friendSideSnap.exists) {
         throw FirebaseException(
@@ -584,15 +591,38 @@ class FriendsService {
         tx.delete(friendSideRef);
       }
 
-      final userData = currentUserSnap.data() ?? <String, dynamic>{};
-      final currentCount = (userData['friendsCount'] as num?)?.toInt() ?? 0;
-      final updatedCount = currentCount > 0 ? currentCount - 1 : 0;
-
+      final currentUserData = currentUserSnap.data() ?? <String, dynamic>{};
+      final currentCount =
+          (currentUserData['friendsCount'] as num?)?.toInt() ?? 0;
       tx.set(currentUserRef, {
         'friends': FieldValue.arrayRemove([friendUid]),
-        'friendsCount': updatedCount,
+        'friendsCount': currentCount > 0 ? currentCount - 1 : 0,
         'updatedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
+
+      if (friendUserSnap.exists) {
+        final friendUserData = friendUserSnap.data() ?? <String, dynamic>{};
+        final friendCount =
+            (friendUserData['friendsCount'] as num?)?.toInt() ?? 0;
+        tx.set(friendUserRef, {
+          'friends': FieldValue.arrayRemove([currentUid]),
+          'friendsCount': friendCount > 0 ? friendCount - 1 : 0,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      }
+
+      // Kabul edilmiş eski istek dokümanı sıfırlanmazsa, taraflardan biri
+      // (özellikle orijinal gönderen) arkadaşlıktan çıkarıldıktan sonra
+      // aynı kişiye tekrar istek gönderemez. 'cancelled' durumuna çekilerek
+      // yeniden istek gönderilebilir hale getirilir.
+      for (final requestSnap in [requestSnapA, requestSnapB]) {
+        if (requestSnap.exists && requestSnap.data()?['status'] == 'accepted') {
+          tx.set(requestSnap.reference, {
+            'status': 'cancelled',
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        }
+      }
     });
   }
 
