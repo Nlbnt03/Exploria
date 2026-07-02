@@ -9,8 +9,8 @@ subprojects {
     configurations.configureEach {
         resolutionStrategy.eachDependency {
             if (requested.group == "org.jetbrains.kotlin") {
-                useVersion("1.9.24")
-                because("Avoid kotlin-stdlib 2.2 metadata mismatch with project compiler")
+                useVersion("2.0.0")
+                because("Align with cloud_functions plugin's Kotlin Gradle Plugin version")
             }
         }
     }
