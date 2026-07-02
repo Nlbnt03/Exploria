@@ -139,7 +139,7 @@ Yukarıda yer alan "Aydınlatma Metni"ni okuduğumu, anladığımı ve Keşfedio
       context: context,
       barrierDismissible: false,
       builder: (context) => AlertDialog(
-        backgroundColor: AppColors.card,
+        backgroundColor: const Color(0xFF1F0734),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
         title: const Row(
           children: [
