@@ -340,9 +340,113 @@ export const onRoomInviteWritten = onDocumentWritten(
   }
 );
 
+// Rozet kategorisine göre gösterilecek ikon adı (bkz. badge_award_service.dart _getIconNameForCategory)
+function iconNameForCategory(category: string | undefined): string {
+  switch (category) {
+    case "social":
+      return "people";
+    case "streak":
+      return "local_fire_department";
+    case "secret":
+      return "visibility_off";
+    case "exploration":
+    default:
+      return "explore";
+  }
+}
+
+// Haftanın kapanışında, kullanıcının kendisi + arkadaşlarından oluşan grupta
+// haftalık XP'de 1. sırada olanlara "weekly_leader" ("Lider") rozetini verir.
+// En az 1 arkadaşı olmayan kullanıcılar (tek kişilik grup) değerlendirmeye alınmaz.
+async function awardWeeklyLeaderBadges(
+  db: FirebaseFirestore.Firestore,
+  leaderboardSnap: FirebaseFirestore.QuerySnapshot,
+  usersSnap: FirebaseFirestore.QuerySnapshot
+) {
+  const badgeId = "weekly_leader";
+  const badgeDoc = await db.collection("badges").doc(badgeId).get();
+  if (!badgeDoc.exists) {
+    console.warn(`[WeeklyLeaderBadge] '${badgeId}' rozet tanımı bulunamadı, atlanıyor.`);
+    return;
+  }
+  const badgeDef = badgeDoc.data() as Record<string, unknown>;
+
+  const xpByUid = new Map<string, { weeklyXP: number; totalXP: number }>();
+  leaderboardSnap.docs.forEach((doc) => {
+    const data = doc.data();
+    xpByUid.set(doc.id, {
+      weeklyXP: (data.weeklyXP as number | undefined) ?? 0,
+      totalXP: (data.totalXP as number | undefined) ?? 0,
+    });
+  });
+
+  const friendsByUid = new Map<string, string[]>();
+  usersSnap.docs.forEach((doc) => {
+    const friends = doc.data().friends;
+    friendsByUid.set(doc.id, Array.isArray(friends) ? friends : []);
+  });
+
+  const winners: string[] = [];
+  for (const uid of xpByUid.keys()) {
+    const friends = friendsByUid.get(uid) ?? [];
+    if (friends.length === 0) continue;
+
+    const group = [uid, ...friends].filter((id) => xpByUid.has(id));
+    if (group.length < 2) continue;
+
+    const [topUid] = [...group].sort((a, b) => {
+      const xa = xpByUid.get(a)!;
+      const xb = xpByUid.get(b)!;
+      return xb.weeklyXP - xa.weeklyXP || xb.totalXP - xa.totalXP;
+    });
+
+    if (topUid === uid) winners.push(uid);
+  }
+
+  if (winners.length === 0) return;
+
+  const outcomes = await Promise.allSettled(
+    winners.map(async (uid) => {
+      const badgeRef = db.collection("users").doc(uid).collection("badges").doc(badgeId);
+      if ((await badgeRef.get()).exists) return; // Zaten kazanılmış, tekrar verilmez
+
+      const batch = db.batch();
+      batch.set(
+        badgeRef,
+        {
+          id: badgeId,
+          name: badgeDef.name ?? "Lider",
+          description: badgeDef.description ?? "",
+          iconName: iconNameForCategory(badgeDef.category as string | undefined),
+          images: badgeDef.images ?? {},
+          earnedAt: admin.firestore.FieldValue.serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      const xpReward = (badgeDef.xpReward as number | undefined) ?? 0;
+      if (xpReward > 0) {
+        batch.set(
+          db.collection("users").doc(uid),
+          { xp: admin.firestore.FieldValue.increment(xpReward) },
+          { merge: true }
+        );
+      }
+
+      await batch.commit();
+    })
+  );
+
+  const failed = outcomes.filter((o) => o.status === "rejected").length;
+  console.log(
+    `[WeeklyLeaderBadge] ${winners.length - failed}/${winners.length} kullanıcıya 'Lider' rozeti verildi.`
+  );
+}
+
 // ────────────────────────────────────────────────────────────
 // 4. HAFTALIK XP SIFIRLAMA
 //    Her Pazartesi 00:00 İstanbul saatinde tüm kullanıcıları sıfırlar.
+//    Sıfırlamadan önce, o haftayı 1. sırada bitirenlere "Lider" rozeti verilir.
 // ────────────────────────────────────────────────────────────
 export const resetWeeklyXP = onSchedule(
   { schedule: "0 0 * * 1", timeZone: "Europe/Istanbul" },
@@ -353,6 +457,8 @@ export const resetWeeklyXP = onSchedule(
       db.collection("leaderboard").get(),
       db.collection("users").get(),
     ]);
+
+    await awardWeeklyLeaderBadges(db, leaderboardSnap, usersSnap);
 
     const allWrites: FirebaseFirestore.WriteBatch[] = [];
 

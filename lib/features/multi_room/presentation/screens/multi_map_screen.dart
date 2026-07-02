@@ -741,7 +741,6 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
         lastVisitedMapId: _historyAreaId,
         lastVisitedMapCompletion:
             _totalPoiCount > 0 ? _visitedPoiIds.length / _totalPoiCount : 0.0,
-        weeklyLeaderboardRank: 999,
       );
       final newBadgeDefs = await _badgeAwardService.checkNewBadges(
         uid: uid,

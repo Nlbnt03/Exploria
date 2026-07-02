@@ -1084,7 +1084,6 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                     _totalPoiCount > 0
                         ? _visitedPoiIds.length / _totalPoiCount
                         : 0.0,
-                weeklyLeaderboardRank: 999,
               );
 
               // Rozet kontrolü ve fog persist reklam izlenirken

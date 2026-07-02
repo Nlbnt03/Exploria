@@ -122,9 +122,10 @@ class BadgeDefinition {
       case 'allWeeklyQuestsJustCompleted':
         contextValue = context.allWeeklyQuestsJustCompleted;
         break;
-      case 'weeklyLeaderboardRank':
-        contextValue = context.weeklyLeaderboardRank ?? 999999;
-        break;
+      // Not: 'weeklyLeaderboardRank' koşulu artık burada değerlendirilmiyor.
+      // "Lider" rozeti, haftalık sıfırlama anında functions/src/index.ts
+      // içindeki awardWeeklyLeaderBadges tarafından sunucu tarafında veriliyor
+      // (anlık sıralama yerine haftanın kapanış durumuna göre).
       // Özel Gizli/Karmaşık Durumlar (Pseudo-fields)
       case 'fatihAreaCompleted':
         contextValue =
@@ -220,7 +221,6 @@ class BadgeCheckContext {
     required this.recentVisitTimes,
     this.lastVisitedMapId,
     this.lastVisitedMapCompletion,
-    this.weeklyLeaderboardRank,
   });
 
   final int totalVisited;
@@ -235,7 +235,6 @@ class BadgeCheckContext {
   final int currentStreak;
   final bool allWeeklyQuestsJustCompleted;
   final DateTime visitTime;
-  final int? weeklyLeaderboardRank;
   final List<DateTime> recentVisitTimes;
 }
 
