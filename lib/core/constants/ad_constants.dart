@@ -13,16 +13,16 @@ class AdConstants {
 
   static String get bannerAdUnitId {
     if (Platform.isIOS) return 'ca-app-pub-3940256099942544/2435281174';
-    return 'ca-app-pub-3940256099942544/9214589741';
+    return 'ca-app-pub-3400076691045068/3651458632';
   }
 
   static String get interstitialAdUnitId {
     if (Platform.isIOS) return 'ca-app-pub-3940256099942544/4411468910';
-    return 'ca-app-pub-3940256099942544/1033173712';
+    return 'ca-app-pub-3400076691045068/1741656764';
   }
 
   static String get rewardedAdUnitId {
     if (Platform.isIOS) return 'ca-app-pub-3940256099942544/1712485313';
-    return 'ca-app-pub-3940256099942544/5224354917';
+    return 'ca-app-pub-3400076691045068/2931449500';
   }
 }
