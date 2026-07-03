@@ -819,7 +819,7 @@ class _MapNameEntryPageState extends State<_MapNameEntryPage> {
                 maxLength: 60,
                 style: const TextStyle(color: AppColors.textMain),
                 decoration: InputDecoration(
-                  hintText: 'Örn: Sabah Kampüs Yürüyüşü',
+                  hintText: 'Örn: Sabah Şehir Yürüyüşü',
                   hintStyle: const TextStyle(color: AppColors.textMuted),
                   filled: true,
                   fillColor: AppColors.inputFill,

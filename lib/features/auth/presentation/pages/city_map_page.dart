@@ -994,7 +994,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
       _warningShown = true;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Kampüs dışındasın'),
+          content: Text('Harita alanı dışındasın'),
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -1222,7 +1222,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                           vertical: 10,
                         ),
                         child: Text(
-                          'Kampüs dışındasın. Harita ve sis sistemi durduruldu.',
+                          'Harita alanı dışındasın. Harita ve sis sistemi durduruldu.',
                           style: TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w700,

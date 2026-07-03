@@ -140,7 +140,7 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                 autofocus: true,
                 style: const TextStyle(color: AppColors.textMain),
                 decoration: InputDecoration(
-                  hintText: 'Orn: Aksam GTU Kesif Ekibi',
+                  hintText: 'Orn: Aksam Kesif Ekibi',
                   hintStyle: const TextStyle(color: AppColors.textMuted),
                   filled: true,
                   fillColor: AppColors.inputFill,
