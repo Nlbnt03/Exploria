@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:app_tracking_transparency/app_tracking_transparency.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
@@ -39,17 +40,6 @@ Future<void> bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ensureFirebaseInitialized();
   await NotificationService.instance.initialize();
-  unawaited(
-    MobileAds.instance.initialize().then((_) {
-      MobileAds.instance.updateRequestConfiguration(
-        RequestConfiguration(
-          testDeviceIds: ['C1C254FBA484927B27A7D7AE274D5207'],
-        ),
-      );
-      InterstitialAdManager.instance.init();
-      RewardedAdManager.instance.init();
-    }),
-  );
 
   setupGlobalErrorHandler();
 
@@ -65,6 +55,37 @@ Future<void> bootstrap() async {
       child: KesfedrioApp(),
     ),
   );
+
+  // Deferred until the first frame is on screen: the ATT system prompt only
+  // renders once the app's window is key and visible, and AdMob must not be
+  // initialized (and must not collect the IDFA) before that consent resolves.
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(_initializeAdsAfterTrackingConsent());
+  });
+}
+
+Future<void> _initializeAdsAfterTrackingConsent() async {
+  await requestTrackingAuthorizationIfNeeded();
+  await MobileAds.instance.initialize();
+  MobileAds.instance.updateRequestConfiguration(
+    RequestConfiguration(
+      testDeviceIds: ['C1C254FBA484927B27A7D7AE274D5207'],
+    ),
+  );
+  InterstitialAdManager.instance.init();
+  RewardedAdManager.instance.init();
+}
+
+/// Shows the iOS App Tracking Transparency system prompt. AdMob must not
+/// collect the IDFA before the user has responded to this consent request.
+Future<void> requestTrackingAuthorizationIfNeeded() async {
+  final status = await AppTrackingTransparency.trackingAuthorizationStatus;
+  if (status == TrackingStatus.notDetermined) {
+    // A short delay avoids the prompt racing the app's own splash/launch
+    // animation, which can cause iOS to silently skip showing it.
+    await Future.delayed(const Duration(milliseconds: 300));
+    await AppTrackingTransparency.requestTrackingAuthorization();
+  }
 }
 
 Future<void> ensureFirebaseInitialized() async {
