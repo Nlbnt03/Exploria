@@ -38,6 +38,8 @@ class _FriendsTabState extends State<FriendsTab> {
   final Set<String> _cancellingRequestTo = <String>{};
   final Set<String> _processingRequests = <String>{};
   final Set<String> _removingFriends = <String>{};
+  final Set<String> _reportingUsers = <String>{};
+  final Set<String> _blockingUsers = <String>{};
   bool _showAllFriends = false;
   static const int _initialFriendLimit = 1;
 
@@ -213,6 +215,161 @@ class _FriendsTabState extends State<FriendsTab> {
     }
   }
 
+  Future<void> _showReportUserSheet(AppUserSummary user) async {
+    if (_reportingUsers.contains(user.uid)) return;
+
+    final reason = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: const Color(0xFF1F0A30),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
+      ),
+      builder:
+          (context) => SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Kullanıcıyı Bildir',
+                    style: TextStyle(
+                      color: AppColors.textMain,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '@${user.username}',
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  _ReportReasonTile(
+                    label: 'Uygunsuz profil bilgisi',
+                    onTap:
+                        () => Navigator.pop(context, 'Uygunsuz profil bilgisi'),
+                  ),
+                  _ReportReasonTile(
+                    label: 'Taciz veya kötüye kullanım',
+                    onTap:
+                        () => Navigator.pop(
+                          context,
+                          'Taciz veya kötüye kullanım',
+                        ),
+                  ),
+                  _ReportReasonTile(
+                    label: 'Spam veya yanıltıcı davranış',
+                    onTap:
+                        () => Navigator.pop(
+                          context,
+                          'Spam veya yanıltıcı davranış',
+                        ),
+                  ),
+                  _ReportReasonTile(
+                    label: 'Diğer',
+                    onTap: () => Navigator.pop(context, 'Diğer'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+    );
+
+    if (reason == null || reason.trim().isEmpty) return;
+    await _reportUser(user, reason);
+  }
+
+  Future<void> _reportUser(AppUserSummary user, String reason) async {
+    if (_reportingUsers.contains(user.uid)) return;
+
+    setState(() => _reportingUsers.add(user.uid));
+    try {
+      await _friendsService.reportUser(
+        reporterUid: widget.uid,
+        reportedUser: user,
+        reason: reason,
+      );
+      _showMessage('Bildirimin alındı. 24 saat içinde incelenecek.');
+    } on FirebaseException catch (e) {
+      _showMessage(_mapError(e));
+    } catch (e) {
+      _showMessage('Kullanıcı bildirilemedi: $e');
+    } finally {
+      if (mounted) setState(() => _reportingUsers.remove(user.uid));
+    }
+  }
+
+  Future<void> _confirmBlockUser(AppUserSummary user) async {
+    if (_blockingUsers.contains(user.uid)) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder:
+          (context) => AlertDialog(
+            backgroundColor: const Color(0xFF1F0A30),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            title: const Text(
+              'Kullanıcıyı Engelle',
+              style: TextStyle(
+                color: AppColors.textMain,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            content: Text(
+              '@${user.username} engellenecek ve arkadaş listenden kaldırılacak.',
+              style: const TextStyle(
+                color: AppColors.textMuted,
+                fontSize: 14,
+                height: 1.4,
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('Vazgeç'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text(
+                  'Engelle',
+                  style: TextStyle(color: Colors.redAccent),
+                ),
+              ),
+            ],
+          ),
+    );
+
+    if (confirmed == true) {
+      await _blockUser(user);
+    }
+  }
+
+  Future<void> _blockUser(AppUserSummary user) async {
+    if (_blockingUsers.contains(user.uid)) return;
+
+    setState(() => _blockingUsers.add(user.uid));
+    try {
+      await _friendsService.blockUser(
+        currentUid: widget.uid,
+        blockedUser: user,
+      );
+      _showMessage('Kullanıcı engellendi ve listenden kaldırıldı.');
+    } on FirebaseException catch (e) {
+      _showMessage(_mapError(e));
+    } catch (e) {
+      _showMessage('Kullanıcı engellenemedi: $e');
+    } finally {
+      if (mounted) setState(() => _blockingUsers.remove(user.uid));
+    }
+  }
+
   String _mapError(FirebaseException e) {
     switch (e.code) {
       case 'already-friends':
@@ -221,6 +378,8 @@ class _FriendsTabState extends State<FriendsTab> {
         return 'Bu kullanıcıya zaten istek gönderdin.';
       case 'incoming-request-exists':
         return 'Bu kullanıcıdan bekleyen bir istek var. Gelen isteklerden kabul edebilirsin.';
+      case 'blocked-user':
+        return 'Bu kullanıcıyla arkadaşlık isteği gönderilemez.';
       case 'username-already-in-use':
         return 'Bu kullanıcı adı başka bir hesap tarafından kullanılıyor.';
       case 'request-not-found':
@@ -231,6 +390,12 @@ class _FriendsTabState extends State<FriendsTab> {
         return 'Sadece arkadaşlarını davet edebilirsin.';
       case 'self-remove':
         return 'Kendini arkadaş listesinden çıkaramazsın.';
+      case 'self-report':
+        return 'Kendini bildiremezsin.';
+      case 'self-block':
+        return 'Kendini engelleyemezsin.';
+      case 'invalid-report-reason':
+        return 'Bildirim nedeni seçmelisin.';
       case 'permission-denied':
         return 'Firestore yetkisi yok. Güvenlik kurallarını kontrol etmelisin.';
       default:
@@ -269,7 +434,10 @@ class _FriendsTabState extends State<FriendsTab> {
           const SizedBox(height: 14),
           _buildSearchSection(),
           const SizedBox(height: 14),
-          Container(key: _incomingSectionKey, child: _buildIncomingRequestsSection()),
+          Container(
+            key: _incomingSectionKey,
+            child: _buildIncomingRequestsSection(),
+          ),
           const SizedBox(height: 14),
           _buildFriendsSection(),
         ],
@@ -635,9 +803,10 @@ class _FriendsTabState extends State<FriendsTab> {
           }
 
           final friends = snapshot.data ?? const <AppUserSummary>[];
-          final displayedFriends = _showAllFriends
-              ? friends
-              : friends.take(_initialFriendLimit).toList();
+          final displayedFriends =
+              _showAllFriends
+                  ? friends
+                  : friends.take(_initialFriendLimit).toList();
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -676,11 +845,14 @@ class _FriendsTabState extends State<FriendsTab> {
                   const Spacer(),
                   if (friends.length > _initialFriendLimit)
                     GestureDetector(
-                      onTap: () => setState(
-                        () => _showAllFriends = !_showAllFriends,
-                      ),
+                      onTap:
+                          () => setState(
+                            () => _showAllFriends = !_showAllFriends,
+                          ),
                       child: Text(
-                        _showAllFriends ? 'Daha Az Göster' : 'Tümünü Göster (${friends.length})',
+                        _showAllFriends
+                            ? 'Daha Az Göster'
+                            : 'Tümünü Göster (${friends.length})',
                         style: const TextStyle(
                           color: AppColors.primary,
                           fontSize: 13,
@@ -700,7 +872,12 @@ class _FriendsTabState extends State<FriendsTab> {
                 ...displayedFriends.map(
                   (friend) => _FriendCard(
                     friend: friend,
-                    isRemoving: _removingFriends.contains(friend.uid),
+                    isBusy:
+                        _removingFriends.contains(friend.uid) ||
+                        _reportingUsers.contains(friend.uid) ||
+                        _blockingUsers.contains(friend.uid),
+                    onReport: () => _showReportUserSheet(friend),
+                    onBlock: () => _confirmBlockUser(friend),
                     onRemove: () => _removeFriend(friend.uid),
                     onTap: () {
                       Navigator.pushNamed(
@@ -798,9 +975,7 @@ class _SearchResultCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.inputFill.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: AppColors.inputBorder.withValues(alpha: 0.2),
-        ),
+        border: Border.all(color: AppColors.inputBorder.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
@@ -890,9 +1065,7 @@ class _RequestCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.inputFill.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: AppColors.inputBorder.withValues(alpha: 0.2),
-        ),
+        border: Border.all(color: AppColors.inputBorder.withValues(alpha: 0.2)),
       ),
       child: Column(
         children: [
@@ -1016,13 +1189,17 @@ class _RequestCard extends StatelessWidget {
 class _FriendCard extends StatelessWidget {
   const _FriendCard({
     required this.friend,
-    required this.isRemoving,
+    required this.isBusy,
+    required this.onReport,
+    required this.onBlock,
     required this.onRemove,
     required this.onTap,
   });
 
   final AppUserSummary friend;
-  final bool isRemoving;
+  final bool isBusy;
+  final VoidCallback onReport;
+  final VoidCallback onBlock;
   final VoidCallback onRemove;
   final VoidCallback onTap;
 
@@ -1034,9 +1211,7 @@ class _FriendCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.inputFill.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: AppColors.inputBorder.withValues(alpha: 0.2),
-        ),
+        border: Border.all(color: AppColors.inputBorder.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
@@ -1049,9 +1224,7 @@ class _FriendCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    friend.fullName.isEmpty
-                        ? friend.username
-                        : friend.fullName,
+                    friend.fullName.isEmpty ? friend.username : friend.fullName,
                     style: const TextStyle(
                       color: AppColors.textMain,
                       fontWeight: FontWeight.w700,
@@ -1081,8 +1254,11 @@ class _FriendCard extends StatelessWidget {
               size: 24,
             ),
             onSelected: (value) {
+              if (value == 'report') onReport();
+              if (value == 'block') onBlock();
               if (value == 'remove') onRemove();
             },
+            enabled: !isBusy,
             color: const Color(0xFF1F0A30),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(12),
@@ -1090,42 +1266,115 @@ class _FriendCard extends StatelessWidget {
                 color: AppColors.inputBorder.withValues(alpha: 0.3),
               ),
             ),
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'remove',
-                height: 40,
-                child:
-                    isRemoving
-                        ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: Colors.redAccent,
-                          ),
-                        )
-                        : const Row(
-                          children: [
-                            Icon(
-                              Icons.person_remove_outlined,
-                              color: Colors.redAccent,
-                              size: 18,
-                            ),
-                            SizedBox(width: 8),
-                            Text(
-                              'Çıkar',
-                              style: TextStyle(
-                                color: Colors.redAccent,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
+            itemBuilder:
+                (context) => [
+                  const PopupMenuItem(
+                    value: 'report',
+                    height: 40,
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.flag_outlined,
+                          color: Colors.orangeAccent,
+                          size: 18,
                         ),
-              ),
-            ],
+                        SizedBox(width: 8),
+                        Text(
+                          'Kullanıcıyı Bildir',
+                          style: TextStyle(
+                            color: Colors.orangeAccent,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'block',
+                    height: 40,
+                    child: Row(
+                      children: [
+                        Icon(
+                          Icons.block_rounded,
+                          color: Colors.redAccent,
+                          size: 18,
+                        ),
+                        SizedBox(width: 8),
+                        Text(
+                          'Kullanıcıyı Engelle',
+                          style: TextStyle(
+                            color: Colors.redAccent,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'remove',
+                    height: 40,
+                    child:
+                        isBusy
+                            ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.redAccent,
+                              ),
+                            )
+                            : const Row(
+                              children: [
+                                Icon(
+                                  Icons.person_remove_outlined,
+                                  color: Colors.redAccent,
+                                  size: 18,
+                                ),
+                                SizedBox(width: 8),
+                                Text(
+                                  'Arkadaşlıktan Çıkar',
+                                  style: TextStyle(
+                                    color: Colors.redAccent,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                  ),
+                ],
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ReportReasonTile extends StatelessWidget {
+  const _ReportReasonTile({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ListTile(
+      contentPadding: EdgeInsets.zero,
+      leading: const Icon(
+        Icons.report_gmailerrorred_outlined,
+        color: AppColors.primary,
+      ),
+      title: Text(
+        label,
+        style: const TextStyle(
+          color: AppColors.textMain,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      trailing: const Icon(
+        Icons.chevron_right_rounded,
+        color: AppColors.textMuted,
+      ),
+      onTap: onTap,
     );
   }
 }
@@ -1188,16 +1437,15 @@ Widget _smallButton({
     textStyle: const TextStyle(fontSize: 12),
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(10),
-      side: borderColor != null ? BorderSide(color: borderColor) : BorderSide.none,
+      side:
+          borderColor != null
+              ? BorderSide(color: borderColor)
+              : BorderSide.none,
     ),
   );
 
   if (!enabled) {
-    return ElevatedButton(
-      onPressed: null,
-      style: btnStyle,
-      child: Text(label),
-    );
+    return ElevatedButton(onPressed: null, style: btnStyle, child: Text(label));
   }
 
   return ElevatedButton(

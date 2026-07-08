@@ -21,6 +21,10 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
+    function isAdmin() {
+      return isSignedIn() && request.auth.token.admin == true;
+    }
+
     function validUsernameLower(usernameLower) {
       return usernameLower is string
         && usernameLower.matches('^[a-z0-9._-]{3,30}$');
@@ -54,6 +58,11 @@ service cloud.firestore {
     function hasAcceptedFriendship(uidA, uidB) {
       return requestStatusNowOrAfterIs(uidA + '_' + uidB, 'accepted')
         || requestStatusNowOrAfterIs(uidB + '_' + uidA, 'accepted');
+    }
+
+    function hasBlockedBetween(uidA, uidB) {
+      return exists(/databases/$(database)/documents/users/$(uidA)/blockedUsers/$(uidB))
+        || exists(/databases/$(database)/documents/users/$(uidB)/blockedUsers/$(uidA));
     }
 
     function isRoomMember(roomId) {
@@ -175,6 +184,29 @@ service cloud.firestore {
         allow delete: if isSignedIn() && (isOwner(uid) || isOwner(friendUid));
       }
 
+      match /blockedUsers/{blockedUid} {
+        allow read: if isOwner(uid);
+
+        allow create, update: if isOwner(uid)
+          && blockedUid != request.auth.uid
+          && request.resource.data.keys().hasOnly([
+            'blockedUid',
+            'username',
+            'name',
+            'surname',
+            'photoUrl',
+            'createdAt'
+          ])
+          && request.resource.data.blockedUid == blockedUid
+          && request.resource.data.username is string
+          && request.resource.data.name is string
+          && request.resource.data.surname is string
+          && request.resource.data.photoUrl is string
+          && request.resource.data.createdAt == request.time;
+
+        allow delete: if isOwner(uid);
+      }
+
       match /badges/{badgeId} {
         allow read: if isSignedIn();
         allow write: if isOwner(uid);
@@ -231,7 +263,8 @@ service cloud.firestore {
         && request.resource.data.toUid is string
         && request.resource.data.toUid != request.auth.uid
         && request.resource.data.status == 'pending'
-        && request.resource.id == request.resource.data.fromUid + '_' + request.resource.data.toUid;
+        && request.resource.id == request.resource.data.fromUid + '_' + request.resource.data.toUid
+        && !hasBlockedBetween(request.resource.data.fromUid, request.resource.data.toUid);
 
       allow update: if isSignedIn() && (
         // Alıcı, bekleyen isteği kabul/reddet edebilir.
@@ -258,6 +291,14 @@ service cloud.firestore {
           && request.resource.data.toUid == resource.data.toUid
           && request.resource.data.status == 'cancelled'
         ) ||
+        // Engel/temizlik akışlarında taraflardan biri bekleyen isteği kapatabilir.
+        (
+          (request.auth.uid == resource.data.fromUid || request.auth.uid == resource.data.toUid)
+          && resource.data.status == 'pending'
+          && request.resource.data.fromUid == resource.data.fromUid
+          && request.resource.data.toUid == resource.data.toUid
+          && request.resource.data.status == 'cancelled'
+        ) ||
         // Taraflardan biri arkadaşlıktan çıkarınca, kabul edilmiş eski istek
         // sıfırlanır ki taraflar birbirine tekrar istek gönderebilsin.
         (
@@ -269,6 +310,40 @@ service cloud.firestore {
         )
       );
 
+      allow delete: if false;
+    }
+
+    match /userReports/{reportId} {
+      allow read: if isAdmin();
+
+      allow create: if isSignedIn()
+        && request.resource.data.keys().hasOnly([
+          'reporterUid',
+          'reportedUid',
+          'reportedUsername',
+          'reportedName',
+          'reportedSurname',
+          'reason',
+          'context',
+          'status',
+          'createdAt',
+          'updatedAt'
+        ])
+        && request.resource.data.reporterUid == request.auth.uid
+        && request.resource.data.reportedUid is string
+        && request.resource.data.reportedUid != request.auth.uid
+        && request.resource.data.reportedUsername is string
+        && request.resource.data.reportedName is string
+        && request.resource.data.reportedSurname is string
+        && request.resource.data.reason is string
+        && request.resource.data.reason.size() > 0
+        && request.resource.data.reason.size() <= 120
+        && request.resource.data.context == 'social_friend_menu'
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      allow update: if isAdmin();
       allow delete: if false;
     }
 

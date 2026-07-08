@@ -70,6 +70,44 @@ class FriendRequestView {
   final AppUserSummary fromUser;
 }
 
+class BlockedUserSummary {
+  const BlockedUserSummary({
+    required this.uid,
+    required this.name,
+    required this.surname,
+    required this.username,
+    required this.photoUrl,
+    required this.createdAt,
+  });
+
+  final String uid;
+  final String name;
+  final String surname;
+  final String username;
+  final String photoUrl;
+  final DateTime? createdAt;
+
+  String get fullName => '$name $surname'.trim();
+
+  factory BlockedUserSummary.fromBlockedDoc(
+    String blockedUid,
+    Map<String, dynamic> data,
+  ) {
+    final createdAt = data['createdAt'];
+    return BlockedUserSummary(
+      uid:
+          (data['blockedUid'] as String?)?.trim().isNotEmpty == true
+              ? (data['blockedUid'] as String).trim()
+              : blockedUid,
+      name: (data['name'] as String?)?.trim() ?? '',
+      surname: (data['surname'] as String?)?.trim() ?? '',
+      username: (data['username'] as String?)?.trim() ?? '',
+      photoUrl: (data['photoUrl'] as String?)?.trim() ?? '',
+      createdAt: createdAt is Timestamp ? createdAt.toDate() : null,
+    );
+  }
+}
+
 class FriendsService {
   FriendsService({FirebaseFirestore? firestore})
     : _firestore = firestore ?? FirebaseFirestore.instance;
@@ -82,6 +120,8 @@ class FriendsService {
       _firestore.collection('friendRequests');
   CollectionReference<Map<String, dynamic>> get _multiInvites =>
       _firestore.collection('multiInvites');
+  CollectionReference<Map<String, dynamic>> get _userReports =>
+      _firestore.collection('userReports');
 
   CollectionReference<Map<String, dynamic>> _friendsOf(String uid) =>
       _users.doc(uid).collection('friends');
@@ -133,6 +173,25 @@ class FriendsService {
     });
   }
 
+  Stream<List<BlockedUserSummary>> watchBlockedUsers(String uid) {
+    if (uid.trim().isEmpty) {
+      return Stream.value(const <BlockedUserSummary>[]);
+    }
+
+    return _users
+        .doc(uid)
+        .collection('blockedUsers')
+        .orderBy('createdAt', descending: true)
+        .snapshots()
+        .map((snapshot) {
+          return snapshot.docs
+              .map(
+                (doc) => BlockedUserSummary.fromBlockedDoc(doc.id, doc.data()),
+              )
+              .toList();
+        });
+  }
+
   Stream<List<FriendRequestView>> watchIncomingRequests(String uid) {
     if (uid.trim().isEmpty) {
       return Stream.value(const <FriendRequestView>[]);
@@ -162,9 +221,10 @@ class FriendsService {
 
       final userDocs = <String, DocumentSnapshot<Map<String, dynamic>>>{};
       if (fromUids.isNotEmpty) {
-        final results = await Future.wait<DocumentSnapshot<Map<String, dynamic>>>(
-          fromUids.map((uid) => _users.doc(uid).get()),
-        );
+        final results =
+            await Future.wait<DocumentSnapshot<Map<String, dynamic>>>(
+              fromUids.map((uid) => _users.doc(uid).get()),
+            );
         for (var i = 0; i < fromUids.length; i++) {
           userDocs[fromUids[i]] = results[i];
         }
@@ -264,6 +324,12 @@ class FriendsService {
       final reverse = await tx.get(reverseRef);
       final fromFriend = await tx.get(fromFriendRef);
       final toFriend = await tx.get(toFriendRef);
+      final fromBlockedTo = await tx.get(
+        _users.doc(fromUid).collection('blockedUsers').doc(toUid),
+      );
+      final toBlockedFrom = await tx.get(
+        _users.doc(toUid).collection('blockedUsers').doc(fromUid),
+      );
 
       if (!fromUser.exists || !toUser.exists) {
         throw FirebaseException(
@@ -278,6 +344,14 @@ class FriendsService {
           plugin: 'friends_service',
           code: 'already-friends',
           message: 'Bu kullanici zaten arkadas listende.',
+        );
+      }
+
+      if (fromBlockedTo.exists || toBlockedFrom.exists) {
+        throw FirebaseException(
+          plugin: 'friends_service',
+          code: 'blocked-user',
+          message: 'Bu kullanıcıya arkadaşlık isteği gönderilemez.',
         );
       }
 
@@ -624,6 +698,180 @@ class FriendsService {
         }
       }
     });
+  }
+
+  Future<void> reportUser({
+    required String reporterUid,
+    required AppUserSummary reportedUser,
+    required String reason,
+  }) async {
+    await _refreshAuthTokenBeforeWrite();
+
+    final normalizedReason = reason.trim();
+    if (reporterUid.trim().isEmpty || reportedUser.uid.trim().isEmpty) {
+      throw FirebaseException(
+        plugin: 'friends_service',
+        code: 'invalid-uid',
+        message: 'Geçersiz kullanıcı kimliği.',
+      );
+    }
+    if (reporterUid == reportedUser.uid) {
+      throw FirebaseException(
+        plugin: 'friends_service',
+        code: 'self-report',
+        message: 'Kendini bildiremezsin.',
+      );
+    }
+    if (normalizedReason.isEmpty) {
+      throw FirebaseException(
+        plugin: 'friends_service',
+        code: 'invalid-report-reason',
+        message: 'Bildirim nedeni seçmelisin.',
+      );
+    }
+
+    await _userReports.add({
+      'reporterUid': reporterUid,
+      'reportedUid': reportedUser.uid,
+      'reportedUsername': reportedUser.username,
+      'reportedName': reportedUser.name,
+      'reportedSurname': reportedUser.surname,
+      'reason': normalizedReason,
+      'context': 'social_friend_menu',
+      'status': 'pending',
+      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+  }
+
+  Future<void> blockUser({
+    required String currentUid,
+    required AppUserSummary blockedUser,
+  }) async {
+    await _refreshAuthTokenBeforeWrite();
+
+    final blockedUid = blockedUser.uid.trim();
+    if (currentUid.trim().isEmpty || blockedUid.isEmpty) {
+      throw FirebaseException(
+        plugin: 'friends_service',
+        code: 'invalid-uid',
+        message: 'Geçersiz kullanıcı kimliği.',
+      );
+    }
+    if (currentUid == blockedUid) {
+      throw FirebaseException(
+        plugin: 'friends_service',
+        code: 'self-block',
+        message: 'Kendini engelleyemezsin.',
+      );
+    }
+
+    final currentUserRef = _users.doc(currentUid);
+    final blockedUserRef = _users.doc(blockedUid);
+    final myFriendRef = _friendsOf(currentUid).doc(blockedUid);
+    final blockedSideRef = _friendsOf(blockedUid).doc(currentUid);
+    final myBlockRef = _users
+        .doc(currentUid)
+        .collection('blockedUsers')
+        .doc(blockedUid);
+    final requestRefA = _friendRequests.doc('${currentUid}_$blockedUid');
+    final requestRefB = _friendRequests.doc('${blockedUid}_$currentUid');
+
+    await _firestore.runTransaction((tx) async {
+      final currentUserSnap = await tx.get(currentUserRef);
+      final blockedUserSnap = await tx.get(blockedUserRef);
+      final myFriendSnap = await tx.get(myFriendRef);
+      final blockedSideSnap = await tx.get(blockedSideRef);
+      final requestSnapA = await tx.get(requestRefA);
+      final requestSnapB = await tx.get(requestRefB);
+
+      if (!currentUserSnap.exists || !blockedUserSnap.exists) {
+        throw FirebaseException(
+          plugin: 'friends_service',
+          code: 'user-not-found',
+          message: 'Kullanıcı bulunamadı.',
+        );
+      }
+
+      tx.set(myBlockRef, {
+        'blockedUid': blockedUid,
+        'username': blockedUser.username,
+        'name': blockedUser.name,
+        'surname': blockedUser.surname,
+        'photoUrl': blockedUser.photoUrl,
+        'createdAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      if (myFriendSnap.exists) {
+        tx.delete(myFriendRef);
+      }
+      if (blockedSideSnap.exists) {
+        tx.delete(blockedSideRef);
+      }
+
+      final currentUserData = currentUserSnap.data() ?? <String, dynamic>{};
+      final currentCount =
+          (currentUserData['friendsCount'] as num?)?.toInt() ?? 0;
+      tx.set(currentUserRef, {
+        'friends': FieldValue.arrayRemove([blockedUid]),
+        'friendsCount':
+            myFriendSnap.exists && currentCount > 0
+                ? currentCount - 1
+                : currentCount,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      final blockedUserData = blockedUserSnap.data() ?? <String, dynamic>{};
+      final blockedCount =
+          (blockedUserData['friendsCount'] as num?)?.toInt() ?? 0;
+      tx.set(blockedUserRef, {
+        'friends': FieldValue.arrayRemove([currentUid]),
+        'friendsCount':
+            blockedSideSnap.exists && blockedCount > 0
+                ? blockedCount - 1
+                : blockedCount,
+        'updatedAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      for (final requestSnap in [requestSnapA, requestSnapB]) {
+        final status = (requestSnap.data()?['status'] as String?)?.trim();
+        if (requestSnap.exists &&
+            (status == 'pending' || status == 'accepted')) {
+          tx.set(requestSnap.reference, {
+            'status': 'cancelled',
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        }
+      }
+    });
+  }
+
+  Future<void> unblockUser({
+    required String currentUid,
+    required String blockedUid,
+  }) async {
+    await _refreshAuthTokenBeforeWrite();
+
+    if (currentUid.trim().isEmpty || blockedUid.trim().isEmpty) {
+      throw FirebaseException(
+        plugin: 'friends_service',
+        code: 'invalid-uid',
+        message: 'Geçersiz kullanıcı kimliği.',
+      );
+    }
+    if (currentUid == blockedUid) {
+      throw FirebaseException(
+        plugin: 'friends_service',
+        code: 'self-unblock',
+        message: 'Kendin için engel kaydı kaldıramazsın.',
+      );
+    }
+
+    await _users
+        .doc(currentUid)
+        .collection('blockedUsers')
+        .doc(blockedUid)
+        .delete();
   }
 
   String _pairKey(String uidA, String uidB) {

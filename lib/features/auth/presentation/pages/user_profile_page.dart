@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../app/router/app_router.dart';
 import '../../../../core/animations/shimmer_loading.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../models/user_xp.dart';
@@ -14,6 +15,7 @@ import '../../domain/models/badge.dart' show AppBadge;
 import '../../../badges/presentation/widgets/badge_hexagon.dart';
 import '../../../badges/presentation/pages/badge_showcase_page.dart';
 import 'edit_profile_page.dart';
+import 'friends_list_page.dart';
 import '../../../badges/data/badge_award_service.dart';
 
 class UserProfilePageArgs {
@@ -532,6 +534,8 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
 
   Widget _buildInfoSection() {
     final friendsCount = (_userData?['friendsCount'] as num?)?.toInt() ?? 0;
+    final currentUserUid = FirebaseAuth.instance.currentUser?.uid;
+    final isCurrentUser = widget.uid == currentUserUid;
 
     return Container(
       width: double.infinity,
@@ -550,6 +554,16 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
             label: 'Arkadaş',
             value: '$friendsCount',
             icon: Icons.groups_rounded,
+            onTap:
+                isCurrentUser
+                    ? () {
+                      Navigator.pushNamed(
+                        context,
+                        AppRouter.friendsList,
+                        arguments: FriendsListPageArgs(uid: widget.uid),
+                      );
+                    }
+                    : null,
           ),
           Container(
             width: 1,
@@ -808,32 +822,65 @@ class _StatItem extends StatelessWidget {
     required this.label,
     required this.value,
     required this.icon,
+    this.onTap,
   });
 
   final String label;
   final String value;
   final IconData icon;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
+    final content = Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Icon(icon, color: AppColors.primary, size: 24),
         const SizedBox(height: 6),
-        Text(
-          value,
-          style: const TextStyle(
-            color: AppColors.textMain,
-            fontSize: 22,
-            fontWeight: FontWeight.w800,
-          ),
+        Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              value,
+              style: const TextStyle(
+                color: AppColors.textMain,
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            if (onTap != null) ...[
+              const SizedBox(width: 4),
+              const Icon(
+                Icons.chevron_right_rounded,
+                color: AppColors.primary,
+                size: 18,
+              ),
+            ],
+          ],
         ),
         const SizedBox(height: 2),
         Text(
           label,
-          style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+          style: TextStyle(
+            color: onTap == null ? AppColors.textMuted : AppColors.textMain,
+            fontSize: 13,
+            fontWeight: onTap == null ? FontWeight.w400 : FontWeight.w700,
+          ),
         ),
       ],
+    );
+
+    if (onTap == null) {
+      return content;
+    }
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: content,
+      ),
     );
   }
 }

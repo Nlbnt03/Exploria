@@ -6,6 +6,7 @@ import '../../features/auth/presentation/pages/city_map_page.dart';
 import '../../features/auth/presentation/pages/city_selection_page.dart';
 import '../../features/auth/presentation/pages/map_preview_page.dart';
 import '../../features/auth/presentation/pages/forgot_password_page.dart';
+import '../../features/auth/presentation/pages/friends_list_page.dart';
 import '../../features/auth/presentation/pages/home_page.dart';
 import '../../features/auth/presentation/pages/login_page.dart';
 import '../../features/auth/presentation/pages/sign_up_page.dart';
@@ -35,6 +36,7 @@ class AppRouter {
   static const String pendingInvites = '/pending-invites';
   static const String multiMap = '/multi-map';
   static const String userProfile = '/user-profile';
+  static const String friendsList = '/friends-list';
   static const String mapPreview = '/map-preview';
   static const String onboarding = '/onboarding';
 
@@ -132,6 +134,13 @@ class AppRouter {
         final uid = args is UserProfilePageArgs ? args.uid : '';
         return SlideUpRoute<void>(
           builder: (_) => UserProfilePage(uid: uid),
+          settings: settings,
+        );
+      case friendsList:
+        final args = settings.arguments;
+        final uid = args is FriendsListPageArgs ? args.uid : '';
+        return SlideUpRoute<void>(
+          builder: (_) => FriendsListPage(uid: uid),
           settings: settings,
         );
       case mapPreview:

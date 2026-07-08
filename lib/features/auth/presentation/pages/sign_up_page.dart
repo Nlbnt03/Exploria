@@ -63,6 +63,36 @@ AÇIK RIZA BEYANI
 Yukarıda yer alan "Aydınlatma Metni"ni okuduğumu, anladığımı ve Keşfedio uygulamasının temel mekaniklerinin (harita keşfi ve çoklu oyuncu modu) çalışabilmesi için kimlik, iletişim ve asıl olarak "Anlık Konum" verilerimin işlenmesine, kaydedilmesine ve çoklu odalarda diğer oyuncularla paylaşılmasına özgür irademle açık rıza gösterdiğimi kabul ve beyan ederim.
 ''';
 
+  static const String _termsText = '''
+KEŞFEDİO KULLANIM ŞARTLARI VE TOPLULUK KURALLARI
+
+Keşfedio kullanıcıları, uygulama içindeki sosyal özellikleri kullanırken güvenli, saygılı ve yasalara uygun bir ortam oluşturmayı kabul eder.
+
+1. YASAKLI DAVRANIŞLAR
+Aşağıdaki davranışlar yasaktır:
+• Taciz, tehdit, nefret söylemi, zorbalık veya kötüye kullanım.
+• Uygunsuz, saldırgan, yanıltıcı, yasa dışı veya spam niteliğinde içerik.
+• Başka kullanıcıları rahatsız eden kullanıcı adı, profil bilgisi veya sosyal davranış.
+• Başkasının kimliğine bürünme, dolandırıcılık veya güvenliği tehdit eden kullanım.
+• Uygulamanın işleyişini bozacak, kötüye kullanacak veya diğer kullanıcıların deneyimini olumsuz etkileyecek davranışlar.
+
+2. KULLANICI BİLDİRME VE ENGELLEME
+Kullanıcılar, uygulama içindeki sosyal alanlarda diğer kullanıcıları bildirebilir veya engelleyebilir.
+
+Bir kullanıcı engellendiğinde, engellenen kullanıcı ilgili kişinin arkadaş listesinden kaldırılır ve sosyal etkileşimleri sınırlandırılır.
+
+3. MODERASYON VE İNCELEME
+Kullanıcı bildirimleri Keşfedio ekibi tarafından incelenir. Uygunsuz içerik veya kötüye kullanım raporları 24 saat içinde değerlendirilmeye çalışılır.
+
+Keşfedio, topluluk kurallarını ihlal eden profil bilgilerini veya içerikleri kaldırma, kullanıcı erişimini sınırlandırma, hesabı askıya alma veya hesabı silme hakkını saklı tutar.
+
+4. KULLANICI SORUMLULUĞU
+Kullanıcılar, hesap bilgileri ve uygulama içindeki davranışlarından kendileri sorumludur. Uygulamayı kullanmaya devam eden kullanıcılar bu Kullanım Şartları ve Topluluk Kuralları'nı kabul etmiş sayılır.
+
+5. DEĞİŞİKLİKLER
+Keşfedio, gerekli gördüğünde bu şartları güncelleyebilir. Güncel şartlar uygulama içinde kullanıcıların erişimine sunulur.
+''';
+
   @override
   void dispose() {
     _nameController.dispose();
@@ -91,7 +121,9 @@ Yukarıda yer alan "Aydınlatma Metni"ni okuduğumu, anladığımı ve Keşfedio
       return;
     }
     if (!_kvkkAccepted) {
-      _showMessage("Kayıt olabilmek için KVKK metnini onaylamanız gerekmektedir.");
+      _showMessage(
+        'Kayıt olabilmek için KVKK metnini ve Kullanım Şartları\'nı onaylamanız gerekmektedir.',
+      );
       return;
     }
     if (!email.contains('@')) {
@@ -138,71 +170,78 @@ Yukarıda yer alan "Aydınlatma Metni"ni okuduğumu, anladığımı ve Keşfedio
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1F0734),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-        title: const Row(
-          children: [
-            Icon(Icons.mark_email_read_outlined, color: AppColors.primary, size: 26),
-            SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Doğrulama Maili Gönderildi',
-                style: TextStyle(
-                  color: AppColors.textMain,
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
+      builder:
+          (context) => AlertDialog(
+            backgroundColor: const Color(0xFF1F0734),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            title: const Row(
+              children: [
+                Icon(
+                  Icons.mark_email_read_outlined,
+                  color: AppColors.primary,
+                  size: 26,
                 ),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Doğrulama Maili Gönderildi',
+                    style: TextStyle(
+                      color: AppColors.textMain,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            content: RichText(
+              text: TextSpan(
+                style: const TextStyle(
+                  color: AppColors.textMain,
+                  fontSize: 14,
+                  height: 1.55,
+                ),
+                children: [
+                  TextSpan(text: '$email '),
+                  const TextSpan(
+                    text: 'adresine bir doğrulama maili gönderdik.\n\n',
+                  ),
+                  const TextSpan(
+                    text: '⚠️ Mail gelmedi mi? ',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const TextSpan(
+                    text: 'Spam / Gereksiz klasörünü kontrol etmeyi unutma.',
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
-        content: RichText(
-          text: TextSpan(
-            style: const TextStyle(
-              color: AppColors.textMain,
-              fontSize: 14,
-              height: 1.55,
-            ),
-            children: [
-              TextSpan(text: '$email '),
-              const TextSpan(
-                text: 'adresine bir doğrulama maili gönderdik.\n\n',
-              ),
-              const TextSpan(
-                text: '⚠️ Mail gelmedi mi? ',
-                style: TextStyle(fontWeight: FontWeight.w700),
-              ),
-              const TextSpan(
-                text: 'Spam / Gereksiz klasörünü kontrol etmeyi unutma.',
+            actions: [
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                    Navigator.pushReplacementNamed(context, AppRouter.login);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Giriş Sayfasına Git',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                  ),
+                ),
               ),
             ],
           ),
-        ),
-        actions: [
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                Navigator.pushReplacementNamed(context, AppRouter.login);
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-              child: const Text(
-                'Giriş Sayfasına Git',
-                style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -218,7 +257,7 @@ Yukarıda yer alan "Aydınlatma Metni"ni okuduğumu, anladığımı ve Keşfedio
     );
   }
 
-  void _showKvkkText() {
+  void _showLegalText({required String title, required String text}) {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -226,81 +265,97 @@ Yukarıda yer alan "Aydınlatma Metni"ni okuduğumu, anladığımı ve Keşfedio
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.8,
-        minChildSize: 0.5,
-        maxChildSize: 0.95,
-        expand: false,
-        builder: (context, scrollController) => Column(
-          children: [
-            Container(
-              margin: const EdgeInsets.only(top: 12, bottom: 20),
-              width: 48,
-              height: 5,
-              decoration: BoxDecoration(
-                color: AppColors.inputBorder,
-                borderRadius: BorderRadius.circular(2.5),
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20),
-              child: Text(
-                'KVKK Aydınlatma Metni\nve Açık Rıza Beyanı',
-                style: TextStyle(
-                  color: AppColors.textMain,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  height: 1.3,
-                ),
-                textAlign: TextAlign.center,
-              ),
-            ),
-            const SizedBox(height: 20),
-            Expanded(
-              child: Scrollbar(
-                controller: scrollController,
-                child: ListView(
-                  controller: scrollController,
-                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-                  children: const [
-                    Text(
-                      _kvkkText,
-                      style: TextStyle(
-                        color: AppColors.textMain,
-                        fontSize: 14,
-                        height: 1.6,
+      builder:
+          (context) => DraggableScrollableSheet(
+            initialChildSize: 0.8,
+            minChildSize: 0.5,
+            maxChildSize: 0.95,
+            expand: false,
+            builder:
+                (context, scrollController) => Column(
+                  children: [
+                    Container(
+                      margin: const EdgeInsets.only(top: 12, bottom: 20),
+                      width: 48,
+                      height: 5,
+                      decoration: BoxDecoration(
+                        color: AppColors.inputBorder,
+                        borderRadius: BorderRadius.circular(2.5),
+                      ),
+                    ),
+                    Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 20),
+                      child: Text(
+                        title,
+                        style: TextStyle(
+                          color: AppColors.textMain,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800,
+                          height: 1.3,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    Expanded(
+                      child: Scrollbar(
+                        controller: scrollController,
+                        child: ListView(
+                          controller: scrollController,
+                          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                          children: [
+                            Text(
+                              text,
+                              style: const TextStyle(
+                                color: AppColors.textMain,
+                                fontSize: 14,
+                                height: 1.6,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    SafeArea(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: ElevatedButton(
+                            onPressed: () => Navigator.pop(context),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            child: const Text(
+                              'Anladım, Kapat',
+                              style: TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                          ),
+                        ),
                       ),
                     ),
                   ],
                 ),
-              ),
-            ),
-            SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton(
-                    onPressed: () => Navigator.pop(context),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                    ),
-                    child: const Text(
-                      'Anladım, Kapat',
-                      style: TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
+          ),
+    );
+  }
+
+  void _showKvkkText() {
+    _showLegalText(
+      title: 'KVKK Aydınlatma Metni\nve Açık Rıza Beyanı',
+      text: _kvkkText,
+    );
+  }
+
+  void _showTermsText() {
+    _showLegalText(
+      title: 'Kullanım Şartları\nve Topluluk Kuralları',
+      text: _termsText,
     );
   }
 
@@ -426,30 +481,55 @@ Yukarıda yer alan "Aydınlatma Metni"ni okuduğumu, anladığımı ve Keşfedio
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: GestureDetector(
-                  onTap: _showKvkkText,
-                  child: Text.rich(
-                    TextSpan(
-                      text: "Kayıt olarak ",
-                      style: TextStyle(
-                        color: AppColors.textMuted.withValues(alpha: 0.9),
-                        fontSize: 13,
-                        height: 1.4,
-                      ),
-                      children: const [
-                        TextSpan(
-                          text: "KVKK Aydınlatma Metni ve Açık Rıza Beyanı'nı",
-                          style: TextStyle(
-                            color: AppColors.primary,
-                            fontWeight: FontWeight.w600,
-                            decoration: TextDecoration.underline,
+                child: Text.rich(
+                  TextSpan(
+                    text: 'Kayıt olarak ',
+                    style: TextStyle(
+                      color: AppColors.textMuted.withValues(alpha: 0.9),
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
+                    children: [
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.baseline,
+                        baseline: TextBaseline.alphabetic,
+                        child: GestureDetector(
+                          onTap: _showKvkkText,
+                          child: const Text(
+                            'KVKK Aydınlatma Metni ve Açık Rıza Beyanı',
+                            style: TextStyle(
+                              color: AppColors.primary,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              decoration: TextDecoration.underline,
+                              height: 1.4,
+                            ),
                           ),
                         ),
-                        TextSpan(
-                          text: " okuduğumu ve kabul ettiğimi onaylıyorum.",
+                      ),
+                      const TextSpan(text: ' ve '),
+                      WidgetSpan(
+                        alignment: PlaceholderAlignment.baseline,
+                        baseline: TextBaseline.alphabetic,
+                        child: GestureDetector(
+                          onTap: _showTermsText,
+                          child: const Text(
+                            'Kullanım Şartları ve Topluluk Kuralları',
+                            style: TextStyle(
+                              color: AppColors.primary,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              decoration: TextDecoration.underline,
+                              height: 1.4,
+                            ),
+                          ),
                         ),
-                      ],
-                    ),
+                      ),
+                      const TextSpan(
+                        text:
+                            ' metinlerini okuduğumu ve kabul ettiğimi onaylıyorum.',
+                      ),
+                    ],
                   ),
                 ),
               ),
