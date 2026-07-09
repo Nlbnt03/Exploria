@@ -96,6 +96,11 @@ service cloud.firestore {
         );
     }
 
+    match /appConfig/{docId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
     match /users/{uid} {
       allow read: if isSignedIn();
 
