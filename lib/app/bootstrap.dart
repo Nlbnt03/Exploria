@@ -50,11 +50,7 @@ Future<void> bootstrap() async {
       defaultValue: _defaultMapboxAccessToken,
     ),
   );
-  runApp(
-    const ProviderScope(
-      child: KesfedrioApp(),
-    ),
-  );
+  runApp(const ProviderScope(child: KesfedrioApp()));
 
   // Deferred until the first frame is on screen: the ATT system prompt only
   // renders once the app's window is key and visible, and AdMob must not be
@@ -67,11 +63,11 @@ Future<void> bootstrap() async {
 Future<void> _initializeAdsAfterTrackingConsent() async {
   await requestTrackingAuthorizationIfNeeded();
   await MobileAds.instance.initialize();
-  MobileAds.instance.updateRequestConfiguration(
-    RequestConfiguration(
-      testDeviceIds: ['C1C254FBA484927B27A7D7AE274D5207'],
-    ),
-  );
+  if (kDebugMode) {
+    MobileAds.instance.updateRequestConfiguration(
+      RequestConfiguration(testDeviceIds: ['C1C254FBA484927B27A7D7AE274D5207']),
+    );
+  }
   InterstitialAdManager.instance.init();
   RewardedAdManager.instance.init();
 }
