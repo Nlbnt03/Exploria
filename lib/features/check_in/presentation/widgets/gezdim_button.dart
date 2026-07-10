@@ -184,6 +184,19 @@ class GezdimButton extends ConsumerWidget {
               textAlign: TextAlign.center,
             ),
           ),
+        if (state == CheckInState.error)
+          const Padding(
+            padding: EdgeInsets.only(top: 8.0),
+            child: Text(
+              'Konum alınamadı. Lütfen tekrar deneyin.',
+              style: TextStyle(
+                color: Colors.red,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ),
       ],
     );
   }

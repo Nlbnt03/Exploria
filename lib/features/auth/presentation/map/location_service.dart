@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:permission_handler/permission_handler.dart' as perm;
+import 'package:shared_preferences/shared_preferences.dart';
 
 enum LocationAccessStatus {
   granted,
@@ -286,12 +287,26 @@ class LocationService {
         if (currentStatus.isGranted) {
           return geo.LocationPermission.always;
         }
+        if (currentStatus.isPermanentlyDenied) {
+          return geo.LocationPermission.deniedForever;
+        }
 
         final requestedStatus = await perm.Permission.locationAlways.request();
         if (requestedStatus.isGranted) {
           return geo.LocationPermission.always;
         }
+        if (requestedStatus.isPermanentlyDenied) {
+          return geo.LocationPermission.deniedForever;
+        }
       } else {
+        // iOS, "Her Zaman" yükseltme diyaloğunu bir kez cevaplandıktan sonra
+        // bir daha göstermiyor; ikinci denemede sessizce no-op olup aynı
+        // sonucu döndürüyor. Bunu daha önce denediğimizi hatırlayıp, sonraki
+        // denemelerde kullanıcıyı doğrudan Ayarlar'a yönlendiriyoruz.
+        if (await _hasPromptedAlwaysOnIosBefore()) {
+          return geo.LocationPermission.deniedForever;
+        }
+        await _markPromptedAlwaysOnIos();
         final requested = await _requestAlwaysOnIos();
         if (requested == geo.LocationPermission.always) {
           return geo.LocationPermission.always;
@@ -303,6 +318,23 @@ class LocationService {
       return geo.LocationPermission.denied;
     }
   }
+
+  static const _iosAlwaysPromptedKey = 'kesfedio_ios_always_permission_prompted';
+
+  static Future<bool> _hasPromptedAlwaysOnIosBefore() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_iosAlwaysPromptedKey) ?? false;
+  }
+
+  static Future<void> _markPromptedAlwaysOnIos() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_iosAlwaysPromptedKey, true);
+  }
+
+  /// Kullanıcıyı doğrudan sistem Ayarları'na yönlendirir. "Her Zaman" konum
+  /// izni kalıcı olarak reddedildiğinde (deniedForever) uygulama içinden
+  /// tekrar sorulamadığı için tek kurtarma yolu budur.
+  static Future<bool> openSettings() => perm.openAppSettings();
 
   static Future<bool> hasBackgroundPermission() async {
     final permission = await geo.Geolocator.checkPermission();
@@ -321,9 +353,12 @@ class LocationService {
   static Future<geo.LocationPermission> _requestAlwaysOnIos() async {
     try {
       const channel = MethodChannel('kesfedio/location');
+      // Native taraf kullanıcı yanıtı için 20 saniye bekliyor; burası daha
+      // kısa olursa native tamamlanmadan zaman aşımına uğrar ve gerçek bir
+      // "İzin Ver" cevabını kaçırırız.
       final result = await channel
           .invokeMethod('requestAlwaysAuthorization')
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(seconds: 25));
       if (result == true) {
         return geo.LocationPermission.always;
       }

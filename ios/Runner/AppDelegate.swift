@@ -80,7 +80,10 @@ import CoreLocation
       alwaysAuthContinuation = continuation
       locationManager.delegate = self
       locationManager.requestAlwaysAuthorization()
-      DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+      // Kullanıcının sistem diyaloğunu okuyup cevaplaması için makul bir süre
+      // tanı; çok kısa bir süre gerçek bir "Evet" cevabını "Hayır" gibi
+      // değerlendirmemize (ve kullanıcıyı yanlışlıkla kilitlememize) yol açar.
+      DispatchQueue.main.asyncAfter(deadline: .now() + 20.0) { [weak self] in
         guard let self = self else { return }
         self.finishAlwaysAuthorization(
           granted: CLLocationManager.authorizationStatus() == .authorizedAlways)

@@ -253,6 +253,11 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
 
     if (!mounted) return false;
 
+    if (result == geo.LocationPermission.deniedForever) {
+      await _showBackgroundPermissionSettingsDialog();
+      return false;
+    }
+
     final hasBackgroundAfterRequest =
         result == geo.LocationPermission.always ||
         await LocationService.hasBackgroundPermission();
@@ -273,6 +278,37 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
       unawaited(_requestIgnoreBatteryOptimizations());
     }
     return true;
+  }
+
+  Future<void> _showBackgroundPermissionSettingsDialog() async {
+    if (!mounted) return;
+    final navigator = Navigator.of(context);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Arka Plan Konum İzni Gerekli'),
+        content: const Text(
+          'Haritayı kullanmak için "Her Zaman" konum izni gerekiyor. Bu izin '
+          'daha önce reddedildiği için uygulama üzerinden tekrar sorulamıyor '
+          '— izni açmak için Ayarlar\'a gitmen gerekiyor.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Vazgeç'),
+          ),
+          FilledButton(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              LocationService.openSettings();
+            },
+            child: const Text('Ayarları Aç'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    await navigator.maybePop();
   }
 
   void _showLocationGateMessage(LocationAccessStatus status) {
@@ -1452,10 +1488,13 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                         vertical: 10,
                       ),
                       child: Text(
-                        _hasPoiData
-                            ? 'Gezilen: ${_visitedPoiIds.length} / $_totalPoiCount'
-                            : mapController.statusMessage ??
-                                _selectedArea.title,
+                        (!mapController.trackingReady &&
+                                mapController.statusMessage != null)
+                            ? mapController.statusMessage!
+                            : (_hasPoiData
+                                  ? 'Gezilen: ${_visitedPoiIds.length} / $_totalPoiCount'
+                                  : mapController.statusMessage ??
+                                        _selectedArea.title),
                         style: const TextStyle(
                           color: AppColors.textMain,
                           fontWeight: FontWeight.w600,

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
@@ -78,12 +80,21 @@ class VenueCheckInService {
       bool isMocked = false;
 
       if (userLat == null || userLng == null) {
-        final position = await Geolocator.getCurrentPosition(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.best,
-            timeLimit: Duration(seconds: 4),
-          ),
-        );
+        Position position;
+        try {
+          position = await Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.best,
+              timeLimit: Duration(seconds: 8),
+            ),
+          );
+        } on TimeoutException {
+          // iOS'ta ilk GPS fix'i Android'e göre belirgin şekilde yavaş
+          // olabiliyor; taze bir son bilinen konum varsa onunla devam et.
+          final lastKnown = await Geolocator.getLastKnownPosition();
+          if (lastKnown == null) rethrow;
+          position = lastKnown;
+        }
         currentLat = position.latitude;
         currentLng = position.longitude;
         accuracy = position.accuracy;
