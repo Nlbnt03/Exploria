@@ -52,6 +52,10 @@ class NotificationService {
     // 3. Yerel bildirim eklentisini başlat
     await _initLocalNotifications();
 
+    // 3.5. iOS: APNs token gelene kadar bekle (yoksa getToken/subscribeToTopic
+    // "apns-token-not-set" hatası verir; Apple'dan token dönüşü birkaç sn sürebilir)
+    await _waitForApnsToken();
+
     // 4. FCM token'ı Firestore'a kaydet ve genel kanala abone ol
     await _saveTokenToFirestore();
     _messaging.onTokenRefresh.listen((_) => _saveTokenToFirestore());
@@ -63,6 +67,19 @@ class NotificationService {
     }
     // 5. Dinleyicileri kur
     _setupMessageListeners();
+  }
+
+  // ─── APNs token bekleme (iOS) ─────────────────────────────────────────────
+  // requestPermission() sonrası Apple'dan APNs token dönüşü birkaç saniye
+  // sürebilir; bu tamamlanmadan getToken()/subscribeToTopic() çağrılırsa
+  // "apns-token-not-set" hatası alınır.
+  Future<void> _waitForApnsToken() async {
+    if (!Platform.isIOS) return;
+    for (var i = 0; i < 10; i++) {
+      if (await _messaging.getAPNSToken() != null) return;
+      await Future.delayed(const Duration(seconds: 1));
+    }
+    debugPrint('[FCM] APNs token 10 saniye içinde alınamadı');
   }
 
   // ─── Yerel bildirim eklentisi ──────────────────────────────────────────────

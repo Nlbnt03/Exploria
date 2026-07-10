@@ -37,6 +37,20 @@
       ]
     },
     {
+      "collectionGroup": "venue_checkins",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "userId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "markedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "pois",
       "queryScope": "COLLECTION",
       "fields": [
