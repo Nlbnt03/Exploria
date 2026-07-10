@@ -1,12 +1,16 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'dart:math' as math;
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart' as geo;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
+import '../../../../widgets/location_disclosure_dialog.dart';
 import '../../data/services/map_area_firestore_service.dart';
 import '../../data/services/map_progress_service.dart';
 import '../map/map_areas.dart';
@@ -177,11 +181,24 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
       const kTestMode = false;
 
       if (!kTestMode && !selectedArea.skipLocationVerification) {
-        final accessResult = await LocationService.requestSinglePosition();
+        final accessResult = await LocationService.requestSinglePosition(
+          requestDisclosureConsent: _showLocationDisclosure,
+        );
         if (!mounted) return;
 
         if (!accessResult.isGranted) {
           _showGateMessage(accessResult.status);
+          return;
+        }
+
+        final backgroundPermission =
+            await LocationService.requestAlwaysPermission(
+              requestDisclosureConsent: _showLocationDisclosure,
+            );
+        if (!mounted) return;
+
+        if (backgroundPermission != geo.LocationPermission.always) {
+          _showBackgroundLocationRequiredMessage();
           return;
         }
 
@@ -206,6 +223,7 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
       final mapId = await _createMapForSelection(
         areaId: selectedArea.id,
         mapName: mapName,
+        areaConfig: selectedArea,
       );
       if (mapId == null || !mounted) return;
 
@@ -232,7 +250,8 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
     setState(() => _isOpeningMap = true);
     List<String> existingNames = [];
     try {
-      existingNames = await _mapProgressService.fetchAllMapNames(uid)
+      existingNames = await _mapProgressService
+          .fetchAllMapNames(uid)
           .timeout(const Duration(seconds: 10));
     } catch (_) {
       // Ignore errors when fetching existing map names
@@ -261,6 +280,7 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
   Future<String?> _createMapForSelection({
     required String areaId,
     required String mapName,
+    required MapAreaConfig areaConfig,
   }) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
@@ -274,18 +294,41 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
     }
 
     try {
-      return await _mapProgressService.createMap(
-        uid: uid,
-        areaId: areaId,
-        mapName: mapName,
-      ).timeout(const Duration(seconds: 15));
+      return await _mapProgressService
+          .createMap(
+            uid: uid,
+            areaId: areaId,
+            mapName: mapName,
+            areaConfig: areaConfig,
+          )
+          .timeout(const Duration(seconds: 15));
     } on TimeoutException {
       if (!mounted) return null;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Harita oluşturulamadı, bağlantı zaman aşımına uğradı.'),
+          content: Text(
+            'Harita oluşturulamadı, bağlantı zaman aşımına uğradı.',
+          ),
           behavior: SnackBarBehavior.floating,
         ),
+      );
+      return null;
+    } on FirebaseFunctionsException catch (e) {
+      if (!mounted) return null;
+      if (e.code == 'resource-exhausted') {
+        await _showActiveMapLimitDialog();
+        return null;
+      }
+      final message = switch (e.code) {
+        'permission-denied' =>
+          'Harita oluşturma yetkisi yok. Functions ve Firestore kurallarını deploy etmen gerekiyor.',
+        'unauthenticated' =>
+          'Oturum doğrulanamadı. Çıkış yapıp tekrar giriş yap.',
+        'invalid-argument' => e.message ?? 'Harita bilgileri geçersiz.',
+        _ => 'Harita oluşturulamadı (${e.code}).',
+      };
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
       );
       return null;
     } on FirebaseException catch (e) {
@@ -311,6 +354,60 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
       );
       return null;
     }
+  }
+
+  Future<void> _showActiveMapLimitDialog() {
+    return showDialog<void>(
+      context: context,
+      builder:
+          (dialogContext) => AlertDialog(
+            backgroundColor: AppColors.bgBottom,
+            surfaceTintColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+              side: BorderSide(
+                color: AppColors.inputBorder.withValues(alpha: 0.45),
+              ),
+            ),
+            title: const Text(
+              '5/5 aktif harita',
+              style: TextStyle(
+                color: AppColors.textMain,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            content: const Text(
+              'Yeni harita oluşturmak için bir haritayı bitir veya sil.',
+              style: TextStyle(color: AppColors.textMuted, height: 1.35),
+            ),
+            actions: [
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                ),
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Tamam'),
+              ),
+            ],
+          ),
+    );
+  }
+
+  void _showBackgroundLocationRequiredMessage() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Haritayı açmak için önce konum izni, ardından arka plan konum izni vermen gerekiyor.',
+        ),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
+  Future<bool> _showLocationDisclosure() async {
+    if (!mounted) return false;
+    if (Platform.isIOS) return true;
+    return showLocationDisclosureDialog(context);
   }
 
   void _showGateMessage(LocationAccessStatus status) {

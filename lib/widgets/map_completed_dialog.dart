@@ -13,23 +13,26 @@ class MapCompletedDialog extends StatefulWidget {
   final String? mapId;
   final GameNotifier? gameNotifier;
   final bool isCoop;
+  final String? subtitle;
 
   const MapCompletedDialog({
-    super.key, 
+    super.key,
     required this.mapName,
     this.uid,
     this.mapId,
     this.gameNotifier,
     this.isCoop = false,
+    this.subtitle,
   });
 
   static void show(
-    BuildContext context, 
+    BuildContext context,
     String mapName, {
     String? uid,
     String? mapId,
     GameNotifier? gameNotifier,
     bool isCoop = false,
+    String? subtitle,
   }) {
     showGeneralDialog(
       context: context,
@@ -44,18 +47,13 @@ class MapCompletedDialog extends StatefulWidget {
           mapId: mapId,
           gameNotifier: gameNotifier,
           isCoop: isCoop,
+          subtitle: subtitle,
         );
       },
       transitionBuilder: (context, anim1, anim2, child) {
         return ScaleTransition(
-          scale: CurvedAnimation(
-            parent: anim1,
-            curve: Curves.elasticOut,
-          ),
-          child: Opacity(
-            opacity: anim1.value,
-            child: child,
-          ),
+          scale: CurvedAnimation(parent: anim1, curve: Curves.elasticOut),
+          child: Opacity(opacity: anim1.value, child: child),
         );
       },
     );
@@ -65,19 +63,26 @@ class MapCompletedDialog extends StatefulWidget {
   State<MapCompletedDialog> createState() => _MapCompletedDialogState();
 }
 
-class _MapCompletedDialogState extends State<MapCompletedDialog> with TickerProviderStateMixin {
+class _MapCompletedDialogState extends State<MapCompletedDialog>
+    with TickerProviderStateMixin {
   late AnimationController _glowController;
   late AnimationController _badgeController;
 
   @override
   void initState() {
     super.initState();
-    _glowController = AnimationController(vsync: this, duration: const Duration(seconds: 2))..repeat(reverse: true);
-    _badgeController = AnimationController(vsync: this, duration: const Duration(milliseconds: 1000));
-    
+    _glowController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 2),
+    )..repeat(reverse: true);
+    _badgeController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1000),
+    );
+
     Future.delayed(const Duration(milliseconds: 400), () async {
       if (mounted) _badgeController.forward();
-      
+
       // BÖLÜM 2 — Rozet Kontrolü (Harita Tamamlandı)
       if (widget.uid != null && widget.gameNotifier != null) {
         final bContext = BadgeCheckContext(
@@ -95,13 +100,13 @@ class _MapCompletedDialogState extends State<MapCompletedDialog> with TickerProv
           lastVisitedMapId: widget.mapId,
           lastVisitedMapCompletion: 1.0,
         );
-        
+
         final newBadges = await BadgeAwardService().checkAndAwardBadges(
           uid: widget.uid!,
           context: bContext,
           gameNotifier: widget.gameNotifier!,
         );
-        
+
         if (newBadges.isNotEmpty && mounted) {
           Future.delayed(const Duration(milliseconds: 500), () {
             if (mounted) BadgeCelebrationDialog.show(context, newBadges);
@@ -136,10 +141,7 @@ class _MapCompletedDialogState extends State<MapCompletedDialog> with TickerProv
                 spreadRadius: 10,
               ),
             ],
-            border: Border.all(
-              color: Colors.amber.withAlpha(100),
-              width: 2,
-            ),
+            border: Border.all(color: Colors.amber.withAlpha(100), width: 2),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -162,7 +164,9 @@ class _MapCompletedDialogState extends State<MapCompletedDialog> with TickerProv
                             color: Colors.amber.withAlpha(30),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.amber.withAlpha((_glowController.value * 100).toInt()),
+                                color: Colors.amber.withAlpha(
+                                  (_glowController.value * 100).toInt(),
+                                ),
                                 blurRadius: 30,
                                 spreadRadius: 10,
                               ),
@@ -216,7 +220,12 @@ class _MapCompletedDialogState extends State<MapCompletedDialog> with TickerProv
               ),
               const SizedBox(height: 12),
               Text(
-                '${widget.mapName} haritasındaki tüm mekanları keşfettin.',
+                [
+                  '${widget.mapName} haritasındaki tüm mekanları keşfettin.',
+                  if (widget.subtitle != null &&
+                      widget.subtitle!.trim().isNotEmpty)
+                    widget.subtitle!.trim(),
+                ].join('\n\n'),
                 style: TextStyle(
                   color: Colors.white.withAlpha(200),
                   fontSize: 16,
@@ -227,8 +236,9 @@ class _MapCompletedDialogState extends State<MapCompletedDialog> with TickerProv
               const SizedBox(height: 32),
               ElevatedButton(
                 onPressed: () async {
+                  final navigator = Navigator.of(context);
                   await InterstitialAdManager.instance.show();
-                  if (mounted) Navigator.pop(context);
+                  if (mounted) navigator.pop();
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
@@ -240,10 +250,7 @@ class _MapCompletedDialogState extends State<MapCompletedDialog> with TickerProv
                 ),
                 child: const Text(
                   'Muhteşem!',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                 ),
               ),
             ],

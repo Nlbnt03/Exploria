@@ -1,16 +1,20 @@
-import 'dart:math' as math;
-
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' hide Source;
 
 import '../../domain/models/campus_map_state.dart';
+import '../../presentation/map/map_areas.dart';
 import '../../domain/models/user_map_record.dart';
 
 class MapProgressService {
-  MapProgressService({FirebaseFirestore? firestore})
-    : _firestore = firestore ?? FirebaseFirestore.instance;
+  MapProgressService({
+    FirebaseFirestore? firestore,
+    FirebaseFunctions? functions,
+  }) : _firestore = firestore ?? FirebaseFirestore.instance,
+       _functions = functions ?? FirebaseFunctions.instance;
 
   final FirebaseFirestore _firestore;
+  final FirebaseFunctions _functions;
 
   CollectionReference<Map<String, dynamic>> get _mapStates =>
       _firestore.collection('userMapStates');
@@ -24,11 +28,14 @@ class MapProgressService {
     final names = <String>{};
 
     // Read from new subcollection
-    final snapshot = await _statesCollection(uid).get(
-      const GetOptions(source: Source.serverAndCache),
-    ).timeout(_defaultTimeout);
+    final snapshot = await _statesCollection(uid)
+        .get(const GetOptions(source: Source.serverAndCache))
+        .timeout(_defaultTimeout);
     for (final doc in snapshot.docs) {
-      final mapName = (doc.data()['mapName'] as String?)?.trim();
+      final data = doc.data();
+      final status = (data['status'] as String?)?.trim();
+      if (status == 'deleted') continue;
+      final mapName = (data['mapName'] as String?)?.trim();
       if (mapName != null && mapName.isNotEmpty) {
         names.add(mapName.toLowerCase());
       }
@@ -36,15 +43,18 @@ class MapProgressService {
 
     // Also read from old nested structure for migration
     try {
-      final parentDoc = await _mapStates.doc(uid).get(
-        const GetOptions(source: Source.serverAndCache),
-      ).timeout(_defaultTimeout);
+      final parentDoc = await _mapStates
+          .doc(uid)
+          .get(const GetOptions(source: Source.serverAndCache))
+          .timeout(_defaultTimeout);
       final data = parentDoc.data();
       if (data != null) {
         final mapStatesRaw = data['mapStates'];
         if (mapStatesRaw is Map<dynamic, dynamic>) {
           for (final value in mapStatesRaw.values) {
             if (value is! Map<dynamic, dynamic>) continue;
+            final status = (value['status'] as String?)?.trim();
+            if (status == 'deleted') continue;
             final mapName = (value['mapName'] as String?)?.trim();
             if (mapName != null && mapName.isNotEmpty) {
               names.add(mapName.toLowerCase());
@@ -60,18 +70,20 @@ class MapProgressService {
   }
 
   Future<String?> fetchLastOpenedAreaId(String uid) async {
-    final doc = await _mapStates.doc(uid).get(
-      const GetOptions(source: Source.serverAndCache),
-    ).timeout(_defaultTimeout);
+    final doc = await _mapStates
+        .doc(uid)
+        .get(const GetOptions(source: Source.serverAndCache))
+        .timeout(_defaultTimeout);
     final data = doc.data();
     if (data == null) return null;
 
     final lastMapId = (data['lastOpenedMapId'] as String?)?.trim();
     if (lastMapId == null || lastMapId.isEmpty) return null;
 
-    final stateDoc = await _statesCollection(uid).doc(lastMapId).get(
-      const GetOptions(source: Source.serverAndCache),
-    ).timeout(_defaultTimeout);
+    final stateDoc = await _statesCollection(uid)
+        .doc(lastMapId)
+        .get(const GetOptions(source: Source.serverAndCache))
+        .timeout(_defaultTimeout);
     if (stateDoc.exists) {
       final stateData = stateDoc.data()!;
       final areaId = (stateData['areaId'] as String?)?.trim();
@@ -95,29 +107,28 @@ class MapProgressService {
     required String uid,
     required String areaId,
     required String mapName,
+    MapAreaConfig? areaConfig,
   }) async {
     final normalizedName = _normalizeMapName(mapName);
-    final mapId = _generateMapId();
+    final config = areaConfig ?? resolveMapArea(areaId);
+    final callable = _functions.httpsCallable('createMap');
+    final result = await callable
+        .call<Map<String, dynamic>>({
+          'areaId': areaId,
+          'title': normalizedName,
+          'totalPois': config.totalPois,
+          'bounds': _boundsToPayload(config.boundary),
+        })
+        .timeout(_defaultTimeout);
 
-    await _firestore.runTransaction((tx) async {
-      tx.set(_mapStates.doc(uid), {
-        'lastOpenedMapId': mapId,
-        'lastOpenedAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      tx.set(_statesCollection(uid).doc(mapId), {
-        'areaId': areaId,
-        'mapName': normalizedName,
-        'revealedCellIds': const <String>[],
-        'visitedPoiIds': const <String>[],
-        'lastInsidePosition': null,
-        'cameraCenter': null,
-        'zoom': null,
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    }).timeout(_defaultTimeout);
+    final mapId = (result.data['mapId'] as String?)?.trim();
+    if (mapId == null || mapId.isEmpty) {
+      throw FirebaseException(
+        plugin: 'map_progress_service',
+        code: 'invalid-response',
+        message: 'Harita oluşturma yanıtı geçersiz.',
+      );
+    }
 
     return mapId;
   }
@@ -138,17 +149,19 @@ class MapProgressService {
     required String uid,
     required String mapId,
   }) async {
-    final doc = await _statesCollection(uid).doc(mapId).get(
-      const GetOptions(source: Source.serverAndCache),
-    ).timeout(_defaultTimeout);
+    final doc = await _statesCollection(uid)
+        .doc(mapId)
+        .get(const GetOptions(source: Source.serverAndCache))
+        .timeout(_defaultTimeout);
     if (doc.exists) {
       return _parseMapRecord(mapId, doc.data()!);
     }
 
     // Fallback: read from old nested mapStates structure for migration
-    final parentDoc = await _mapStates.doc(uid).get(
-      const GetOptions(source: Source.serverAndCache),
-    ).timeout(_defaultTimeout);
+    final parentDoc = await _mapStates
+        .doc(uid)
+        .get(const GetOptions(source: Source.serverAndCache))
+        .timeout(_defaultTimeout);
     final parentData = parentDoc.data();
     if (parentData == null) return null;
 
@@ -177,19 +190,21 @@ class MapProgressService {
   }) async {
     final normalizedName = _normalizeMapName(mapName);
 
-    await _firestore.runTransaction((tx) async {
-      tx.set(_mapStates.doc(uid), {
-        'lastOpenedMapId': mapId,
-        'lastOpenedAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+    await _firestore
+        .runTransaction((tx) async {
+          tx.set(_mapStates.doc(uid), {
+            'lastOpenedMapId': mapId,
+            'lastOpenedAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
 
-      tx.set(_statesCollection(uid).doc(mapId), {
-        'areaId': areaId,
-        'mapName': normalizedName,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    }).timeout(_defaultTimeout);
+          tx.set(_statesCollection(uid).doc(mapId), {
+            'areaId': areaId,
+            'mapName': normalizedName,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        })
+        .timeout(_defaultTimeout);
   }
 
   Future<void> saveMapState({
@@ -198,55 +213,48 @@ class MapProgressService {
     required String areaId,
     required String mapName,
     required CampusMapState state,
+    int totalPois = 0,
   }) async {
     final normalizedName = _normalizeMapName(mapName);
 
-    await _firestore.runTransaction((tx) async {
-      tx.set(_mapStates.doc(uid), {
-        'lastOpenedMapId': mapId,
-        'lastOpenedAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+    await _firestore
+        .runTransaction((tx) async {
+          tx.set(_mapStates.doc(uid), {
+            'lastOpenedMapId': mapId,
+            'lastOpenedAt': FieldValue.serverTimestamp(),
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
 
-      tx.set(_statesCollection(uid).doc(mapId), {
-        'areaId': areaId,
-        'mapName': normalizedName,
-        'revealedCellIds': state.revealedCellIds,
-        'visitedPoiIds': state.visitedPoiIds,
-        'lastInsidePosition': _positionToMap(state.lastInsidePosition),
-        'cameraCenter': _positionToMap(state.cameraCenter),
-        'zoom': state.zoom,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-    }).timeout(_defaultTimeout);
+          tx.set(_statesCollection(uid).doc(mapId), {
+            'areaId': areaId,
+            'mapName': normalizedName,
+            'revealedCellIds': state.revealedCellIds,
+            'visitedPoiIds': state.visitedPoiIds,
+            'lastInsidePosition': _positionToMap(state.lastInsidePosition),
+            'cameraCenter': _positionToMap(state.cameraCenter),
+            'zoom': state.zoom,
+            'updatedAt': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        })
+        .timeout(_defaultTimeout);
   }
 
   Future<void> deleteMap({required String uid, required String mapId}) async {
-    await _firestore.runTransaction((tx) async {
-      final metaDoc = await tx.get(_mapStates.doc(uid)).timeout(_defaultTimeout);
-
-      tx.delete(_statesCollection(uid).doc(mapId));
-
-      if (!metaDoc.exists) return;
-
-      final data = metaDoc.data() ?? <String, dynamic>{};
-      final lastOpenedMapId = (data['lastOpenedMapId'] as String?)?.trim();
-      if (lastOpenedMapId == mapId) {
-        tx.update(_mapStates.doc(uid), {
-          'lastOpenedMapId': FieldValue.delete(),
-          'lastOpenedAt': FieldValue.serverTimestamp(),
-          'updatedAt': FieldValue.serverTimestamp(),
-        });
-      }
-    }).timeout(_defaultTimeout);
+    final callable = _functions.httpsCallable('deleteMap');
+    await callable
+        .call<Map<String, dynamic>>({'mapId': mapId})
+        .timeout(_defaultTimeout);
   }
 
-  List<UserMapRecord> _parseMapHistory(List<QueryDocumentSnapshot<Map<String, dynamic>>> docs) {
+  List<UserMapRecord> _parseMapHistory(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) {
     final records = <UserMapRecord>[];
     for (final doc in docs) {
       final data = doc.data();
       final record = _parseMapRecord(doc.id, data);
       if (record == null) continue;
+      if (record.status == 'deleted') continue;
       records.add(record);
     }
 
@@ -281,8 +289,17 @@ class MapProgressService {
         cameraCenter: _parsePosition(raw['cameraCenter']),
         zoom: _parseDouble(raw['zoom']),
       ),
+      status: (raw['status'] as String?)?.trim() ?? 'active',
+      totalPois: _parseProgressInt(raw['progress'], 'totalPois'),
+      visitedPois: _parseProgressInt(
+        raw['progress'],
+        'visitedPois',
+      ).clamp(0, 1000000),
+      progressPercent: _parseProgressDouble(raw['progress'], 'percent'),
+      earnedXp: _parseProgressInt(raw['progress'], 'earnedXp'),
       createdAt: _parseDateTime(raw['createdAt']),
       updatedAt: _parseDateTime(raw['updatedAt']),
+      completedAt: _parseDateTime(raw['completedAt']),
     );
   }
 
@@ -301,15 +318,6 @@ class MapProgressService {
     }
 
     return trimmed.substring(0, 60);
-  }
-
-  String _generateMapId() {
-    final timestamp = DateTime.now().millisecondsSinceEpoch;
-    final random = math.Random()
-        .nextInt(0xFFFFFF)
-        .toRadixString(16)
-        .padLeft(6, '0');
-    return 'map_${timestamp}_$random';
   }
 
   List<String> _parseStringList(dynamic raw) {
@@ -344,6 +352,20 @@ class MapProgressService {
     return null;
   }
 
+  int _parseProgressInt(dynamic raw, String key) {
+    if (raw is! Map<dynamic, dynamic>) return 0;
+    final value = raw[key];
+    if (value is num) return value.toInt();
+    return 0;
+  }
+
+  double _parseProgressDouble(dynamic raw, String key) {
+    if (raw is! Map<dynamic, dynamic>) return 0;
+    final value = raw[key];
+    if (value is num) return value.toDouble();
+    return 0;
+  }
+
   DateTime? _parseDateTime(dynamic raw) {
     if (raw is Timestamp) return raw.toDate();
     if (raw is DateTime) return raw;
@@ -357,5 +379,16 @@ class MapProgressService {
       'lat': position.lat.toDouble(),
       'lng': position.lng.toDouble(),
     };
+  }
+
+  List<Map<String, double>> _boundsToPayload(List<Position> boundary) {
+    return boundary
+        .map(
+          (point) => <String, double>{
+            'lat': point.lat.toDouble(),
+            'lng': point.lng.toDouble(),
+          },
+        )
+        .toList(growable: false);
   }
 }

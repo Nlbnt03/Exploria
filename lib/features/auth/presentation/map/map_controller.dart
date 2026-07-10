@@ -97,7 +97,6 @@ class CampusMapController extends ChangeNotifier {
   }
 
   Future<void> onStyleLoaded() async {
-
     final map = _mapboxMap;
     if (map == null) return;
 
@@ -519,9 +518,12 @@ class CampusMapController extends ChangeNotifier {
     }
 
     locationService.registerConsumer();
-    _trackingReady = await locationService.start();
+    _trackingReady = await locationService.start(
+      requireBackgroundPermission: true,
+    );
     if (!_trackingReady) {
-      _statusMessage = 'Konum izni gerekli. Lütfen konum erişimini aç.';
+      _statusMessage =
+          'Konum ve arka plan konum izni gerekli. Lütfen izinleri aç.';
       locationService.unregisterConsumer();
       notifyListeners();
       return;
@@ -745,7 +747,8 @@ class CampusMapController extends ChangeNotifier {
   void _schedulePersist({Duration? delay}) {
     if (_isDisposed || onPersistStateRequested == null) return;
 
-    final effectiveDelay = delay ??
+    final effectiveDelay =
+        delay ??
         (_isBackground
             ? const Duration(seconds: 8)
             : const Duration(seconds: 2));

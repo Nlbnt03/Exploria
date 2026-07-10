@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import '../constants/ad_constants.dart';
@@ -13,6 +14,8 @@ class InterstitialAdManager {
   DateTime? _lastShown;
   bool _loading = false;
   bool _skipNext = false;
+  Timer? _retryTimer;
+  int _loadFailures = 0;
 
   static const int _maxPerSession = 2;
   static const Duration _minInterval = Duration(seconds: 5);
@@ -22,6 +25,8 @@ class InterstitialAdManager {
   }
 
   void _load() {
+    _retryTimer?.cancel();
+    _retryTimer = null;
     _loading = true;
     InterstitialAd.load(
       adUnitId: AdConstants.interstitialAdUnitId,
@@ -30,6 +35,7 @@ class InterstitialAdManager {
         onAdLoaded: (ad) {
           _interstitial = ad;
           _loading = false;
+          _loadFailures = 0;
           ad.fullScreenContentCallback = FullScreenContentCallback(
             onAdDismissedFullScreenContent: (_) {
               _interstitial?.dispose();
@@ -37,18 +43,32 @@ class InterstitialAdManager {
               _load();
             },
             onAdFailedToShowFullScreenContent: (ad, err) {
+              debugPrint('[Ads] Interstitial failed to show: ${err.message}');
               ad.dispose();
               _interstitial = null;
               _loading = false;
+              _scheduleRetry();
             },
           );
         },
-        onAdFailedToLoad: (_) {
+        onAdFailedToLoad: (err) {
+          debugPrint('[Ads] Interstitial failed to load: ${err.message}');
           _interstitial = null;
           _loading = false;
+          _loadFailures++;
+          _scheduleRetry();
         },
       ),
     );
+  }
+
+  void _scheduleRetry() {
+    if (_interstitial != null || _loading) return;
+    _retryTimer?.cancel();
+    final delay = Duration(seconds: _loadFailures < 3 ? 5 : 20);
+    _retryTimer = Timer(delay, () {
+      if (_interstitial == null && !_loading) _load();
+    });
   }
 
   bool get _canShow {
@@ -84,8 +104,11 @@ class InterstitialAdManager {
         completer.complete(true);
       },
       onAdFailedToShowFullScreenContent: (ad, err) {
+        debugPrint('[Ads] Interstitial failed to show: ${err.message}');
         ad.dispose();
         _loading = false;
+        _loadFailures++;
+        _scheduleRetry();
         completer.complete(false);
       },
     );

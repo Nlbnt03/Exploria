@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import '../constants/ad_constants.dart';
@@ -13,6 +14,8 @@ class RewardedAdManager {
   RewardedAd? _ad;
   bool _isLoading = false;
   Completer<void>? _loadCompleter;
+  Timer? _retryTimer;
+  int _loadFailures = 0;
 
   void init() {
     if (_ad == null && !_isLoading) _load();
@@ -22,6 +25,8 @@ class RewardedAdManager {
 
   void _load() {
     if (_isLoading) return;
+    _retryTimer?.cancel();
+    _retryTimer = null;
     _isLoading = true;
     _loadCompleter = Completer<void>();
 
@@ -32,17 +37,30 @@ class RewardedAdManager {
         onAdLoaded: (ad) {
           _ad = ad;
           _isLoading = false;
+          _loadFailures = 0;
           _loadCompleter?.complete();
           _loadCompleter = null;
         },
         onAdFailedToLoad: (err) {
+          debugPrint('[Ads] Rewarded failed to load: ${err.message}');
           _ad = null;
           _isLoading = false;
-          _loadCompleter?.completeError(err);
+          _loadFailures++;
+          _loadCompleter?.complete();
           _loadCompleter = null;
+          _scheduleRetry();
         },
       ),
     );
+  }
+
+  void _scheduleRetry() {
+    if (_ad != null || _isLoading) return;
+    _retryTimer?.cancel();
+    final delay = Duration(seconds: _loadFailures < 3 ? 5 : 20);
+    _retryTimer = Timer(delay, () {
+      if (_ad == null && !_isLoading) _load();
+    });
   }
 
   Future<bool> _waitForLoad(Duration timeout) async {
@@ -84,9 +102,11 @@ class RewardedAdManager {
           );
         }
       },
-      onAdFailedToShowFullScreenContent: (failedAd, _) {
+      onAdFailedToShowFullScreenContent: (failedAd, err) {
+        debugPrint('[Ads] Rewarded failed to show: ${err.message}');
         failedAd.dispose();
         _isLoading = false;
+        _loadFailures++;
         _load();
         if (!completer.isCompleted) {
           completer.complete(RewardResult.notLoaded);

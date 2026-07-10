@@ -10,8 +10,9 @@ class GezdimButton extends ConsumerWidget {
   final double? userLat;
   final double? userLng;
   final bool currentVisited;
-  final VoidCallback onCheckInSuccess;
+  final ValueChanged<CheckInResult> onCheckInSuccess;
   final VoidCallback onCancelVisit;
+  final int xpValue;
 
   const GezdimButton({
     super.key,
@@ -24,6 +25,7 @@ class GezdimButton extends ConsumerWidget {
     required this.currentVisited,
     required this.onCheckInSuccess,
     required this.onCancelVisit,
+    required this.xpValue,
   });
 
   @override
@@ -34,52 +36,78 @@ class GezdimButton extends ConsumerWidget {
     // Başarılı işaretleme anında UI tetikleyicisi (Örn: XP Animasyonu)
     ref.listen(checkInProvider, (previous, next) {
       if (next == CheckInState.success && previous != CheckInState.success) {
-        onCheckInSuccess();
+        final result =
+            ref.read(checkInProvider.notifier).lastResult ??
+            const CheckInResult(state: CheckInState.success);
+        onCheckInSuccess(result);
       }
     });
 
     Widget buildButtonContent() {
       if (state == CheckInState.loading) {
         return const SizedBox(
-          width: 24, height: 24,
-          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(
+            color: Colors.white,
+            strokeWidth: 2.5,
+          ),
         );
       }
-      
+
       if (currentVisited || state == CheckInState.success) {
         return const Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.undo, color: Colors.white),
             SizedBox(width: 8),
-            Text('Gezmedim (İptal Et)', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+            Text(
+              'Gezmedim (İptal Et)',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
           ],
         );
       }
 
-      return const Text('Gezdim ✓', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold));
+      return const Text(
+        'Gezdim ✓',
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 16,
+          fontWeight: FontWeight.bold,
+        ),
+      );
     }
 
     Color getButtonColor() {
-      if (currentVisited || state == CheckInState.success) return Colors.red.withAlpha(153);
+      if (currentVisited || state == CheckInState.success) {
+        return Colors.red.withAlpha(153);
+      }
       if (state == CheckInState.offline) return Colors.grey;
       return Theme.of(context).primaryColor;
     }
 
     void handlePress() {
-      if (state == CheckInState.loading || state == CheckInState.offline) return;
-      
+      if (state == CheckInState.loading || state == CheckInState.offline) {
+        return;
+      }
+
       if (currentVisited || state == CheckInState.success) {
         onCancelVisit();
         notifier.reset();
         return;
       }
-      
+
       notifier.performCheckIn(
         venueId: venueId,
         mapId: mapId,
         venueLat: venueLat,
         venueLng: venueLng,
+        xpValue: xpValue,
         userLat: userLat,
         userLng: userLng,
       );
@@ -95,18 +123,25 @@ class GezdimButton extends ConsumerWidget {
             backgroundColor: getButtonColor(),
             disabledBackgroundColor: getButtonColor().withAlpha(153),
             padding: const EdgeInsets.symmetric(vertical: 16),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
           ),
           child: buildButtonContent(),
         ),
-        
+
         // Hata ve Durum Mesajları
-        if (state == CheckInState.tooFar && notifier.lastCalculatedDistance != null)
+        if (state == CheckInState.tooFar &&
+            notifier.lastCalculatedDistance != null)
           Padding(
             padding: const EdgeInsets.only(top: 8.0),
             child: Text(
               'Bu mekana ~${notifier.lastCalculatedDistance!.toStringAsFixed(0)}m uzaktasınız.',
-              style: const TextStyle(color: Colors.orange, fontSize: 13, fontWeight: FontWeight.w500),
+              style: const TextStyle(
+                color: Colors.orange,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
               textAlign: TextAlign.center,
             ),
           ),
@@ -115,7 +150,11 @@ class GezdimButton extends ConsumerWidget {
             padding: EdgeInsets.only(top: 8.0),
             child: Text(
               'Mock location (Sahte Konum) tespit edildi!',
-              style: TextStyle(color: Colors.red, fontSize: 13, fontWeight: FontWeight.w500),
+              style: TextStyle(
+                color: Colors.red,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
               textAlign: TextAlign.center,
             ),
           ),
@@ -124,7 +163,11 @@ class GezdimButton extends ConsumerWidget {
             padding: EdgeInsets.only(top: 8.0),
             child: Text(
               'Şüpheli konum değişikliği tespit edildi!',
-              style: TextStyle(color: Colors.red, fontSize: 13, fontWeight: FontWeight.w500),
+              style: TextStyle(
+                color: Colors.red,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
               textAlign: TextAlign.center,
             ),
           ),
@@ -133,7 +176,11 @@ class GezdimButton extends ConsumerWidget {
             padding: EdgeInsets.only(top: 8.0),
             child: Text(
               'İnternet bağlantısı gerekli.',
-              style: TextStyle(color: Colors.grey, fontSize: 13, fontWeight: FontWeight.w500),
+              style: TextStyle(
+                color: Colors.grey,
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+              ),
               textAlign: TextAlign.center,
             ),
           ),

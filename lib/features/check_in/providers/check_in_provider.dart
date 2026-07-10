@@ -9,7 +9,21 @@ enum CheckInState {
   mocked,
   offline,
   speedLimitError,
-  error
+  error,
+}
+
+class CheckInResult {
+  const CheckInResult({
+    required this.state,
+    this.mapCompleted = false,
+    this.xpEligible = false,
+    this.alreadyVisited = false,
+  });
+
+  final CheckInState state;
+  final bool mapCompleted;
+  final bool xpEligible;
+  final bool alreadyVisited;
 }
 
 // Servisimizi Riverpod'la enjekte ediyoruz
@@ -20,6 +34,7 @@ final checkInServiceProvider = Provider<VenueCheckInService>((ref) {
 class CheckInNotifier extends StateNotifier<CheckInState> {
   final VenueCheckInService _service;
   double? lastCalculatedDistance; // Mesafeyi saklamak için
+  CheckInResult? lastResult;
 
   CheckInNotifier(this._service) : super(CheckInState.idle);
 
@@ -28,19 +43,22 @@ class CheckInNotifier extends StateNotifier<CheckInState> {
     required String mapId,
     required double venueLat,
     required double venueLng,
+    required int xpValue,
     double? userLat,
     double? userLng,
   }) async {
     // 1. Kullanıcıyı Loading durumuna al
     state = CheckInState.loading;
     lastCalculatedDistance = null;
+    lastResult = null;
 
     // 2. Doğrulama servisini çağır
-    final result = await _service.processCheckIn(
+    final result = await _service.processCheckInDetailed(
       venueId: venueId,
       mapId: mapId,
       venueLat: venueLat,
       venueLng: venueLng,
+      xpValue: xpValue,
       userLat: userLat,
       userLng: userLng,
       onTooFar: (dist) {
@@ -50,13 +68,18 @@ class CheckInNotifier extends StateNotifier<CheckInState> {
     );
 
     // 3. Sonucu yansıt
-    state = result;
+    lastResult = result;
+    state = result.state;
   }
-  
-  void reset() => state = CheckInState.idle;
+
+  void reset() {
+    lastResult = null;
+    state = CheckInState.idle;
+  }
 }
 
 // UI tarafında kullanılacak Provider
-final checkInProvider = StateNotifierProvider.autoDispose<CheckInNotifier, CheckInState>((ref) {
-  return CheckInNotifier(ref.watch(checkInServiceProvider));
-});
+final checkInProvider =
+    StateNotifierProvider.autoDispose<CheckInNotifier, CheckInState>((ref) {
+      return CheckInNotifier(ref.watch(checkInServiceProvider));
+    });

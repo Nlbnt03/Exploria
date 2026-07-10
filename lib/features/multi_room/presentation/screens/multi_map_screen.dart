@@ -31,7 +31,9 @@ import '../../../../core/services/interstitial_ad_manager.dart';
 import '../../../../providers/game_provider.dart';
 import '../../../../widgets/xp_popup.dart';
 import '../../../../widgets/level_up_dialog.dart';
+import '../../../../widgets/map_completed_dialog.dart';
 import '../../../../widgets/quest_completed_dialog.dart';
+import '../../../../widgets/location_disclosure_dialog.dart';
 import '../../../place_suggestion/presentation/suggest_place_button.dart';
 import '../../../place_suggestion/presentation/place_suggestion_form_sheet.dart';
 import '../../../place_suggestion/presentation/animated_map_pin.dart';
@@ -63,9 +65,9 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
 
   static final geo.ForegroundNotificationConfig _foregroundNotification =
       geo.ForegroundNotificationConfig(
-    notificationTitle: 'Keşfedio',
-    notificationText: 'Oda arkadaşlarınla ilerleme takip ediliyor...',
-  );
+        notificationTitle: 'Keşfedio',
+        notificationText: 'Oda arkadaşlarınla ilerleme takip ediliyor...',
+      );
 
   final MultiRoomFirestoreService _service = MultiRoomFirestoreService();
   final MapProgressService _mapProgressService = MapProgressService();
@@ -145,7 +147,6 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
   double? _suggestScreenX;
   double? _suggestScreenY;
   Key _pinKey = UniqueKey();
-
 
   @override
   void initState() {
@@ -539,19 +540,16 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
 
     // Periodic Firestore write (every 5 seconds) instead of per-GPS-event
     _locationWriteTimer?.cancel();
-    _locationWriteTimer = Timer.periodic(
-      const Duration(seconds: 5),
-      (_) async {
-        if (!_isTracking || _lastKnownLat == null || _lastKnownLng == null) {
-          return;
-        }
-        await _service.updateMyLocation(
-          widget.roomId,
-          _lastKnownLat!,
-          _lastKnownLng!,
-        );
-      },
-    );
+    _locationWriteTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+      if (!_isTracking || _lastKnownLat == null || _lastKnownLng == null) {
+        return;
+      }
+      await _service.updateMyLocation(
+        widget.roomId,
+        _lastKnownLat!,
+        _lastKnownLng!,
+      );
+    });
   }
 
   void _stopTracking() {
@@ -571,6 +569,11 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
 
     var permission = await geo.Geolocator.checkPermission();
     if (permission == geo.LocationPermission.denied) {
+      if (!mounted) return false;
+      final accepted = await showLocationDisclosureDialog(context);
+      if (!accepted) {
+        return false;
+      }
       permission = await geo.Geolocator.requestPermission();
     }
 
@@ -610,36 +613,37 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
       if (!mounted) return;
       final agree = await showDialog<bool>(
         context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: AppColors.bgBottom,
-          title: const Text(
-            'Pil Tasarrufu İstisnası',
-            style: TextStyle(color: AppColors.textMain),
-          ),
-          content: const Text(
-            'Bazı telefonlar (Xiaomi, Huawei, Samsung vb.) uygulamaları '
-            'arka planda kısıtlayarak konum takibini durdurabilir. '
-            'Oda arkadaşlarınla kesintisiz takip için pil optimizasyonu '
-            'istisnası eklemek ister misiniz?',
-            style: TextStyle(color: AppColors.textMuted),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text(
-                'İptal',
+        builder:
+            (ctx) => AlertDialog(
+              backgroundColor: AppColors.bgBottom,
+              title: const Text(
+                'Pil Tasarrufu İstisnası',
+                style: TextStyle(color: AppColors.textMain),
+              ),
+              content: const Text(
+                'Bazı telefonlar (Xiaomi, Huawei, Samsung vb.) uygulamaları '
+                'arka planda kısıtlayarak konum takibini durdurabilir. '
+                'Oda arkadaşlarınla kesintisiz takip için pil optimizasyonu '
+                'istisnası eklemek ister misiniz?',
                 style: TextStyle(color: AppColors.textMuted),
               ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text(
+                    'İptal',
+                    style: TextStyle(color: AppColors.textMuted),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text(
+                    'İzin Ver',
+                    style: TextStyle(color: AppColors.primary),
+                  ),
+                ),
+              ],
             ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text(
-                'İzin Ver',
-                style: TextStyle(color: AppColors.primary),
-              ),
-            ),
-          ],
-        ),
       );
 
       if (agree == true && mounted) {
@@ -673,10 +677,12 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
       _sharedFogDebounce?.cancel();
       _sharedFogDebounce = Timer(const Duration(seconds: 5), () {
         if (_pendingSharedFogCells.isNotEmpty) {
-          unawaited(_service.updateSharedFog(
-            widget.roomId,
-            _pendingSharedFogCells.toList(),
-          ));
+          unawaited(
+            _service.updateSharedFog(
+              widget.roomId,
+              _pendingSharedFogCells.toList(),
+            ),
+          );
           _pendingSharedFogCells.clear();
         }
       });
@@ -701,7 +707,8 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
   }
 
   Future<void> _ensurePoisParsed() async {
-    final areaId = _historyAreaId ?? _room?.cityId ?? _resolveAreaForRoom(_room).id;
+    final areaId =
+        _historyAreaId ?? _room?.cityId ?? _resolveAreaForRoom(_room).id;
     // If POIs were loaded for a different areaId, clear and reload.
     if (_parsedPois.isNotEmpty && _parsedPoisAreaId != areaId) {
       _parsedPois = [];
@@ -788,18 +795,28 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
     try {
       final bContext = BadgeCheckContext(
         totalVisited: _visitedPoiIds.length,
-        historicBuildingVisited: _parsedPois
-            .where((p) =>
-                _visitedPoiIds.contains(p['featureId']) &&
-                (p['category'].toString().toLowerCase().contains('tarih') ||
-                    p['type'].toString().toLowerCase().contains('tarih')))
-            .length,
-        mosqueVisited: _parsedPois
-            .where((p) =>
-                _visitedPoiIds.contains(p['featureId']) &&
-                (p['category'].toString().toLowerCase().contains('cami') ||
-                    p['type'].toString().toLowerCase().contains('cami')))
-            .length,
+        historicBuildingVisited:
+            _parsedPois
+                .where(
+                  (p) =>
+                      _visitedPoiIds.contains(p['featureId']) &&
+                      (p['category'].toString().toLowerCase().contains(
+                            'tarih',
+                          ) ||
+                          p['type'].toString().toLowerCase().contains('tarih')),
+                )
+                .length,
+        mosqueVisited:
+            _parsedPois
+                .where(
+                  (p) =>
+                      _visitedPoiIds.contains(p['featureId']) &&
+                      (p['category'].toString().toLowerCase().contains(
+                            'cami',
+                          ) ||
+                          p['type'].toString().toLowerCase().contains('cami')),
+                )
+                .length,
         distinctCitiesVisited: 1,
         coopSessionsCompleted: 1,
         distinctCoopPartners: (_memberByUid.length - 1).clamp(0, 99),
@@ -825,11 +842,13 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
         context: bContext,
       );
       if (newBadgeDefs.isNotEmpty && mounted) {
-        unawaited(_badgeAwardService.awardBadges(
-          uid: uid,
-          badges: newBadgeDefs,
-          gameNotifier: ref.read(gameProvider.notifier),
-        ));
+        unawaited(
+          _badgeAwardService.awardBadges(
+            uid: uid,
+            badges: newBadgeDefs,
+            gameNotifier: ref.read(gameProvider.notifier),
+          ),
+        );
         await BadgeCelebrationDialog.show(
           context,
           newBadgeDefs.map((d) => d.id).toList(),
@@ -884,9 +903,10 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
 
   Future<void> _showSessionSummary() async {
     if (!mounted) return;
-    final duration = _sessionStartTime != null
-        ? DateTime.now().difference(_sessionStartTime!)
-        : Duration.zero;
+    final duration =
+        _sessionStartTime != null
+            ? DateTime.now().difference(_sessionStartTime!)
+            : Duration.zero;
     final mins = duration.inMinutes;
     final secs = duration.inSeconds % 60;
     final durationStr = mins > 0 ? '${mins}dk ${secs}sn' : '${secs}sn';
@@ -895,38 +915,55 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: AppColors.bgBottom,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(
-          children: [
-            Icon(Icons.flag_rounded, color: AppColors.primary),
-            SizedBox(width: 8),
-            Text('Oturum Özeti',
-                style: TextStyle(color: AppColors.textMain, fontSize: 18)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _SummaryRow(icon: Icons.group_rounded,
-                label: 'Takım', value: '$teamSize kişi'),
-            _SummaryRow(icon: Icons.place_rounded,
-                label: 'Gezilen', value: '${_visitedPoiIds.length} mekan'),
-            _SummaryRow(icon: Icons.timer_rounded,
-                label: 'Süre', value: durationStr),
-
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Devam Et',
-                style: TextStyle(color: AppColors.primary,
-                    fontWeight: FontWeight.w700)),
+      builder:
+          (ctx) => AlertDialog(
+            backgroundColor: AppColors.bgBottom,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            title: const Row(
+              children: [
+                Icon(Icons.flag_rounded, color: AppColors.primary),
+                SizedBox(width: 8),
+                Text(
+                  'Oturum Özeti',
+                  style: TextStyle(color: AppColors.textMain, fontSize: 18),
+                ),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _SummaryRow(
+                  icon: Icons.group_rounded,
+                  label: 'Takım',
+                  value: '$teamSize kişi',
+                ),
+                _SummaryRow(
+                  icon: Icons.place_rounded,
+                  label: 'Gezilen',
+                  value: '${_visitedPoiIds.length} mekan',
+                ),
+                _SummaryRow(
+                  icon: Icons.timer_rounded,
+                  label: 'Süre',
+                  value: durationStr,
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text(
+                  'Devam Et',
+                  style: TextStyle(
+                    color: AppColors.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
     );
   }
 
@@ -1008,8 +1045,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
                 width: double.infinity,
                 decoration: const BoxDecoration(
                   color: AppColors.bgBottom,
-                  borderRadius:
-                      BorderRadius.vertical(top: Radius.circular(24)),
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -1037,17 +1073,19 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
                           child: CachedNetworkImage(
                             imageUrl: photoUrl,
                             fit: BoxFit.cover,
-                            errorWidget: (_, _, _) => const Icon(
-                              Icons.image_not_supported_rounded,
-                              color: AppColors.textMuted,
-                              size: 40,
-                            ),
-                            placeholder: (_, _) => const Center(
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: AppColors.primary,
-                              ),
-                            ),
+                            errorWidget:
+                                (_, _, _) => const Icon(
+                                  Icons.image_not_supported_rounded,
+                                  color: AppColors.textMuted,
+                                  size: 40,
+                                ),
+                            placeholder:
+                                (_, _) => const Center(
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
                           ),
                         ),
                       ),
@@ -1076,15 +1114,19 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
                                       vertical: 5,
                                     ),
                                     decoration: BoxDecoration(
-                                      color: AppColors.primary
-                                          .withValues(alpha: 0.15),
+                                      color: AppColors.primary.withValues(
+                                        alpha: 0.15,
+                                      ),
                                       borderRadius: BorderRadius.circular(20),
                                     ),
                                     child: const Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Icon(Icons.check_circle,
-                                            color: AppColors.primary, size: 14),
+                                        Icon(
+                                          Icons.check_circle,
+                                          color: AppColors.primary,
+                                          size: 14,
+                                        ),
                                         SizedBox(width: 4),
                                         Text(
                                           'Gezildi',
@@ -1114,8 +1156,9 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
                               Text(
                                 description,
                                 style: TextStyle(
-                                  color: AppColors.textMain
-                                      .withValues(alpha: 0.85),
+                                  color: AppColors.textMain.withValues(
+                                    alpha: 0.85,
+                                  ),
                                   fontSize: 14,
                                   height: 1.5,
                                 ),
@@ -1133,8 +1176,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
                           clipBehavior: Clip.none,
                           children: [
                             Padding(
-                              padding:
-                                  const EdgeInsets.fromLTRB(20, 8, 20, 16),
+                              padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
                               child: SafeArea(
                                 top: false,
                                 child: Column(
@@ -1149,19 +1191,26 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
                                           vertical: 10,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: allInRange
-                                              ? const Color(0xFF10B981)
-                                                  .withValues(alpha: 0.12)
-                                              : Colors.orange
-                                                  .withValues(alpha: 0.12),
-                                          borderRadius:
-                                              BorderRadius.circular(12),
+                                          color:
+                                              allInRange
+                                                  ? const Color(
+                                                    0xFF10B981,
+                                                  ).withValues(alpha: 0.12)
+                                                  : Colors.orange.withValues(
+                                                    alpha: 0.12,
+                                                  ),
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
                                           border: Border.all(
-                                            color: allInRange
-                                                ? const Color(0xFF10B981)
-                                                    .withValues(alpha: 0.4)
-                                                : Colors.orange
-                                                    .withValues(alpha: 0.4),
+                                            color:
+                                                allInRange
+                                                    ? const Color(
+                                                      0xFF10B981,
+                                                    ).withValues(alpha: 0.4)
+                                                    : Colors.orange.withValues(
+                                                      alpha: 0.4,
+                                                    ),
                                           ),
                                         ),
                                         child: Column(
@@ -1171,25 +1220,28 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
                                             for (final entry
                                                 in _memberByUid.entries)
                                               () {
-                                                final loc = _locationByUid[
-                                                    entry.key];
+                                                final loc =
+                                                    _locationByUid[entry.key];
                                                 if (loc == null) {
                                                   return _ProximityRow(
-                                                    name:
-                                                        entry.value.username,
+                                                    name: entry.value.username,
                                                     status:
-                                                        _ProximityStatus.unknown,
+                                                        _ProximityStatus
+                                                            .unknown,
                                                   );
                                                 }
-                                                final inRange = !outOfRange
-                                                    .contains(entry.key);
+                                                final inRange =
+                                                    !outOfRange.contains(
+                                                      entry.key,
+                                                    );
                                                 return _ProximityRow(
-                                                  name:
-                                                      entry.value.username,
-                                                  status: inRange
-                                                      ? _ProximityStatus.inRange
-                                                      : _ProximityStatus
-                                                          .outOfRange,
+                                                  name: entry.value.username,
+                                                  status:
+                                                      inRange
+                                                          ? _ProximityStatus
+                                                              .inRange
+                                                          : _ProximityStatus
+                                                              .outOfRange,
                                                 );
                                               }(),
                                           ],
@@ -1210,33 +1262,69 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
                                             venueLat: lat,
                                             venueLng: lon,
                                             currentVisited: currentVisited,
-                                            userLat: _lastInsidePosition
-                                                ?.lat
-                                                .toDouble(),
-                                            userLng: _lastInsidePosition
-                                                ?.lng
-                                                .toDouble(),
-                                            onCheckInSuccess: () async {
+                                            xpValue: xpValue,
+                                            userLat:
+                                                _lastInsidePosition?.lat
+                                                    .toDouble(),
+                                            userLng:
+                                                _lastInsidePosition?.lng
+                                                    .toDouble(),
+                                            onCheckInSuccess: (
+                                              checkInResult,
+                                            ) async {
                                               _visitedPoiIds.add(id);
-                                              xpAnimAmount = xpValue;
+                                              xpAnimAmount =
+                                                  checkInResult.xpEligible
+                                                      ? xpValue
+                                                      : null;
                                               setSheetState(() {});
                                               setState(() {});
                                               _loadAndShowPois();
 
                                               // Award XP + visited to all other members
-                                              unawaited(
-                                                _service.awardCoopCheckIn(
-                                                  roomId: widget.roomId,
-                                                  mapId: mapId,
-                                                  venueId: id,
-                                                  xpValue: xpValue,
-                                                  memberUids: _memberByUid
-                                                      .keys
-                                                      .toList(),
-                                                ),
-                                              );
+                                              if (checkInResult.xpEligible) {
+                                                unawaited(
+                                                  _service.awardCoopCheckIn(
+                                                    roomId: widget.roomId,
+                                                    mapId: mapId,
+                                                    venueId: id,
+                                                    xpValue: xpValue,
+                                                    memberUids:
+                                                        _memberByUid.keys
+                                                            .toList(),
+                                                  ),
+                                                );
+                                              }
 
-                                              if (!context.mounted) return;
+                                              if (checkInResult.mapCompleted &&
+                                                  context.mounted) {
+                                                MapCompletedDialog.show(
+                                                  context,
+                                                  _historyMapName ??
+                                                      'Çoklu Harita',
+                                                  subtitle:
+                                                      '1 harita slotun açıldı. Yeni bir harita oluşturabilirsin.',
+                                                  uid: _uid,
+                                                  mapId: mapId,
+                                                  gameNotifier: ref.read(
+                                                    gameProvider.notifier,
+                                                  ),
+                                                  isCoop: true,
+                                                );
+                                              }
+
+                                              if (!checkInResult.xpEligible) {
+                                                debugPrint(
+                                                  '[Co] XP atlandı: completed/duplicate check-in',
+                                                );
+                                                unawaited(_persistMapState());
+                                                return;
+                                              }
+
+                                              if (!context.mounted) {
+                                                unawaited(_persistMapState());
+                                                return;
+                                              }
                                               try {
                                                 final isLevelUp = await ref
                                                     .read(gameProvider.notifier)
@@ -1248,9 +1336,10 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
                                                     );
                                                 if (context.mounted &&
                                                     isLevelUp) {
-                                                  final userXP = ref
-                                                      .read(gameProvider)
-                                                      .valueOrNull;
+                                                  final userXP =
+                                                      ref
+                                                          .read(gameProvider)
+                                                          .valueOrNull;
                                                   if (userXP != null) {
                                                     LevelUpDialog.show(
                                                       context,
@@ -1260,7 +1349,8 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
                                                 }
                                               } catch (e) {
                                                 debugPrint(
-                                                    '[Co] onPlaceVisited: $e');
+                                                  '[Co] onPlaceVisited: $e',
+                                                );
                                               }
                                               unawaited(_persistMapState());
                                             },
@@ -1285,8 +1375,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
                                     ),
                                     if (!allInRange)
                                       Padding(
-                                        padding:
-                                            const EdgeInsets.only(top: 8),
+                                        padding: const EdgeInsets.only(top: 8),
                                         child: Text(
                                           'Tüm takım arkadaşları mekana yakın olmalı (${_coopProximityThreshold.toInt()}m).',
                                           style: const TextStyle(
@@ -1353,10 +1442,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
           },
           'geometry': <String, Object?>{
             'type': 'Point',
-            'coordinates': <double>[
-              poi['lon'] as double,
-              poi['lat'] as double,
-            ],
+            'coordinates': <double>[poi['lon'] as double, poi['lat'] as double],
           },
         });
       }
@@ -1380,7 +1466,9 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
           if (_isAlreadyExistsError(e)) {
             try {
               final existing = await map.style.getSource(sourceId);
-              if (existing is GeoJsonSource) await existing.updateGeoJSON(geoJson);
+              if (existing is GeoJsonSource) {
+                await existing.updateGeoJSON(geoJson);
+              }
             } catch (_) {}
           } else {
             _poiLayerCreated = false;
@@ -1392,27 +1480,68 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
               id: circleLayerId,
               sourceId: sourceId,
               circleRadiusExpression: <Object>[
-                'match', <Object>['get', 'rarity'],
-                'must-see', 14.0, 'önerilen', 10.0,
-                'legendary', 14.0, 'epic', 11.0, 'rare', 8.0, 6.0,
+                'match',
+                <Object>['get', 'rarity'],
+                'must-see',
+                14.0,
+                'önerilen',
+                10.0,
+                'legendary',
+                14.0,
+                'epic',
+                11.0,
+                'rare',
+                8.0,
+                6.0,
               ],
               circleColorExpression: <Object>[
-                'match', <Object>['get', 'poi_type'],
-                'Cami', '#10B981', 'Saray', '#F59E0B', 'Müze', '#3B82F6',
-                'Tarihi Yapı', '#6B7280', 'Meydan', '#F43F5E',
-                'Hamam', '#06B6D4', 'Çarşı & Pazar', '#8B5CF6',
-                'Çarşı', '#8B5CF6', 'Park & Bahçe', '#84CC16',
-                'Semt & Cadde', '#F97316', 'Kule & Tepe', '#EF4444',
-                'Sinagog & Kilise', '#A855F7', 'Eğitim Binası', '#3B82F6',
-                'Araştırma Merkezi', '#F59E0B', 'Spor Tesisleri', '#10B981',
-                'Yeme & İçme', '#F43F5E', '#E0E0E0',
+                'match',
+                <Object>['get', 'poi_type'],
+                'Cami',
+                '#10B981',
+                'Saray',
+                '#F59E0B',
+                'Müze',
+                '#3B82F6',
+                'Tarihi Yapı',
+                '#6B7280',
+                'Meydan',
+                '#F43F5E',
+                'Hamam',
+                '#06B6D4',
+                'Çarşı & Pazar',
+                '#8B5CF6',
+                'Çarşı',
+                '#8B5CF6',
+                'Park & Bahçe',
+                '#84CC16',
+                'Semt & Cadde',
+                '#F97316',
+                'Kule & Tepe',
+                '#EF4444',
+                'Sinagog & Kilise',
+                '#A855F7',
+                'Eğitim Binası',
+                '#3B82F6',
+                'Araştırma Merkezi',
+                '#F59E0B',
+                'Spor Tesisleri',
+                '#10B981',
+                'Yeme & İçme',
+                '#F43F5E',
+                '#E0E0E0',
               ],
               circleStrokeWidth: 1.5,
               circleStrokeColor: const Color(0xFFFFFFFF).toARGB32(),
               circleOpacityExpression: <Object>[
                 'case',
-                <Object>['==', <Object>['get', 'visited'], true],
-                0.4, 0.92,
+                <Object>[
+                  '==',
+                  <Object>['get', 'visited'],
+                  true,
+                ],
+                0.4,
+                0.92,
               ],
             ),
           );
@@ -1431,8 +1560,13 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
               textHaloWidth: 1.5,
               textOpacityExpression: <Object>[
                 'case',
-                <Object>['==', <Object>['get', 'visited'], true],
-                0.5, 1.0,
+                <Object>[
+                  '==',
+                  <Object>['get', 'visited'],
+                  true,
+                ],
+                0.5,
+                1.0,
               ],
               textOffset: <double>[0, 1.6],
               textMaxWidth: 10.0,
@@ -1950,6 +2084,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
           cameraCenter: cameraCenter,
           zoom: zoom,
         ),
+        totalPois: _totalPoiCount,
       );
     } catch (_) {
       // Persisting map state is best-effort.
@@ -2024,340 +2159,359 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
         if (didPop) return;
         final confirm = await showDialog<bool>(
           context: context,
-          builder: (ctx) => AlertDialog(
-            backgroundColor: AppColors.bgBottom,
-            title: const Text(
-              'Odadan Ayrıl',
-              style: TextStyle(color: AppColors.textMain),
-            ),
-            content: const Text(
-              'Odadan ayrılmak istediğinize emin misiniz?',
-              style: TextStyle(color: AppColors.textMuted),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text(
-                  'İptal',
+          builder:
+              (ctx) => AlertDialog(
+                backgroundColor: AppColors.bgBottom,
+                title: const Text(
+                  'Odadan Ayrıl',
+                  style: TextStyle(color: AppColors.textMain),
+                ),
+                content: const Text(
+                  'Odadan ayrılmak istediğinize emin misiniz?',
                   style: TextStyle(color: AppColors.textMuted),
                 ),
+                actions: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, false),
+                    child: const Text(
+                      'İptal',
+                      style: TextStyle(color: AppColors.textMuted),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx, true),
+                    child: const Text(
+                      'Ayrıl',
+                      style: TextStyle(color: AppColors.primary),
+                    ),
+                  ),
+                ],
               ),
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text(
-                  'Ayrıl',
-                  style: TextStyle(color: AppColors.primary),
-                ),
-              ),
-            ],
-          ),
         );
         if (confirm == true && context.mounted) unawaited(_leaveRoom());
       },
       child: Scaffold(
-      backgroundColor: AppColors.bgBottom,
-      appBar: AppBar(
-        backgroundColor: AppColors.bgTop,
-        foregroundColor: AppColors.textMain,
-        title: Text(room?.roomName ?? 'Coklu Harita'),
-        actions: [
-          if (isHost)
+        backgroundColor: AppColors.bgBottom,
+        appBar: AppBar(
+          backgroundColor: AppColors.bgTop,
+          foregroundColor: AppColors.textMain,
+          title: Text(room?.roomName ?? 'Coklu Harita'),
+          actions: [
+            if (isHost)
+              IconButton(
+                tooltip: 'End room',
+                onPressed: _endRoom,
+                icon: const Icon(Icons.stop_circle_outlined),
+              ),
             IconButton(
-              tooltip: 'End room',
-              onPressed: _endRoom,
-              icon: const Icon(Icons.stop_circle_outlined),
+              tooltip: 'Leave room',
+              onPressed: _leaveRoom,
+              icon: const Icon(Icons.exit_to_app_rounded),
             ),
-          IconButton(
-            tooltip: 'Leave room',
-            onPressed: _leaveRoom,
-            icon: const Icon(Icons.exit_to_app_rounded),
-          ),
-        ],
-      ),
-      body: Stack(
-        children: [
-          AbsorbPointer(
-            absorbing: shouldLockExploration,
-            child: MapWidget(
-              key: ValueKey('multi-map-${widget.roomId}-${area.id}'),
-              styleUri: area.styleUri,
-              cameraOptions: CameraOptions(
-                center: Point(coordinates: _lastInsidePosition ?? area.center),
-                zoom: _initialZoom,
-                bearing: 0,
-                pitch: 0,
+          ],
+        ),
+        body: Stack(
+          children: [
+            AbsorbPointer(
+              absorbing: shouldLockExploration,
+              child: MapWidget(
+                key: ValueKey('multi-map-${widget.roomId}-${area.id}'),
+                styleUri: area.styleUri,
+                cameraOptions: CameraOptions(
+                  center: Point(
+                    coordinates: _lastInsidePosition ?? area.center,
+                  ),
+                  zoom: _initialZoom,
+                  bearing: 0,
+                  pitch: 0,
+                ),
+                onMapCreated:
+                    (mapboxMap) => unawaited(_onMapCreated(mapboxMap)),
+                onTapListener: _handleMapTap,
+                onStyleLoadedListener: (_) => unawaited(_onStyleLoaded()),
+                onCameraChangeListener: _onCameraChanged,
               ),
-              onMapCreated: (mapboxMap) => unawaited(_onMapCreated(mapboxMap)),
-              onTapListener: _handleMapTap,
-              onStyleLoadedListener: (_) => unawaited(_onStyleLoaded()),
-              onCameraChangeListener: _onCameraChanged,
             ),
-          ),
-          if (shouldLockExploration)
-            Positioned.fill(
-              child: IgnorePointer(
+            if (shouldLockExploration)
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: Container(
+                    color: const Color(0x7A120A24),
+                    alignment: Alignment.center,
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: const Color(0xEE1A1030),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(
+                          color: AppColors.inputBorder.withValues(alpha: 0.6),
+                        ),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Text(
+                              'Keşif kilitli',
+                              style: TextStyle(
+                                color: AppColors.textMain,
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16,
+                              ),
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              waitingNames.isEmpty
+                                  ? 'Tüm oyuncular haritaya girene kadar bekleniyor.'
+                                  : 'Beklenen oyuncu: $waitingNames',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                color: AppColors.textMuted,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            // Category filter chips
+            if (_availableCategories.isNotEmpty)
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 12,
                 child: Container(
-                  color: const Color(0x7A120A24),
-                  alignment: Alignment.center,
-                  padding: const EdgeInsets.symmetric(horizontal: 24),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: const Color(0xEE1A1030),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: AppColors.inputBorder.withValues(alpha: 0.6),
-                      ),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 14,
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Text(
-                            'Keşif kilitli',
-                            style: TextStyle(
-                              color: AppColors.textMain,
-                              fontWeight: FontWeight.w800,
-                              fontSize: 16,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            waitingNames.isEmpty
-                                ? 'Tüm oyuncular haritaya girene kadar bekleniyor.'
-                                : 'Beklenen oyuncu: $waitingNames',
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: AppColors.textMuted,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ],
-                      ),
+                  margin: const EdgeInsets.symmetric(horizontal: 10),
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xCC12091F),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: AppColors.inputBorder.withValues(alpha: 0.35),
                     ),
                   ),
-                ),
-              ),
-            ),
-          // Category filter chips
-          if (_availableCategories.isNotEmpty)
-            Positioned(
-              left: 0,
-              right: 0,
-              top: 12,
-              child: Container(
-                margin: const EdgeInsets.symmetric(horizontal: 10),
-                padding: const EdgeInsets.symmetric(vertical: 6),
-                decoration: BoxDecoration(
-                  color: const Color(0xCC12091F),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(
-                    color: AppColors.inputBorder.withValues(alpha: 0.35),
-                  ),
-                ),
-                child: SizedBox(
-                  height: 36,
-                  child: ListView(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    children: [
-                      _MultiCategoryChip(
-                        label: 'Tümü',
-                        isActive: _activeCategories.length ==
-                            _availableCategories.length,
-                        onTap: _toggleAllCategories,
-                        showAllIcon: true,
-                      ),
-                      const SizedBox(width: 6),
-                      for (final cat in _availableCategories) ...[
+                  child: SizedBox(
+                    height: 36,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      children: [
                         _MultiCategoryChip(
-                          label: cat,
-                          isActive: _activeCategories.contains(cat),
-                          onTap: () => _toggleCategory(cat),
-                          categoryColor: _coopCategoryColorMap[cat],
+                          label: 'Tümü',
+                          isActive:
+                              _activeCategories.length ==
+                              _availableCategories.length,
+                          onTap: _toggleAllCategories,
+                          showAllIcon: true,
                         ),
                         const SizedBox(width: 6),
+                        for (final cat in _availableCategories) ...[
+                          _MultiCategoryChip(
+                            label: cat,
+                            isActive: _activeCategories.contains(cat),
+                            onTap: () => _toggleCategory(cat),
+                            categoryColor: _coopCategoryColorMap[cat],
+                          ),
+                          const SizedBox(width: 6),
+                        ],
                       ],
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          Positioned(
-            left: 12,
-            right: 12,
-            bottom: 14,
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: const Color(0xD9190D2A),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(
-                  color: AppColors.inputBorder.withValues(alpha: 0.45),
-                ),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                child: Text(
-                  'Gezilen: ${_visitedPoiIds.length} / $_totalPoiCount',
-                  style: const TextStyle(
-                    color: AppColors.textMain,
-                    fontWeight: FontWeight.w600,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
-            ),
-          ),
-        // Debug-only simulation overlay — stripped from release builds.
-
-        // Zoom controls (matching solo mode).
-        Positioned(
-          right: 18,
-          bottom: 94,
-          child: _CoopZoomControls(
-            canZoomIn: _latestCameraState != null &&
-                _latestCameraState!.zoom < _maxZoom - 0.02,
-            canZoomOut: _latestCameraState != null &&
-                _latestCameraState!.zoom > _minZoom + 0.02,
-            onZoomIn: () async {
-              final map = _mapboxMap;
-              if (map == null) return;
-              final state = await map.getCameraState();
-              await map.setCamera(
-                CameraOptions(zoom: (state.zoom + 0.8).clamp(_minZoom, _maxZoom)),
-              );
-            },
-            onZoomOut: () async {
-              final map = _mapboxMap;
-              if (map == null) return;
-              final state = await map.getCameraState();
-              await map.setCamera(
-                CameraOptions(zoom: (state.zoom - 0.8).clamp(_minZoom, _maxZoom)),
-              );
-            },
-          ),
-        ),
-
-        // Co-op XP popup: shown when a teammate's check-in awards XP to us.
-        if (_coopXpGain != null)
-          Positioned(
-            bottom: 80,
-            left: 0,
-            right: 0,
-            child: Center(
-              child: XPPopup(
-                key: ValueKey(_coopXpGain),
-                xpAmount: _coopXpGain!,
-                onComplete: () {},
-              ),
-            ),
-          ),
-
-        // ── Yer Öner button (shown when NOT in suggest mode) ────
-        if (!_isSuggestMode)
-          Positioned(
-            left: 16,
-            bottom: 94,
-            child: SuggestPlaceButton(
-              onTap: () => setState(() {
-                _isSuggestMode = true;
-                _suggestPin = null;
-                _suggestScreenX = null;
-                _suggestScreenY = null;
-              }),
-            ),
-          ),
-
-        // ── Suggest mode overlay ──────────────────────────────
-        if (_isSuggestMode) ...[
-          Positioned(
-            top: (_availableCategories.isNotEmpty) ? 64 : 14,
-            left: 14,
-            right: 14,
-            child: _CoopSuggestTooltipCard(),
-          ),
-          // Animated pin at the tapped screen position
-          if (_suggestScreenX != null && _suggestScreenY != null)
-            Positioned(
-              left: _suggestScreenX! - 28,
-              top: _suggestScreenY! - 56,
-              child: AnimatedMapPin(key: _pinKey),
-            ),
-          Positioned(
-            top: 8,
-            right: 8,
-            child: SafeArea(
-              child: Material(
-                color: const Color(0xCC12091F),
-                shape: const CircleBorder(),
-                child: InkWell(
-                  customBorder: const CircleBorder(),
-                  onTap: () => setState(() {
-                    _isSuggestMode = false;
-                    _suggestPin = null;
-                    _suggestScreenX = null;
-                    _suggestScreenY = null;
-                  }),
-                  child: const Padding(
-                    padding: EdgeInsets.all(10),
-                    child: Icon(
-                      Icons.close_rounded,
-                      color: AppColors.textMain,
-                      size: 22,
                     ),
                   ),
                 ),
               ),
+            Positioned(
+              left: 12,
+              right: 12,
+              bottom: 14,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: const Color(0xD9190D2A),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: AppColors.inputBorder.withValues(alpha: 0.45),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  child: Text(
+                    'Gezilen: ${_visitedPoiIds.length} / $_totalPoiCount',
+                    style: const TextStyle(
+                      color: AppColors.textMain,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              ),
             ),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: _CoopSuggestBottomBar(
-              pinSelected: _suggestPin != null,
-              onCancel: () => setState(() {
-                _isSuggestMode = false;
-                _suggestPin = null;
-                _suggestScreenX = null;
-                _suggestScreenY = null;
-              }),
-              onConfirm: () {
-                final pin = _suggestPin;
-                if (pin == null) return;
-                final lat = pin.lat.toDouble();
-                final lng = pin.lng.toDouble();
-                final areaId = _roomArea?.id ?? _room?.cityId ?? '';
-                setState(() {
-                  _isSuggestMode = false;
-                  _suggestScreenX = null;
-                  _suggestScreenY = null;
-                });
-                showModalBottomSheet<bool>(
-                  context: context,
-                  backgroundColor: Colors.transparent,
-                  isScrollControlled: true,
-                  builder: (_) => PlaceSuggestionFormSheet(
-                    latitude: lat,
-                    longitude: lng,
-                    mapAreaId: areaId,
-                    onChangeLocation: () => setState(() {
-                      _isSuggestMode = true;
-                      _suggestPin = null;
+            // Debug-only simulation overlay — stripped from release builds.
+
+            // Zoom controls (matching solo mode).
+            Positioned(
+              right: 18,
+              bottom: 94,
+              child: _CoopZoomControls(
+                canZoomIn:
+                    _latestCameraState != null &&
+                    _latestCameraState!.zoom < _maxZoom - 0.02,
+                canZoomOut:
+                    _latestCameraState != null &&
+                    _latestCameraState!.zoom > _minZoom + 0.02,
+                onZoomIn: () async {
+                  final map = _mapboxMap;
+                  if (map == null) return;
+                  final state = await map.getCameraState();
+                  await map.setCamera(
+                    CameraOptions(
+                      zoom: (state.zoom + 0.8).clamp(_minZoom, _maxZoom),
+                    ),
+                  );
+                },
+                onZoomOut: () async {
+                  final map = _mapboxMap;
+                  if (map == null) return;
+                  final state = await map.getCameraState();
+                  await map.setCamera(
+                    CameraOptions(
+                      zoom: (state.zoom - 0.8).clamp(_minZoom, _maxZoom),
+                    ),
+                  );
+                },
+              ),
+            ),
+
+            // Co-op XP popup: shown when a teammate's check-in awards XP to us.
+            if (_coopXpGain != null)
+              Positioned(
+                bottom: 80,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: XPPopup(
+                    key: ValueKey(_coopXpGain),
+                    xpAmount: _coopXpGain!,
+                    onComplete: () {},
+                  ),
+                ),
+              ),
+
+            // ── Yer Öner button (shown when NOT in suggest mode) ────
+            if (!_isSuggestMode)
+              Positioned(
+                left: 16,
+                bottom: 94,
+                child: SuggestPlaceButton(
+                  onTap:
+                      () => setState(() {
+                        _isSuggestMode = true;
+                        _suggestPin = null;
+                        _suggestScreenX = null;
+                        _suggestScreenY = null;
+                      }),
+                ),
+              ),
+
+            // ── Suggest mode overlay ──────────────────────────────
+            if (_isSuggestMode) ...[
+              Positioned(
+                top: (_availableCategories.isNotEmpty) ? 64 : 14,
+                left: 14,
+                right: 14,
+                child: _CoopSuggestTooltipCard(),
+              ),
+              // Animated pin at the tapped screen position
+              if (_suggestScreenX != null && _suggestScreenY != null)
+                Positioned(
+                  left: _suggestScreenX! - 28,
+                  top: _suggestScreenY! - 56,
+                  child: AnimatedMapPin(key: _pinKey),
+                ),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: SafeArea(
+                  child: Material(
+                    color: const Color(0xCC12091F),
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      customBorder: const CircleBorder(),
+                      onTap:
+                          () => setState(() {
+                            _isSuggestMode = false;
+                            _suggestPin = null;
+                            _suggestScreenX = null;
+                            _suggestScreenY = null;
+                          }),
+                      child: const Padding(
+                        padding: EdgeInsets.all(10),
+                        child: Icon(
+                          Icons.close_rounded,
+                          color: AppColors.textMain,
+                          size: 22,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: _CoopSuggestBottomBar(
+                  pinSelected: _suggestPin != null,
+                  onCancel:
+                      () => setState(() {
+                        _isSuggestMode = false;
+                        _suggestPin = null;
+                        _suggestScreenX = null;
+                        _suggestScreenY = null;
+                      }),
+                  onConfirm: () {
+                    final pin = _suggestPin;
+                    if (pin == null) return;
+                    final lat = pin.lat.toDouble();
+                    final lng = pin.lng.toDouble();
+                    final areaId = _roomArea?.id ?? _room?.cityId ?? '';
+                    setState(() {
+                      _isSuggestMode = false;
                       _suggestScreenX = null;
                       _suggestScreenY = null;
-                    }),
-                  ),
-                );
-              },
-            ),
-          ),
-        ],
-        ],
-      ),
+                    });
+                    showModalBottomSheet<bool>(
+                      context: context,
+                      backgroundColor: Colors.transparent,
+                      isScrollControlled: true,
+                      builder:
+                          (_) => PlaceSuggestionFormSheet(
+                            latitude: lat,
+                            longitude: lng,
+                            mapAreaId: areaId,
+                            onChangeLocation:
+                                () => setState(() {
+                                  _isSuggestMode = true;
+                                  _suggestPin = null;
+                                  _suggestScreenX = null;
+                                  _suggestScreenY = null;
+                                }),
+                          ),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -2408,9 +2562,10 @@ class _CoopZoomControls extends StatelessWidget {
               icon: Icon(
                 Icons.add_rounded,
                 size: 26,
-                color: canZoomIn
-                    ? AppColors.textMain
-                    : AppColors.textMuted.withValues(alpha: 0.5),
+                color:
+                    canZoomIn
+                        ? AppColors.textMain
+                        : AppColors.textMuted.withValues(alpha: 0.5),
               ),
             ),
             Container(
@@ -2424,9 +2579,10 @@ class _CoopZoomControls extends StatelessWidget {
               icon: Icon(
                 Icons.remove_rounded,
                 size: 26,
-                color: canZoomOut
-                    ? AppColors.textMain
-                    : AppColors.textMuted.withValues(alpha: 0.5),
+                color:
+                    canZoomOut
+                        ? AppColors.textMain
+                        : AppColors.textMuted.withValues(alpha: 0.5),
               ),
             ),
           ],
@@ -2445,7 +2601,6 @@ class _MultiCategoryChip extends StatelessWidget {
     this.showAllIcon = false,
   });
 
-
   final String label;
   final bool isActive;
   final VoidCallback onTap;
@@ -2462,12 +2617,14 @@ class _MultiCategoryChip extends StatelessWidget {
         curve: Curves.easeOut,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
-          color: isActive ? dotColor.withValues(alpha: 0.18) : Colors.transparent,
+          color:
+              isActive ? dotColor.withValues(alpha: 0.18) : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isActive
-                ? dotColor.withValues(alpha: 0.7)
-                : AppColors.textMuted.withValues(alpha: 0.3),
+            color:
+                isActive
+                    ? dotColor.withValues(alpha: 0.7)
+                    : AppColors.textMuted.withValues(alpha: 0.3),
             width: isActive ? 1.4 : 0.8,
           ),
         ),
@@ -2475,9 +2632,11 @@ class _MultiCategoryChip extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (showAllIcon)
-              Icon(Icons.grid_view_rounded,
-                  size: 14,
-                  color: isActive ? AppColors.primary : AppColors.textMuted)
+              Icon(
+                Icons.grid_view_rounded,
+                size: 14,
+                color: isActive ? AppColors.primary : AppColors.textMuted,
+              )
             else
               Container(
                 width: 10,
@@ -2491,9 +2650,10 @@ class _MultiCategoryChip extends StatelessWidget {
             Text(
               label,
               style: TextStyle(
-                color: isActive
-                    ? AppColors.textMain
-                    : AppColors.textMuted.withValues(alpha: 0.7),
+                color:
+                    isActive
+                        ? AppColors.textMain
+                        : AppColors.textMuted.withValues(alpha: 0.7),
                 fontSize: 12,
                 fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
               ),
@@ -2516,9 +2676,21 @@ class _ProximityRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (icon, color, label) = switch (status) {
-      _ProximityStatus.inRange => (Icons.check_circle_rounded, const Color(0xFF10B981), 'Yakın'),
-      _ProximityStatus.outOfRange => (Icons.location_off_rounded, Colors.orange, 'Uzakta'),
-      _ProximityStatus.unknown => (Icons.help_outline_rounded, AppColors.textMuted, 'Konum yok'),
+      _ProximityStatus.inRange => (
+        Icons.check_circle_rounded,
+        const Color(0xFF10B981),
+        'Yakın',
+      ),
+      _ProximityStatus.outOfRange => (
+        Icons.location_off_rounded,
+        Colors.orange,
+        'Uzakta',
+      ),
+      _ProximityStatus.unknown => (
+        Icons.help_outline_rounded,
+        AppColors.textMuted,
+        'Konum yok',
+      ),
     };
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
@@ -2533,7 +2705,14 @@ class _ProximityRow extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          Text(label, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w600)),
+          Text(
+            label,
+            style: TextStyle(
+              color: color,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );
@@ -2558,14 +2737,19 @@ class _SummaryRow extends StatelessWidget {
         children: [
           Icon(icon, size: 18, color: AppColors.primary),
           const SizedBox(width: 10),
-          Text(label,
-              style: const TextStyle(color: AppColors.textMuted, fontSize: 14)),
+          Text(
+            label,
+            style: const TextStyle(color: AppColors.textMuted, fontSize: 14),
+          ),
           const Spacer(),
-          Text(value,
-              style: const TextStyle(
-                  color: AppColors.textMain,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700)),
+          Text(
+            value,
+            style: const TextStyle(
+              color: AppColors.textMain,
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
         ],
       ),
     );
@@ -2601,9 +2785,7 @@ class _CoopSuggestTooltipCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xF0130826),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: AppColors.inputBorder.withValues(alpha: 0.5),
-        ),
+        border: Border.all(color: AppColors.inputBorder.withValues(alpha: 0.5)),
         boxShadow: const [
           BoxShadow(
             color: Color(0x66000000),
@@ -2723,16 +2905,18 @@ class _CoopSuggestBottomBar extends StatelessWidget {
               flex: 2,
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  gradient: pinSelected
-                      ? const LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [AppColors.primary, AppColors.secondary],
-                        )
-                      : null,
-                  color: pinSelected
-                      ? null
-                      : AppColors.textMuted.withValues(alpha: 0.15),
+                  gradient:
+                      pinSelected
+                          ? const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [AppColors.primary, AppColors.secondary],
+                          )
+                          : null,
+                  color:
+                      pinSelected
+                          ? null
+                          : AppColors.textMuted.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: ElevatedButton(
@@ -2764,4 +2948,3 @@ class _CoopSuggestBottomBar extends StatelessWidget {
     );
   }
 }
-

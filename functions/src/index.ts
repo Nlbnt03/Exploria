@@ -22,13 +22,670 @@ function deg2rad(deg: number) {
   return deg * (Math.PI / 180);
 }
 
+const MAX_ACTIVE_MAPS = 5;
+
+type MapBoundsPoint = {
+  lat: number;
+  lng: number;
+};
+
+type CheckInResult = {
+  status: "success" | "speed_error";
+  alreadyVisited?: boolean;
+  xpEligible?: boolean;
+  mapCompleted?: boolean;
+};
+
+function assertString(value: unknown, field: string, maxLength: number): string {
+  if (typeof value !== "string") {
+    throw new functions.https.HttpsError("invalid-argument", `${field} metin olmalı.`);
+  }
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > maxLength) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      `${field} boş olamaz ve ${maxLength} karakteri geçemez.`
+    );
+  }
+  return trimmed;
+}
+
+function validateBoundsGeometry(raw: unknown): MapBoundsPoint[] {
+  if (!Array.isArray(raw) || raw.length < 3 || raw.length > 200) {
+    throw new functions.https.HttpsError(
+      "invalid-argument",
+      "bounds en az 3 koordinattan oluşmalı."
+    );
+  }
+
+  const points = raw.map((item) => {
+    if (!item || typeof item !== "object") {
+      throw new functions.https.HttpsError("invalid-argument", "bounds koordinatları geçersiz.");
+    }
+    const record = item as Record<string, unknown>;
+    const lat = record.lat;
+    const lng = record.lng;
+    if (typeof lat !== "number" || typeof lng !== "number") {
+      throw new functions.https.HttpsError("invalid-argument", "bounds lat/lng sayısal olmalı.");
+    }
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+      throw new functions.https.HttpsError("invalid-argument", "bounds koordinat aralığı geçersiz.");
+    }
+    return { lat, lng };
+  });
+
+  const unique = new Set(points.map((point) => `${point.lat.toFixed(7)},${point.lng.toFixed(7)}`));
+  if (unique.size < 3) {
+    throw new functions.https.HttpsError("invalid-argument", "bounds en az 3 farklı nokta içermeli.");
+  }
+
+  return points;
+}
+
+function parseTotalPois(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < 0 || raw > 10000) {
+    throw new functions.https.HttpsError("invalid-argument", "totalPois geçerli bir tam sayı olmalı.");
+  }
+  return raw;
+}
+
+function parseOptionalInt(raw: unknown, field: string, min: number, max: number): number {
+  if (raw === undefined || raw === null) return 0;
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw < min || raw > max) {
+    throw new functions.https.HttpsError("invalid-argument", `${field} geçerli bir tam sayı olmalı.`);
+  }
+  return raw;
+}
+
+function parseCoordinate(raw: unknown, field: string, min: number, max: number): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < min || raw > max) {
+    throw new functions.https.HttpsError("invalid-argument", `${field} koordinatı geçersiz.`);
+  }
+  return raw;
+}
+
+function parseNumber(raw: unknown, field: string, min: number, max: number): number {
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < min || raw > max) {
+    throw new functions.https.HttpsError("invalid-argument", `${field} değeri geçersiz.`);
+  }
+  return raw;
+}
+
+function parseStringArray(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((value): value is string => typeof value === "string")
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+}
+
+function parseProgress(raw: unknown): { totalPois: number; visitedPois: number; earnedXp: number } {
+  if (!raw || typeof raw !== "object") {
+    return { totalPois: 0, visitedPois: 0, earnedXp: 0 };
+  }
+  const progress = raw as Record<string, unknown>;
+  const totalPois = typeof progress.totalPois === "number" ? Math.max(0, Math.floor(progress.totalPois)) : 0;
+  const visitedPois = typeof progress.visitedPois === "number" ? Math.max(0, Math.floor(progress.visitedPois)) : 0;
+  const earnedXp = typeof progress.earnedXp === "number" ? Math.max(0, Math.floor(progress.earnedXp)) : 0;
+  return { totalPois, visitedPois, earnedXp };
+}
+
+function isActivePoi(data: FirebaseFirestore.DocumentData | undefined): boolean {
+  if (!data) return false;
+  const raw = data.isActive;
+  if (typeof raw === "boolean") return raw;
+  if (typeof raw === "number") return raw === 1;
+  if (typeof raw === "string") return raw.toLowerCase() === "true";
+  return true;
+}
+
+function mapStateRef(uid: string, mapId: string) {
+  return admin.firestore()
+    .collection("userMapStates")
+    .doc(uid)
+    .collection("states")
+    .doc(mapId);
+}
+
+function pairKey(uidA: string, uidB: string): string {
+  return [uidA, uidB].sort().join("_");
+}
+
+async function deleteVenueCheckInsForMap(
+  db: FirebaseFirestore.Firestore,
+  uid: string,
+  mapId: string
+): Promise<number> {
+  const prefix = `${uid}_${mapId}_`;
+  let deleted = 0;
+
+  while (true) {
+    const snapshot = await db.collection("venue_checkins")
+      .orderBy(admin.firestore.FieldPath.documentId())
+      .startAt(prefix)
+      .endAt(`${prefix}\uf8ff`)
+      .limit(450)
+      .get();
+
+    if (snapshot.empty) break;
+
+    const batch = db.batch();
+    for (const doc of snapshot.docs) {
+      batch.delete(doc.ref);
+    }
+    await batch.commit();
+    deleted += snapshot.size;
+
+    if (snapshot.size < 450) break;
+  }
+
+  return deleted;
+}
+
+export const sendFriendRequest = functions.https.onCall(async (request) => {
+  if (!request.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Oturum yok.");
+  }
+
+  const fromUid = request.auth.uid;
+  const data = request.data as Record<string, unknown>;
+  const toUid = assertString(data.toUid, "toUid", 160);
+  if (fromUid === toUid) {
+    throw new functions.https.HttpsError("invalid-argument", "Kendine arkadaşlık isteği gönderemezsin.");
+  }
+
+  const db = admin.firestore();
+  const fromUserRef = db.collection("users").doc(fromUid);
+  const toUserRef = db.collection("users").doc(toUid);
+  const requestRef = db.collection("friendRequests").doc(`${fromUid}_${toUid}`);
+  const reverseRef = db.collection("friendRequests").doc(`${toUid}_${fromUid}`);
+  const fromFriendRef = fromUserRef.collection("friends").doc(toUid);
+  const toFriendRef = toUserRef.collection("friends").doc(fromUid);
+  const fromBlockedToRef = fromUserRef.collection("blockedUsers").doc(toUid);
+  const toBlockedFromRef = toUserRef.collection("blockedUsers").doc(fromUid);
+
+  await db.runTransaction(async (transaction) => {
+    const [
+      fromUser,
+      toUser,
+      requestSnap,
+      reverseSnap,
+      fromFriend,
+      toFriend,
+      fromBlockedTo,
+      toBlockedFrom,
+    ] = await Promise.all([
+      transaction.get(fromUserRef),
+      transaction.get(toUserRef),
+      transaction.get(requestRef),
+      transaction.get(reverseRef),
+      transaction.get(fromFriendRef),
+      transaction.get(toFriendRef),
+      transaction.get(fromBlockedToRef),
+      transaction.get(toBlockedFromRef),
+    ]);
+
+    if (!fromUser.exists || !toUser.exists) {
+      throw new functions.https.HttpsError("not-found", "Kullanıcı bulunamadı.");
+    }
+    if (fromFriend.exists || toFriend.exists) {
+      throw new functions.https.HttpsError("already-exists", "Bu kullanıcı zaten arkadaş listende.");
+    }
+    if (fromBlockedTo.exists || toBlockedFrom.exists) {
+      throw new functions.https.HttpsError("failed-precondition", "Bu kullanıcıya arkadaşlık isteği gönderilemez.");
+    }
+
+    const requestStatus = requestSnap.data()?.status as string | undefined;
+    if (requestStatus === "pending") {
+      throw new functions.https.HttpsError("already-exists", "Bu kullanıcıya zaten istek gönderdin.");
+    }
+
+    const reverseStatus = reverseSnap.data()?.status as string | undefined;
+    if (reverseStatus === "pending") {
+      throw new functions.https.HttpsError("already-exists", "Bu kullanıcıdan bekleyen bir istek var.");
+    }
+
+    const fromData = fromUser.data() ?? {};
+    const toData = toUser.data() ?? {};
+    transaction.set(requestRef, {
+      fromUid,
+      toUid,
+      fromUsername: (fromData.username as string | undefined) ?? "",
+      toUsername: (toData.username as string | undefined) ?? "",
+      pairKey: pairKey(fromUid, toUid),
+      status: "pending",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  });
+
+  return { status: "pending" };
+});
+
+export const blockUser = functions.https.onCall(async (request) => {
+  if (!request.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Oturum yok.");
+  }
+
+  const currentUid = request.auth.uid;
+  const data = request.data as Record<string, unknown>;
+  const blockedUid = assertString(data.blockedUid, "blockedUid", 160);
+  if (currentUid === blockedUid) {
+    throw new functions.https.HttpsError("invalid-argument", "Kendini engelleyemezsin.");
+  }
+
+  const db = admin.firestore();
+  const currentUserRef = db.collection("users").doc(currentUid);
+  const blockedUserRef = db.collection("users").doc(blockedUid);
+  const myFriendRef = currentUserRef.collection("friends").doc(blockedUid);
+  const blockedSideRef = blockedUserRef.collection("friends").doc(currentUid);
+  const myBlockRef = currentUserRef.collection("blockedUsers").doc(blockedUid);
+  const requestRefA = db.collection("friendRequests").doc(`${currentUid}_${blockedUid}`);
+  const requestRefB = db.collection("friendRequests").doc(`${blockedUid}_${currentUid}`);
+
+  await db.runTransaction(async (transaction) => {
+    const [
+      currentUserSnap,
+      blockedUserSnap,
+      myFriendSnap,
+      blockedSideSnap,
+      requestSnapA,
+      requestSnapB,
+    ] = await Promise.all([
+      transaction.get(currentUserRef),
+      transaction.get(blockedUserRef),
+      transaction.get(myFriendRef),
+      transaction.get(blockedSideRef),
+      transaction.get(requestRefA),
+      transaction.get(requestRefB),
+    ]);
+
+    if (!currentUserSnap.exists || !blockedUserSnap.exists) {
+      throw new functions.https.HttpsError("not-found", "Kullanıcı bulunamadı.");
+    }
+
+    const blockedUserData = blockedUserSnap.data() ?? {};
+    transaction.set(myBlockRef, {
+      blockedUid,
+      username: (blockedUserData.username as string | undefined) ?? "",
+      name: (blockedUserData.name as string | undefined) ?? "",
+      surname: (blockedUserData.surname as string | undefined) ?? "",
+      photoUrl: (blockedUserData.photoUrl as string | undefined) ?? "",
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    if (myFriendSnap.exists) transaction.delete(myFriendRef);
+    if (blockedSideSnap.exists) transaction.delete(blockedSideRef);
+
+    const currentCount = (currentUserSnap.data()?.friendsCount as number | undefined) ?? 0;
+    const blockedCount = (blockedUserData.friendsCount as number | undefined) ?? 0;
+    transaction.set(currentUserRef, {
+      friends: admin.firestore.FieldValue.arrayRemove(blockedUid),
+      friendsCount: myFriendSnap.exists && currentCount > 0 ? currentCount - 1 : currentCount,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    transaction.set(blockedUserRef, {
+      friends: admin.firestore.FieldValue.arrayRemove(currentUid),
+      friendsCount: blockedSideSnap.exists && blockedCount > 0 ? blockedCount - 1 : blockedCount,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+
+    for (const requestSnap of [requestSnapA, requestSnapB]) {
+      const status = requestSnap.data()?.status as string | undefined;
+      if (requestSnap.exists && (status === "pending" || status === "accepted")) {
+        transaction.set(requestSnap.ref, {
+          status: "cancelled",
+          updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+      }
+    }
+  });
+
+  return { status: "blocked" };
+});
+
+export const unblockUser = functions.https.onCall(async (request) => {
+  if (!request.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Oturum yok.");
+  }
+
+  const currentUid = request.auth.uid;
+  const data = request.data as Record<string, unknown>;
+  const blockedUid = assertString(data.blockedUid, "blockedUid", 160);
+  if (currentUid === blockedUid) {
+    throw new functions.https.HttpsError("invalid-argument", "Kendin için engel kaydı kaldıramazsın.");
+  }
+
+  await admin.firestore()
+    .collection("users")
+    .doc(currentUid)
+    .collection("blockedUsers")
+    .doc(blockedUid)
+    .delete();
+
+  return { status: "unblocked" };
+});
+
+export const createMap = functions.https.onCall(async (request) => {
+  if (!request.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Oturum yok.");
+  }
+
+  const uid = request.auth.uid;
+  const data = request.data as Record<string, unknown>;
+  const title = assertString(data.title, "title", 60);
+  const areaId = assertString(data.areaId, "areaId", 120);
+  const bounds = validateBoundsGeometry(data.bounds);
+  const totalPois = parseTotalPois(data.totalPois);
+
+  const db = admin.firestore();
+  const userRef = db.collection("users").doc(uid);
+  const parentRef = db.collection("userMapStates").doc(uid);
+  const mapRef = parentRef.collection("states").doc();
+
+  await db.runTransaction(async (transaction) => {
+    const userSnap = await transaction.get(userRef);
+    const activeMapCount = (userSnap.data()?.activeMapCount as number | undefined) ?? 0;
+
+    if (activeMapCount >= MAX_ACTIVE_MAPS) {
+      throw new functions.https.HttpsError(
+        "resource-exhausted",
+        "5/5 aktif harita — bir haritayı bitir veya sil."
+      );
+    }
+
+    const now = admin.firestore.FieldValue.serverTimestamp();
+
+    transaction.set(parentRef, {
+      lastOpenedMapId: mapRef.id,
+      lastOpenedAt: now,
+      updatedAt: now,
+    }, { merge: true });
+
+    transaction.set(mapRef, {
+      ownerUid: uid,
+      areaId,
+      mapName: title,
+      bounds,
+      status: "active",
+      progress: {
+        totalPois,
+        visitedPois: 0,
+        percent: 0,
+        earnedXp: 0,
+      },
+      revealedCellIds: [],
+      visitedPoiIds: [],
+      lastInsidePosition: null,
+      cameraCenter: null,
+      zoom: null,
+      completedAt: null,
+      completionCountApplied: false,
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    transaction.set(userRef, {
+      activeMapCount: admin.firestore.FieldValue.increment(1),
+      updatedAt: now,
+    }, { merge: true });
+  });
+
+  return { mapId: mapRef.id };
+});
+
+export const deleteMap = functions.https.onCall(async (request) => {
+  if (!request.auth) {
+    throw new functions.https.HttpsError("unauthenticated", "Oturum yok.");
+  }
+
+  const uid = request.auth.uid;
+  const data = request.data as Record<string, unknown>;
+  const mapId = assertString(data.mapId, "mapId", 160);
+
+  const db = admin.firestore();
+  const userRef = db.collection("users").doc(uid);
+  const parentRef = db.collection("userMapStates").doc(uid);
+  const ref = mapStateRef(uid, mapId);
+
+  await db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(ref);
+    const parentSnap = await transaction.get(parentRef);
+    if (!snap.exists) {
+      throw new functions.https.HttpsError("not-found", "Harita bulunamadı.");
+    }
+
+    const map = snap.data() ?? {};
+    const ownerUid = (map.ownerUid as string | undefined) ?? uid;
+    if (ownerUid !== uid) {
+      throw new functions.https.HttpsError("permission-denied", "Bu haritayı silme yetkin yok.");
+    }
+
+    const status = (map.status as string | undefined) ?? "active";
+    if (status === "active") {
+      transaction.set(userRef, {
+        activeMapCount: admin.firestore.FieldValue.increment(-1),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
+    if (parentSnap.data()?.lastOpenedMapId === mapId) {
+      transaction.set(parentRef, {
+        lastOpenedMapId: admin.firestore.FieldValue.delete(),
+        lastOpenedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+
+    transaction.delete(ref);
+  });
+
+  const deletedCheckIns = await deleteVenueCheckInsForMap(db, uid, mapId);
+
+  return { status: "deleted", deletedCheckIns };
+});
+
+export const onUserMapStateWritten = onDocumentWritten(
+  "userMapStates/{uid}/states/{mapId}",
+  async (event) => {
+    const before = event.data?.before.data() as { status?: string } | undefined;
+    const after = event.data?.after.data() as {
+      status?: string;
+      completedAt?: unknown;
+      completionCountApplied?: boolean;
+    } | undefined;
+    if (!before || !after) return;
+
+    const beforeStatus = before.status ?? "active";
+    const afterStatus = after.status ?? "active";
+    if (beforeStatus === "active" && afterStatus === "completed") {
+      if (after.completionCountApplied === true) return;
+      const db = admin.firestore();
+      const batch = db.batch();
+      batch.set(db.collection("users").doc(event.params.uid), {
+        activeMapCount: admin.firestore.FieldValue.increment(-1),
+        completedMapCount: admin.firestore.FieldValue.increment(1),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      batch.set(mapStateRef(event.params.uid, event.params.mapId), {
+        completedAt: after.completedAt ?? admin.firestore.FieldValue.serverTimestamp(),
+        completionCountApplied: true,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      await batch.commit();
+    } else if (beforeStatus === "completed" && afterStatus === "active") {
+      await admin.firestore().collection("users").doc(event.params.uid).set({
+        activeMapCount: admin.firestore.FieldValue.increment(1),
+        completedMapCount: admin.firestore.FieldValue.increment(-1),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+    }
+  }
+);
+
+export const reconcileActiveMapCounts = onSchedule(
+  { schedule: "0 4 * * *", timeZone: "Europe/Istanbul" },
+  async () => {
+    const db = admin.firestore();
+    const activeSnap = await db.collectionGroup("states")
+      .where("status", "==", "active")
+      .get();
+
+    const counts = new Map<string, number>();
+    for (const doc of activeSnap.docs) {
+      const parent = doc.ref.parent.parent;
+      if (!parent) continue;
+      const uid = parent.id;
+      counts.set(uid, (counts.get(uid) ?? 0) + 1);
+    }
+
+    const usersWithCounts = await db.collection("users")
+      .where("activeMapCount", ">", 0)
+      .get();
+    for (const userDoc of usersWithCounts.docs) {
+      if (!counts.has(userDoc.id)) counts.set(userDoc.id, 0);
+    }
+
+    let batch = db.batch();
+    let writes = 0;
+    for (const [uid, count] of counts.entries()) {
+      batch.set(db.collection("users").doc(uid), {
+        activeMapCount: count,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      }, { merge: true });
+      writes++;
+      if (writes % 450 === 0) {
+        await batch.commit();
+        batch = db.batch();
+      }
+    }
+    if (writes % 450 !== 0) {
+      await batch.commit();
+    }
+  }
+);
+
+async function reconcileAreaMapProgress(areaId: string): Promise<void> {
+  const db = admin.firestore();
+  const poiSnap = await db.collection("maps").doc(areaId).collection("pois").get();
+  const activePoiIds = new Set<string>();
+  let activePoiCount = 0;
+  for (const doc of poiSnap.docs) {
+    const data = doc.data();
+    if (!isActivePoi(data)) continue;
+    activePoiCount++;
+    activePoiIds.add(doc.id);
+    const dataId = data.id;
+    if (typeof dataId === "string" && dataId.trim()) {
+      activePoiIds.add(dataId.trim());
+    }
+  }
+
+  const totalPois = activePoiCount;
+  const stateSnap = await db.collectionGroup("states")
+    .where("areaId", "==", areaId)
+    .get();
+
+  let batch = db.batch();
+  let writes = 0;
+
+  const commitIfNeeded = async () => {
+    if (writes > 0 && writes % 400 === 0) {
+      await batch.commit();
+      batch = db.batch();
+    }
+  };
+
+  for (const doc of stateSnap.docs) {
+    const data = doc.data();
+    const uid = doc.ref.parent.parent?.id;
+    if (!uid) continue;
+
+    const beforeStatus = (data.status as string | undefined) ?? "active";
+    if (beforeStatus === "deleted") continue;
+
+    const visitedIds = parseStringArray(data.visitedPoiIds);
+    const progress = parseProgress(data.progress);
+    const visitedPois = activePoiIds.size > 0
+      ? visitedIds.filter((id) => activePoiIds.has(id)).length
+      : 0;
+    const visitedFallback = Math.min(progress.visitedPois, totalPois);
+    const normalizedVisited = visitedIds.length > 0 ? visitedPois : visitedFallback;
+    const percent = totalPois > 0 ? Math.round((normalizedVisited / totalPois) * 10000) / 100 : 0;
+    const nextStatus = totalPois > 0 && normalizedVisited >= totalPois ? "completed" : "active";
+    const now = admin.firestore.FieldValue.serverTimestamp();
+
+    const update: FirebaseFirestore.UpdateData<FirebaseFirestore.DocumentData> = {
+      progress: {
+        totalPois,
+        visitedPois: normalizedVisited,
+        percent,
+        earnedXp: progress.earnedXp,
+      },
+      status: nextStatus,
+      updatedAt: now,
+    };
+
+    if (beforeStatus === "active" && nextStatus === "completed") {
+      update.completedAt = data.completedAt ?? now;
+      update.completionCountApplied = true;
+      batch.set(db.collection("users").doc(uid), {
+        activeMapCount: admin.firestore.FieldValue.increment(-1),
+        completedMapCount: admin.firestore.FieldValue.increment(1),
+        updatedAt: now,
+      }, { merge: true });
+      writes++;
+    } else if (beforeStatus === "completed" && nextStatus === "active") {
+      update.completedAt = admin.firestore.FieldValue.delete();
+      update.completionCountApplied = false;
+      batch.set(db.collection("users").doc(uid), {
+        activeMapCount: admin.firestore.FieldValue.increment(1),
+        completedMapCount: admin.firestore.FieldValue.increment(-1),
+        updatedAt: now,
+      }, { merge: true });
+      writes++;
+    }
+
+    batch.set(doc.ref, update, { merge: true });
+    writes++;
+    await commitIfNeeded();
+  }
+
+  if (writes % 400 !== 0) {
+    await batch.commit();
+  }
+}
+
+export const onMapPoiWritten = onDocumentWritten(
+  "maps/{areaId}/pois/{poiId}",
+  async (event) => {
+    const beforeActive = event.data?.before.exists
+      ? isActivePoi(event.data.before.data())
+      : false;
+    const afterActive = event.data?.after.exists
+      ? isActivePoi(event.data.after.data())
+      : false;
+
+    if (beforeActive === afterActive) return;
+    await reconcileAreaMapProgress(event.params.areaId);
+  }
+);
+
 export const verifyAndCheckIn = functions.https.onCall(async (request) => {
   if (!request.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Token yok');
   }
 
   const userId = request.auth.uid;
-  const { venueId, mapId, userLat, userLng, accuracy, isMocked, distance } = request.data;
+  const data = request.data as Record<string, unknown>;
+  const venueId = assertString(data.venueId, "venueId", 180);
+  const mapId = assertString(data.mapId, "mapId", 180);
+  const userLat = parseCoordinate(data.userLat, "userLat", -90, 90);
+  const userLng = parseCoordinate(data.userLng, "userLng", -180, 180);
+  const accuracy = parseNumber(data.accuracy, "accuracy", 0, 10000);
+  const distance = parseNumber(data.distance, "distance", 0, 1000000);
+  const xpValue = parseOptionalInt(data.xpValue, "xpValue", 0, 10000);
+  const isMocked = data.isMocked === true;
   const db = admin.firestore();
 
   // 1. HIZ KONTROLÜ (Işınlanma/Teleport Tespiti)
@@ -55,40 +712,137 @@ export const verifyAndCheckIn = functions.https.onCall(async (request) => {
         const speedKmH = distanceKm / hoursPassed;
         if (speedKmH > limit30Kmh) {
           console.warn(`[Speed Error] User: ${userId}, Speed: ${speedKmH} km/h`);
-          return { status: 'speed_error' };
+          return {
+            status: 'speed_error',
+            xpEligible: false,
+            mapCompleted: false,
+          } satisfies CheckInResult;
         }
       }
     }
   }
 
-  // 2. HAFTALIK GÖREV İŞLEME DİĞER TARAFA ALINDI: BURADA SADECE DOĞRULAMA (SPOOF / SPEED) YAPILIYOR
+  // 2. Doğrulanan check-in'i, harita ilerlemesini ve completion sayaçlarını
+  // tek transaction'da yaz. XP hâlâ client quest akışında veriliyor; burada
+  // xpEligible=false dönerek tamamlanmış/tekrar check-in'lerde XP üretimi engellenir.
   try {
-    const compositeId = `${userId}_${venueId}`;
+    const compositeId = `${userId}_${mapId}_${venueId}`;
+    const legacyCompositeId = `${userId}_${venueId}`;
     const checkInRef = db.collection("venue_checkins").doc(compositeId);
+    const legacyCheckInRef = db.collection("venue_checkins").doc(legacyCompositeId);
+    const userRef = db.collection("users").doc(userId);
+    const stateRef = mapStateRef(userId, mapId);
+    let result: CheckInResult = {
+      status: "success",
+      alreadyVisited: false,
+      xpEligible: false,
+      mapCompleted: false,
+    };
 
-    // Idempotent constraint & Log saving
     await db.runTransaction(async (transaction) => {
-      const checkInDoc = await transaction.get(checkInRef);
-      if (checkInDoc.exists) {
+      const [checkInDoc, legacyCheckInDoc, mapDoc] = await Promise.all([
+        transaction.get(checkInRef),
+        legacyCompositeId === compositeId ? transaction.get(checkInRef) : transaction.get(legacyCheckInRef),
+        transaction.get(stateRef),
+      ]);
+
+      if (!mapDoc.exists) {
+        throw new functions.https.HttpsError("not-found", "Harita bulunamadı.");
+      }
+
+      const map = mapDoc.data() ?? {};
+      const ownerUid = (map.ownerUid as string | undefined) ?? userId;
+      if (ownerUid !== userId) {
+        throw new functions.https.HttpsError("permission-denied", "Bu haritaya check-in yetkin yok.");
+      }
+
+      const status = (map.status as string | undefined) ?? "active";
+      if (status === "deleted") {
+        throw new functions.https.HttpsError("failed-precondition", "Silinmiş haritada check-in yapılamaz.");
+      }
+      if (status === "completed") {
+        result = {
+          status: "success",
+          alreadyVisited: true,
+          xpEligible: false,
+          mapCompleted: false,
+        };
         return;
       }
+
+      const visitedIds = parseStringArray(map.visitedPoiIds);
+      const alreadyVisited = checkInDoc.exists || legacyCheckInDoc.exists || visitedIds.includes(venueId);
+      if (alreadyVisited) {
+        result = {
+          status: "success",
+          alreadyVisited: true,
+          xpEligible: false,
+          mapCompleted: false,
+        };
+        return;
+      }
+
+      const progress = parseProgress(map.progress);
+      const totalPois = progress.totalPois;
+      const visitedBefore = Math.max(progress.visitedPois, visitedIds.length);
+      const visitedAfter = totalPois > 0
+        ? Math.min(totalPois, visitedBefore + 1)
+        : visitedBefore + 1;
+      const percent = totalPois > 0 ? Math.round((visitedAfter / totalPois) * 10000) / 100 : 0;
+      const mapCompleted = totalPois > 0 && visitedAfter >= totalPois;
+      const now = admin.firestore.FieldValue.serverTimestamp();
 
       transaction.set(checkInRef, {
         venueId,
         mapId,
         userId,
-        markedAt: admin.firestore.FieldValue.serverTimestamp(),
+        markedAt: now,
         userLat,
         userLng,
         accuracy,
         isMocked,
-        distance
+        distance,
+        xpValue,
       });
+
+      const mapUpdate: FirebaseFirestore.UpdateData<FirebaseFirestore.DocumentData> = {
+        visitedPoiIds: admin.firestore.FieldValue.arrayUnion(venueId),
+        progress: {
+          totalPois,
+          visitedPois: visitedAfter,
+          percent,
+          earnedXp: progress.earnedXp + xpValue,
+        },
+        updatedAt: now,
+      };
+
+      if (mapCompleted) {
+        mapUpdate.status = "completed";
+        mapUpdate.completedAt = now;
+        mapUpdate.completionCountApplied = true;
+        transaction.set(userRef, {
+          activeMapCount: admin.firestore.FieldValue.increment(-1),
+          completedMapCount: admin.firestore.FieldValue.increment(1),
+          updatedAt: now,
+        }, { merge: true });
+      }
+
+      transaction.set(stateRef, mapUpdate, { merge: true });
+
+      result = {
+        status: "success",
+        alreadyVisited: false,
+        xpEligible: true,
+        mapCompleted,
+      };
     });
 
-    return { status: 'success' };
+    return result;
   } catch (error) {
     console.error("Gezdim Transaction Hatası:", error);
+    if (error instanceof functions.https.HttpsError) {
+      throw error;
+    }
     throw new functions.https.HttpsError('internal', 'Server error during check-in');
   }
 });

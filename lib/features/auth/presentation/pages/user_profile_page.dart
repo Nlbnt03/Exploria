@@ -137,27 +137,30 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
     final currentUserUid = FirebaseAuth.instance.currentUser?.uid;
     final bool isCurrentUser = widget.uid == currentUserUid;
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(24, 12, 24, 40),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildAppBar(),
-          const SizedBox(height: 24),
-          _buildProfileHeader(),
-          if (!isCurrentUser) _buildFriendActionButton(currentUserUid ?? ''),
-          const SizedBox(height: 24),
-          _buildInfoSection(),
-          const SizedBox(height: 24),
-          if (isCurrentUser) ...[
-            const XPCard(),
+    return SafeArea(
+      bottom: false,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(24, 12, 24, 40),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildAppBar(),
             const SizedBox(height: 24),
-          ] else ...[
-            _buildTitleSection(),
+            _buildProfileHeader(),
+            if (!isCurrentUser) _buildFriendActionButton(currentUserUid ?? ''),
             const SizedBox(height: 24),
+            _buildInfoSection(),
+            const SizedBox(height: 24),
+            if (isCurrentUser) ...[
+              const XPCard(),
+              const SizedBox(height: 24),
+            ] else ...[
+              _buildTitleSection(),
+              const SizedBox(height: 24),
+            ],
+            _buildBadgesSection(isCurrentUser),
           ],
-          _buildBadgesSection(isCurrentUser),
-        ],
+        ),
       ),
     );
   }
@@ -406,8 +409,8 @@ class _UserProfilePageState extends ConsumerState<UserProfilePage> {
             borderRadius: BorderRadius.circular(12),
             onTap: () => Navigator.pop(context),
             child: Container(
-              width: 42,
-              height: 42,
+              width: 48,
+              height: 48,
               decoration: BoxDecoration(
                 color: AppColors.card,
                 borderRadius: BorderRadius.circular(12),

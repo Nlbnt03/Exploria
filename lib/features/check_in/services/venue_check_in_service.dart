@@ -1,5 +1,6 @@
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../providers/check_in_provider.dart';
@@ -20,11 +21,13 @@ class VenueCheckInService {
     if (_connectivityInitialized) return;
     _connectivityInitialized = true;
     Connectivity().onConnectivityChanged.listen((results) {
-      _lastConnectivity = results.isNotEmpty ? results.first : ConnectivityResult.none;
+      _lastConnectivity =
+          results.isNotEmpty ? results.first : ConnectivityResult.none;
     });
     // Seed with initial value (best-effort, may not complete before first check-in).
     Connectivity().checkConnectivity().then((results) {
-      _lastConnectivity = results.isNotEmpty ? results.first : ConnectivityResult.none;
+      _lastConnectivity =
+          results.isNotEmpty ? results.first : ConnectivityResult.none;
     });
   }
 
@@ -33,27 +36,46 @@ class VenueCheckInService {
     required String mapId,
     required double venueLat,
     required double venueLng,
+    required int xpValue,
+    double? userLat,
+    double? userLng,
+    required Function(double distance) onTooFar,
+  }) async {
+    final result = await processCheckInDetailed(
+      venueId: venueId,
+      mapId: mapId,
+      venueLat: venueLat,
+      venueLng: venueLng,
+      xpValue: xpValue,
+      userLat: userLat,
+      userLng: userLng,
+      onTooFar: onTooFar,
+    );
+    return result.state;
+  }
+
+  Future<CheckInResult> processCheckInDetailed({
+    required String venueId,
+    required String mapId,
+    required double venueLat,
+    required double venueLng,
+    required int xpValue,
     double? userLat,
     double? userLng,
     required Function(double distance) onTooFar,
   }) async {
     try {
-      // --- GEÇİCİ TEST MODU (DEVRE DIŞI BIRAKILANLAR: Mock, GPS, Mesafe, Sunucu Hız Kontrolü) ---
-      // UI ve Animasyonları emülatörde rahatça test edebilmeniz için sadece 800ms bekleyip başarılı döner.
-      await Future.delayed(const Duration(milliseconds: 800));
-      //return CheckInState.success;
-      // ------------------------------------------------------------------------------------------
-
       // 1. Offline Kontrol (cached — platform kanalına gitmez)
       _ensureConnectivityInit();
       if (_lastConnectivity == ConnectivityResult.none) {
-        return CheckInState.offline;
+        return const CheckInResult(state: CheckInState.offline);
       }
 
       // 2. Mevcut GPS'i al (Eğer userLat/userLng dışarıdan verilmediyse)
       double currentLat = userLat ?? 0.0;
       double currentLng = userLng ?? 0.0;
       double accuracy = 10.0;
+      bool isMocked = false;
 
       if (userLat == null || userLng == null) {
         final position = await Geolocator.getCurrentPosition(
@@ -65,6 +87,7 @@ class VenueCheckInService {
         currentLat = position.latitude;
         currentLng = position.longitude;
         accuracy = position.accuracy;
+        isMocked = position.isMocked;
       }
 
       // 4. Mesafe Kontrolü (Haversine Formülü)
@@ -75,44 +98,52 @@ class VenueCheckInService {
         venueLng,
       );
 
-      final double dynamicThreshold = baseThreshold + accuracy.clamp(0.0, maxAccuracyAllowance);
+      final double dynamicThreshold =
+          baseThreshold + accuracy.clamp(0.0, maxAccuracyAllowance);
 
       if (distance > dynamicThreshold) {
         onTooFar(distance);
-        return CheckInState.tooFar;
+        return const CheckInResult(state: CheckInState.tooFar);
       }
 
       // 5. Sunucu Taraflı Hız ve Transaction Kontrolü
-      // TEST İÇİN DEVRE DIŞI BIRAKILDI: Cloud Function henüz deploy edilmedi.
-      /*
       // Kullanıcı oturumu açık değilse hata ver
-      if (_auth.currentUser == null) return CheckInState.error;
+      if (_auth.currentUser == null) {
+        return const CheckInResult(state: CheckInState.error);
+      }
 
-      final HttpsCallable callable = _functions.httpsCallable('verifyAndCheckIn');
+      final HttpsCallable callable = _functions.httpsCallable(
+        'verifyAndCheckIn',
+      );
       final response = await callable.call({
         'venueId': venueId,
         'mapId': mapId,
-        'userLat': position.latitude,
-        'userLng': position.longitude,
-        'accuracy': position.accuracy,
-        'isMocked': position.isMocked,
+        'userLat': currentLat,
+        'userLng': currentLng,
+        'accuracy': accuracy,
+        'isMocked': isMocked,
         'distance': distance,
+        'xpValue': xpValue,
       });
 
       // Bulut fonksiyonundan dönen yanıta göre state belirle
-      final status = response.data['status'];
+      final data = Map<String, dynamic>.from(response.data as Map);
+      final status = data['status'];
       if (status == 'success') {
-        return CheckInState.success;
+        return CheckInResult(
+          state: CheckInState.success,
+          mapCompleted: data['mapCompleted'] == true,
+          xpEligible: data['xpEligible'] == true,
+          alreadyVisited: data['alreadyVisited'] == true,
+        );
       } else if (status == 'speed_error') {
-        return CheckInState.speedLimitError;
+        return const CheckInResult(state: CheckInState.speedLimitError);
       } else {
-        return CheckInState.error;
+        return const CheckInResult(state: CheckInState.error);
       }
-      */
-      return CheckInState.success;
     } catch (e) {
-      print('Gezdim butonu servisinde hata: $e');
-      return CheckInState.error;
+      debugPrint('Gezdim butonu servisinde hata: $e');
+      return const CheckInResult(state: CheckInState.error);
     }
   }
 }

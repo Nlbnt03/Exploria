@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
+import 'package:permission_handler/permission_handler.dart' as perm;
 
 enum LocationAccessStatus {
   granted,
@@ -27,8 +28,12 @@ class LocationAccessResult {
 class LocationService {
   static LocationService? _instance;
 
-  factory LocationService({Duration pollingInterval = const Duration(seconds: 4)}) {
+  factory LocationService({
+    Duration pollingInterval = const Duration(seconds: 4),
+    Future<bool> Function()? requestDisclosureConsent,
+  }) {
     _instance ??= LocationService._internal();
+    _instance!._requestDisclosureConsent = requestDisclosureConsent;
     return _instance!;
   }
 
@@ -38,15 +43,16 @@ class LocationService {
       StreamController<Position>.broadcast();
 
   StreamSubscription<geo.Position>? _positionSub;
+  Future<bool> Function()? _requestDisclosureConsent;
   bool _running = false;
   bool _isBackground = false;
   int _activeControllers = 0;
 
   static final geo.ForegroundNotificationConfig _foregroundNotification =
       geo.ForegroundNotificationConfig(
-    notificationTitle: 'Keşfedio',
-    notificationText: 'Haritadaki ilerlemeniz takip ediliyor...',
-  );
+        notificationTitle: 'Keşfedio',
+        notificationText: 'Haritadaki ilerlemeniz takip ediliyor...',
+      );
 
   Stream<Position> get positionStream => _controller.stream;
   bool get isRunning => _running;
@@ -54,9 +60,6 @@ class LocationService {
 
   void registerConsumer() {
     _activeControllers++;
-    if (!_running) {
-      unawaited(start());
-    }
   }
 
   void unregisterConsumer() {
@@ -67,10 +70,15 @@ class LocationService {
     }
   }
 
-  Future<bool> start({bool background = false}) async {
+  Future<bool> start({
+    bool background = false,
+    bool requireBackgroundPermission = false,
+  }) async {
     if (_running) return true;
 
-    final hasPermission = await _ensurePermission();
+    final hasPermission = await _ensurePermission(
+      requestBackground: background || requireBackgroundPermission,
+    );
     if (!hasPermission) return false;
 
     _isBackground = background;
@@ -111,9 +119,8 @@ class LocationService {
   }
 
   geo.LocationSettings _buildSettings() {
-    final accuracy = _isBackground
-        ? geo.LocationAccuracy.medium
-        : geo.LocationAccuracy.high;
+    final accuracy =
+        _isBackground ? geo.LocationAccuracy.medium : geo.LocationAccuracy.high;
     final distanceFilter = _isBackground ? 12 : 4;
 
     if (Platform.isAndroid) {
@@ -151,9 +158,13 @@ class LocationService {
     await stop();
   }
 
-  static Future<LocationAccessResult> requestSinglePosition() async {
+  static Future<LocationAccessResult> requestSinglePosition({
+    Future<bool> Function()? requestDisclosureConsent,
+  }) async {
     try {
-      final hasPermission = await _ensurePermissionStatic();
+      final hasPermission = await _ensurePermissionStatic(
+        requestDisclosureConsent: requestDisclosureConsent,
+      );
       if (!hasPermission) {
         final permission = await geo.Geolocator.checkPermission();
         if (permission == geo.LocationPermission.deniedForever) {
@@ -204,24 +215,44 @@ class LocationService {
 
     var permission = await geo.Geolocator.checkPermission();
     if (permission == geo.LocationPermission.denied) {
+      if (!await _confirmDisclosureConsent()) {
+        return false;
+      }
       permission = await geo.Geolocator.requestPermission();
     }
 
-    if (permission == geo.LocationPermission.whileInUse && requestBackground) {
-      permission = await geo.Geolocator.requestPermission();
+    if (requestBackground && !await hasBackgroundPermission()) {
+      if (!await _confirmDisclosureConsent()) {
+        return false;
+      }
+      final backgroundPermission = await requestAlwaysPermission();
+      if (backgroundPermission == geo.LocationPermission.always ||
+          await hasBackgroundPermission()) {
+        permission = geo.LocationPermission.always;
+      }
     }
 
-    return permission == geo.LocationPermission.always ||
+    final hasForeground =
+        permission == geo.LocationPermission.always ||
         permission == geo.LocationPermission.whileInUse;
+    if (!hasForeground) return false;
+    if (requestBackground) return await hasBackgroundPermission();
+    return true;
   }
 
-  static Future<bool> _ensurePermissionStatic() async {
+  static Future<bool> _ensurePermissionStatic({
+    Future<bool> Function()? requestDisclosureConsent,
+  }) async {
     if (!await geo.Geolocator.isLocationServiceEnabled()) {
       return false;
     }
 
     var permission = await geo.Geolocator.checkPermission();
     if (permission == geo.LocationPermission.denied) {
+      final accepted = await requestDisclosureConsent?.call() ?? true;
+      if (!accepted) {
+        return false;
+      }
       permission = await geo.Geolocator.requestPermission();
     }
 
@@ -229,13 +260,44 @@ class LocationService {
         permission == geo.LocationPermission.whileInUse;
   }
 
-  static Future<geo.LocationPermission> requestAlwaysPermission() async {
+  static Future<geo.LocationPermission> requestAlwaysPermission({
+    Future<bool> Function()? requestDisclosureConsent,
+  }) async {
     try {
-      final permission = await geo.Geolocator.checkPermission();
+      var permission = await geo.Geolocator.checkPermission();
       if (permission == geo.LocationPermission.always) {
         return geo.LocationPermission.always;
       }
-      return await geo.Geolocator.requestPermission();
+      final accepted = await requestDisclosureConsent?.call() ?? true;
+      if (!accepted) {
+        return permission;
+      }
+      if (permission == geo.LocationPermission.denied) {
+        permission = await geo.Geolocator.requestPermission();
+      }
+
+      if (permission != geo.LocationPermission.always &&
+          permission != geo.LocationPermission.whileInUse) {
+        return permission;
+      }
+
+      if (Platform.isAndroid) {
+        final currentStatus = await perm.Permission.locationAlways.status;
+        if (currentStatus.isGranted) {
+          return geo.LocationPermission.always;
+        }
+
+        final requestedStatus = await perm.Permission.locationAlways.request();
+        if (requestedStatus.isGranted) {
+          return geo.LocationPermission.always;
+        }
+      } else {
+        final requested = await _requestAlwaysOnIos();
+        if (requested == geo.LocationPermission.always) {
+          return geo.LocationPermission.always;
+        }
+      }
+      return permission;
     } catch (e) {
       debugPrint('[Location] Always permission request failed: $e');
       return geo.LocationPermission.denied;
@@ -244,6 +306,32 @@ class LocationService {
 
   static Future<bool> hasBackgroundPermission() async {
     final permission = await geo.Geolocator.checkPermission();
-    return permission == geo.LocationPermission.always;
+    if (permission == geo.LocationPermission.always) return true;
+    if (Platform.isAndroid) {
+      final status = await perm.Permission.locationAlways.status;
+      return status.isGranted;
+    }
+    return false;
+  }
+
+  Future<bool> _confirmDisclosureConsent() async {
+    return await _requestDisclosureConsent?.call() ?? true;
+  }
+
+  static Future<geo.LocationPermission> _requestAlwaysOnIos() async {
+    try {
+      const channel = MethodChannel('kesfedio/location');
+      final result = await channel
+          .invokeMethod('requestAlwaysAuthorization')
+          .timeout(const Duration(seconds: 8));
+      if (result == true) {
+        return geo.LocationPermission.always;
+      }
+    } on TimeoutException {
+      debugPrint('[Location] iOS always permission request timed out.');
+    } catch (e) {
+      debugPrint('[Location] iOS always permission request failed: $e');
+    }
+    return geo.LocationPermission.denied;
   }
 }

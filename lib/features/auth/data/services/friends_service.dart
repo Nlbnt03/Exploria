@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class AppUserSummary {
@@ -109,10 +110,12 @@ class BlockedUserSummary {
 }
 
 class FriendsService {
-  FriendsService({FirebaseFirestore? firestore})
-    : _firestore = firestore ?? FirebaseFirestore.instance;
+  FriendsService({FirebaseFirestore? firestore, FirebaseFunctions? functions})
+    : _firestore = firestore ?? FirebaseFirestore.instance,
+      _functions = functions ?? FirebaseFunctions.instance;
 
   final FirebaseFirestore _firestore;
+  final FirebaseFunctions _functions;
 
   CollectionReference<Map<String, dynamic>> get _users =>
       _firestore.collection('users');
@@ -302,6 +305,13 @@ class FriendsService {
   }) async {
     await _refreshAuthTokenBeforeWrite();
 
+    if (fromUid.trim().isEmpty || toUid.trim().isEmpty) {
+      throw FirebaseException(
+        plugin: 'friends_service',
+        code: 'invalid-uid',
+        message: 'Geçersiz kullanıcı kimliği.',
+      );
+    }
     if (fromUid == toUid) {
       throw FirebaseException(
         plugin: 'friends_service',
@@ -310,81 +320,8 @@ class FriendsService {
       );
     }
 
-    final requestRef = _friendRequests.doc('${fromUid}_$toUid');
-    final reverseRef = _friendRequests.doc('${toUid}_$fromUid');
-    final fromUserRef = _users.doc(fromUid);
-    final toUserRef = _users.doc(toUid);
-    final fromFriendRef = _friendsOf(fromUid).doc(toUid);
-    final toFriendRef = _friendsOf(toUid).doc(fromUid);
-
-    await _firestore.runTransaction((tx) async {
-      final fromUser = await tx.get(fromUserRef);
-      final toUser = await tx.get(toUserRef);
-      final request = await tx.get(requestRef);
-      final reverse = await tx.get(reverseRef);
-      final fromFriend = await tx.get(fromFriendRef);
-      final toFriend = await tx.get(toFriendRef);
-      final fromBlockedTo = await tx.get(
-        _users.doc(fromUid).collection('blockedUsers').doc(toUid),
-      );
-      final toBlockedFrom = await tx.get(
-        _users.doc(toUid).collection('blockedUsers').doc(fromUid),
-      );
-
-      if (!fromUser.exists || !toUser.exists) {
-        throw FirebaseException(
-          plugin: 'friends_service',
-          code: 'user-not-found',
-          message: 'Kullanici bulunamadi.',
-        );
-      }
-
-      if (fromFriend.exists || toFriend.exists) {
-        throw FirebaseException(
-          plugin: 'friends_service',
-          code: 'already-friends',
-          message: 'Bu kullanici zaten arkadas listende.',
-        );
-      }
-
-      if (fromBlockedTo.exists || toBlockedFrom.exists) {
-        throw FirebaseException(
-          plugin: 'friends_service',
-          code: 'blocked-user',
-          message: 'Bu kullanıcıya arkadaşlık isteği gönderilemez.',
-        );
-      }
-
-      final requestStatus = (request.data()?['status'] as String?)?.trim();
-      if (request.exists && requestStatus == 'pending') {
-        throw FirebaseException(
-          plugin: 'friends_service',
-          code: 'request-already-sent',
-          message: 'Bu kullaniciya zaten istek gonderdin.',
-        );
-      }
-
-      final reverseStatus = (reverse.data()?['status'] as String?)?.trim();
-      if (reverse.exists && reverseStatus == 'pending') {
-        throw FirebaseException(
-          plugin: 'friends_service',
-          code: 'incoming-request-exists',
-          message: 'Bu kullanicidan bekleyen bir istek var.',
-        );
-      }
-
-      final fromData = fromUser.data() ?? <String, dynamic>{};
-      final toData = toUser.data() ?? <String, dynamic>{};
-      tx.set(requestRef, {
-        'fromUid': fromUid,
-        'toUid': toUid,
-        'fromUsername': (fromData['username'] as String?)?.trim() ?? '',
-        'toUsername': (toData['username'] as String?)?.trim() ?? '',
-        'pairKey': _pairKey(fromUid, toUid),
-        'status': 'pending',
-        'createdAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+    await _functions.httpsCallable('sendFriendRequest').call<void>({
+      'toUid': toUid.trim(),
     });
   }
 
@@ -766,83 +703,8 @@ class FriendsService {
       );
     }
 
-    final currentUserRef = _users.doc(currentUid);
-    final blockedUserRef = _users.doc(blockedUid);
-    final myFriendRef = _friendsOf(currentUid).doc(blockedUid);
-    final blockedSideRef = _friendsOf(blockedUid).doc(currentUid);
-    final myBlockRef = _users
-        .doc(currentUid)
-        .collection('blockedUsers')
-        .doc(blockedUid);
-    final requestRefA = _friendRequests.doc('${currentUid}_$blockedUid');
-    final requestRefB = _friendRequests.doc('${blockedUid}_$currentUid');
-
-    await _firestore.runTransaction((tx) async {
-      final currentUserSnap = await tx.get(currentUserRef);
-      final blockedUserSnap = await tx.get(blockedUserRef);
-      final myFriendSnap = await tx.get(myFriendRef);
-      final blockedSideSnap = await tx.get(blockedSideRef);
-      final requestSnapA = await tx.get(requestRefA);
-      final requestSnapB = await tx.get(requestRefB);
-
-      if (!currentUserSnap.exists || !blockedUserSnap.exists) {
-        throw FirebaseException(
-          plugin: 'friends_service',
-          code: 'user-not-found',
-          message: 'Kullanıcı bulunamadı.',
-        );
-      }
-
-      tx.set(myBlockRef, {
-        'blockedUid': blockedUid,
-        'username': blockedUser.username,
-        'name': blockedUser.name,
-        'surname': blockedUser.surname,
-        'photoUrl': blockedUser.photoUrl,
-        'createdAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      if (myFriendSnap.exists) {
-        tx.delete(myFriendRef);
-      }
-      if (blockedSideSnap.exists) {
-        tx.delete(blockedSideRef);
-      }
-
-      final currentUserData = currentUserSnap.data() ?? <String, dynamic>{};
-      final currentCount =
-          (currentUserData['friendsCount'] as num?)?.toInt() ?? 0;
-      tx.set(currentUserRef, {
-        'friends': FieldValue.arrayRemove([blockedUid]),
-        'friendsCount':
-            myFriendSnap.exists && currentCount > 0
-                ? currentCount - 1
-                : currentCount,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      final blockedUserData = blockedUserSnap.data() ?? <String, dynamic>{};
-      final blockedCount =
-          (blockedUserData['friendsCount'] as num?)?.toInt() ?? 0;
-      tx.set(blockedUserRef, {
-        'friends': FieldValue.arrayRemove([currentUid]),
-        'friendsCount':
-            blockedSideSnap.exists && blockedCount > 0
-                ? blockedCount - 1
-                : blockedCount,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      for (final requestSnap in [requestSnapA, requestSnapB]) {
-        final status = (requestSnap.data()?['status'] as String?)?.trim();
-        if (requestSnap.exists &&
-            (status == 'pending' || status == 'accepted')) {
-          tx.set(requestSnap.reference, {
-            'status': 'cancelled',
-            'updatedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
-        }
-      }
+    await _functions.httpsCallable('blockUser').call<void>({
+      'blockedUid': blockedUid,
     });
   }
 
@@ -867,16 +729,9 @@ class FriendsService {
       );
     }
 
-    await _users
-        .doc(currentUid)
-        .collection('blockedUsers')
-        .doc(blockedUid)
-        .delete();
-  }
-
-  String _pairKey(String uidA, String uidB) {
-    final values = <String>[uidA, uidB]..sort();
-    return '${values.first}_${values.last}';
+    await _functions.httpsCallable('unblockUser').call<void>({
+      'blockedUid': blockedUid.trim(),
+    });
   }
 
   Map<String, dynamic> _friendEdgeData(

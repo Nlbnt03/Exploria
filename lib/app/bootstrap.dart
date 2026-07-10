@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:app_tracking_transparency/app_tracking_transparency.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -75,6 +76,7 @@ Future<void> _initializeAdsAfterTrackingConsent() async {
 /// Shows the iOS App Tracking Transparency system prompt. AdMob must not
 /// collect the IDFA before the user has responded to this consent request.
 Future<void> requestTrackingAuthorizationIfNeeded() async {
+  if (!Platform.isIOS) return;
   final status = await AppTrackingTransparency.trackingAuthorizationStatus;
   if (status == TrackingStatus.notDetermined) {
     // A short delay avoids the prompt racing the app's own splash/launch
