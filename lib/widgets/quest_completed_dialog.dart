@@ -152,7 +152,7 @@ class _QuestCompletedDialogState extends State<QuestCompletedDialog>
           _isDoubled = true;
           _isDoubling = false;
         });
-        _snack('+${widget.info.xpReward} XP bonus kazandın! 🎉');
+        _snack('+${widget.info.resolvedXpReward} XP bonus kazandın! 🎉');
       } else {
         setState(() => _isDoubling = false);
         _snack('Bonus alınamadı, tekrar dene', isError: true);
@@ -197,7 +197,7 @@ class _QuestCompletedDialogState extends State<QuestCompletedDialog>
         ),
         child: Center(
           child: Text(
-            '🎉  +${widget.info.xpReward} XP Bonus Kazandın!',
+            '🎉  +${widget.info.resolvedXpReward} XP Bonus Kazandın!',
             style: const TextStyle(
               color: Color(0xFF5BD9C4),
               fontSize: 14,
@@ -266,7 +266,7 @@ class _QuestCompletedDialogState extends State<QuestCompletedDialog>
             const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 18),
             const SizedBox(width: 6),
             Text(
-              'Reklam izle → +${widget.info.xpReward} XP daha kazan',
+              'Reklam izle → +${widget.info.resolvedXpReward} XP daha kazan',
               style: const TextStyle(
                 color: Colors.white,
                 fontSize: 13,
@@ -423,7 +423,7 @@ class _QuestCompletedDialogState extends State<QuestCompletedDialog>
                               colors: [Color(0xFFFF922B), Color(0xFFFF6EC7)],
                             ).createShader(bounds),
                             child: Text(
-                              '+${widget.info.xpReward} XP',
+                              '+${widget.info.resolvedXpReward} XP',
                               style: const TextStyle(
                                 color: Colors.white,
                                 fontSize: 48,

@@ -117,7 +117,11 @@ class CampusMapController extends ChangeNotifier {
       );
 
       await _upsertFogSourceAndLayer();
-      await _enableLocationPuck();
+      // Gerçek cihaz GPS'ini gösteren native puck, skip modunda (demo)
+      // yanlış/alakasız bir konumu gösterebileceği için devre dışı bırakılır.
+      if (!skipLocationVerification) {
+        await _enableLocationPuck();
+      }
       await _configureOrnaments(map);
 
       _latestCameraState = await map.getCameraState();
@@ -597,6 +601,13 @@ class CampusMapController extends ChangeNotifier {
       );
     }
   }
+
+  /// Demo modu: gerçek konum akışı yerine kurgulanmış bir konum besler.
+  /// Sadece [skipLocationVerification] true olan kontrolcüler için
+  /// kullanılmalı (bkz. OnboardingDemoPage) — Firestore'a hiçbir yazım
+  /// [onPersistStateRequested] atanmadığı sürece tetiklenmez.
+  Future<void> feedSimulatedPosition(Position position) =>
+      _onLocationUpdate(position);
 
   Future<void> _setMapInteractionEnabled(bool enabled) async {
     final map = _mapboxMap;

@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 class FirebaseAuthService {
@@ -9,11 +12,13 @@ class FirebaseAuthService {
   Future<UserCredential> createUser({
     required String email,
     required String password,
-  }) {
-    return _auth.createUserWithEmailAndPassword(
+  }) async {
+    final credential = await _auth.createUserWithEmailAndPassword(
       email: email,
       password: password,
     );
+    unawaited(FirebaseAnalytics.instance.logSignUp(signUpMethod: 'email'));
+    return credential;
   }
 
   Future<UserCredential> signIn({

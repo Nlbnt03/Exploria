@@ -7,8 +7,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../../app/router/app_router.dart';
-import '../../features/auth/presentation/pages/home_page.dart';
-
 
 // ─── Arka-plan mesaj handler'ı (top-level fonksiyon zorunluluğu) ──────────────
 @pragma('vm:entry-point')
@@ -43,11 +41,7 @@ class NotificationService {
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
 
     // 2. İzin iste
-    await _messaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
+    await _messaging.requestPermission(alert: true, badge: true, sound: true);
 
     // 3. Yerel bildirim eklentisini başlat
     await _initLocalNotifications();
@@ -84,15 +78,13 @@ class NotificationService {
 
   // ─── Yerel bildirim eklentisi ──────────────────────────────────────────────
   Future<void> _initLocalNotifications() async {
-    const androidSettings =
-        AndroidInitializationSettings('@mipmap/ic_launcher');
+    const androidSettings = AndroidInitializationSettings(
+      '@mipmap/ic_launcher',
+    );
     const iosSettings = DarwinInitializationSettings();
 
     await _localNotifications.initialize(
-      const InitializationSettings(
-        android: androidSettings,
-        iOS: iosSettings,
-      ),
+      const InitializationSettings(android: androidSettings, iOS: iosSettings),
       onDidReceiveNotificationResponse: (response) {
         final payload = response.payload;
         if (payload != null) _navigate(payload, {});
@@ -103,7 +95,8 @@ class NotificationService {
     if (Platform.isAndroid) {
       await _localNotifications
           .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>()
+            AndroidFlutterLocalNotificationsPlugin
+          >()
           ?.createNotificationChannel(_androidChannel);
     }
   }
@@ -119,14 +112,16 @@ class NotificationService {
       final token = await _messaging.getToken();
       if (token == null) return;
 
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .update({'fcmToken': token});
+      await FirebaseFirestore.instance.collection('users').doc(uid).update({
+        'fcmToken': token,
+        'lastActiveAt': FieldValue.serverTimestamp(),
+      });
 
       debugPrint('[FCM] Token kaydedildi: $token');
     } catch (e) {
-      debugPrint('[FCM] Token alınırken hata oluştu (iOS Simulator olabilir): $e');
+      debugPrint(
+        '[FCM] Token alınırken hata oluştu (iOS Simulator olabilir): $e',
+      );
     }
   }
 
@@ -200,11 +195,10 @@ class NotificationService {
       // Rota sakla, login sayfasına yönlendir
       _pendingRoute = route;
       _pendingData = data;
-      debugPrint('[FCM] Kullanıcı giriş yapmamış, login sayfasına yönlendirildi.');
-      navigator.pushNamedAndRemoveUntil(
-        AppRouter.login,
-        (r) => false,
+      debugPrint(
+        '[FCM] Kullanıcı giriş yapmamış, login sayfasına yönlendirildi.',
       );
+      navigator.pushNamedAndRemoveUntil(AppRouter.login, (r) => false);
       return;
     }
     // ───────────────────────────────────────────────────────
@@ -249,4 +243,3 @@ class NotificationService {
     }
   }
 }
-

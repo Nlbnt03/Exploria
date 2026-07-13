@@ -4,7 +4,9 @@ import 'package:cloud_functions/cloud_functions.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../providers/check_in_provider.dart';
 
 class VenueCheckInService {
@@ -141,6 +143,9 @@ class VenueCheckInService {
       final data = Map<String, dynamic>.from(response.data as Map);
       final status = data['status'];
       if (status == 'success') {
+        if (data['alreadyVisited'] != true) {
+          unawaited(_logFirstCheckInOnce());
+        }
         return CheckInResult(
           state: CheckInState.success,
           mapCompleted: data['mapCompleted'] == true,
@@ -156,5 +161,16 @@ class VenueCheckInService {
       debugPrint('Gezdim butonu servisinde hata: $e');
       return const CheckInResult(state: CheckInState.error);
     }
+  }
+
+  /// Onboarding hunisi için: hesap başına yalnızca ilk başarılı check-in'de loglanır.
+  Future<void> _logFirstCheckInOnce() async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'has_logged_first_checkin_$uid';
+    if (prefs.getBool(key) ?? false) return;
+    await prefs.setBool(key, true);
+    await FirebaseAnalytics.instance.logEvent(name: 'first_checkin');
   }
 }

@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
@@ -115,7 +114,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
             backgroundColor: const Color(0xFF1E1040),
             title: const Text(
               'Hesabı Sil',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800),
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+              ),
             ),
             content: const Text(
               'Hesabınızı silmek istediğinizden emin misiniz? Bu işlem geri alınamaz ve tüm verileriniz kalıcı olarak silinir.',
@@ -126,7 +128,10 @@ class _EditProfilePageState extends State<EditProfilePage> {
                 onPressed: () => Navigator.pop(context, false),
                 child: const Text(
                   'Vazgeç',
-                  style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600),
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
               TextButton(
@@ -154,11 +159,7 @@ class _EditProfilePageState extends State<EditProfilePage> {
         await user.delete();
       }
       if (mounted) {
-        Navigator.pushNamedAndRemoveUntil(
-          context,
-          '/login',
-          (route) => false,
-        );
+        Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
       }
     } on FirebaseAuthException catch (e) {
       if (e.code == 'requires-recent-login') {

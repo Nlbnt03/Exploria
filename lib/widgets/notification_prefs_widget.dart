@@ -8,11 +8,15 @@ class NotificationPrefs {
   final bool weeklyTask;
   final bool friendRequest;
   final bool roomInvite;
+  final bool reengagement;
+  final bool placeSuggestion;
 
   const NotificationPrefs({
     this.weeklyTask = true,
     this.friendRequest = true,
     this.roomInvite = true,
+    this.reengagement = true,
+    this.placeSuggestion = true,
   });
 
   factory NotificationPrefs.fromMap(Map<String, dynamic> map) {
@@ -20,28 +24,31 @@ class NotificationPrefs {
       weeklyTask: map['weeklyTask'] as bool? ?? true,
       friendRequest: map['friendRequest'] as bool? ?? true,
       roomInvite: map['roomInvite'] as bool? ?? true,
+      reengagement: map['reengagement'] as bool? ?? true,
+      placeSuggestion: map['placeSuggestion'] as bool? ?? true,
     );
   }
 }
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
-final notificationPrefsProvider =
-    StreamProvider.autoDispose<NotificationPrefs>((ref) {
-  final uid = FirebaseAuth.instance.currentUser?.uid;
-  if (uid == null) return const Stream.empty();
+final notificationPrefsProvider = StreamProvider.autoDispose<NotificationPrefs>(
+  (ref) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const Stream.empty();
 
-  return FirebaseFirestore.instance
-      .collection('users')
-      .doc(uid)
-      .snapshots()
-      .map((snap) {
-    final data = snap.data();
-    if (data == null) return const NotificationPrefs();
-    final prefs = data['notificationPrefs'];
-    if (prefs is! Map<String, dynamic>) return const NotificationPrefs();
-    return NotificationPrefs.fromMap(prefs);
-  });
-});
+    return FirebaseFirestore.instance
+        .collection('users')
+        .doc(uid)
+        .snapshots()
+        .map((snap) {
+          final data = snap.data();
+          if (data == null) return const NotificationPrefs();
+          final prefs = data['notificationPrefs'];
+          if (prefs is! Map<String, dynamic>) return const NotificationPrefs();
+          return NotificationPrefs.fromMap(prefs);
+        });
+  },
+);
 
 // ─── Widget ───────────────────────────────────────────────────────────────────
 class NotificationPrefsWidget extends ConsumerWidget {
@@ -62,37 +69,52 @@ class NotificationPrefsWidget extends ConsumerWidget {
 
     return prefsAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (e, _) => Center(
-        child: Text('Tercihler yüklenemedi: $e'),
-      ),
-      data: (prefs) => Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _PrefTile(
-            icon: Icons.task_alt_rounded,
-            title: 'Haftalık Görev Hatırlatıcı',
-            subtitle: 'Tamamlanmamış görevler için günlük bildirim al',
-            value: prefs.weeklyTask,
-            onChanged: (v) => _toggle('weeklyTask', v),
+      error: (e, _) => Center(child: Text('Tercihler yüklenemedi: $e')),
+      data:
+          (prefs) => Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _PrefTile(
+                icon: Icons.task_alt_rounded,
+                title: 'Haftalık Görev Hatırlatıcı',
+                subtitle: 'Tamamlanmamış görevler için günlük bildirim al',
+                value: prefs.weeklyTask,
+                onChanged: (v) => _toggle('weeklyTask', v),
+              ),
+              const Divider(height: 1, indent: 72),
+              _PrefTile(
+                icon: Icons.person_add_rounded,
+                title: 'Arkadaşlık İsteği',
+                subtitle: 'Yeni arkadaşlık isteklerinde bildirim al',
+                value: prefs.friendRequest,
+                onChanged: (v) => _toggle('friendRequest', v),
+              ),
+              const Divider(height: 1, indent: 72),
+              _PrefTile(
+                icon: Icons.meeting_room_rounded,
+                title: 'Oda Daveti',
+                subtitle: 'Bir odaya davet edildiğinde bildirim al',
+                value: prefs.roomInvite,
+                onChanged: (v) => _toggle('roomInvite', v),
+              ),
+              const Divider(height: 1, indent: 72),
+              _PrefTile(
+                icon: Icons.cloud_rounded,
+                title: 'Geri Çağırma Hatırlatıcısı',
+                subtitle: 'Birkaç gündür uygulamayı açmadığında hatırlatma al',
+                value: prefs.reengagement,
+                onChanged: (v) => _toggle('reengagement', v),
+              ),
+              const Divider(height: 1, indent: 72),
+              _PrefTile(
+                icon: Icons.add_location_alt_rounded,
+                title: 'Mekan Önerisi Onayı',
+                subtitle: 'Önerdiğin bir mekan onaylandığında bildirim al',
+                value: prefs.placeSuggestion,
+                onChanged: (v) => _toggle('placeSuggestion', v),
+              ),
+            ],
           ),
-          const Divider(height: 1, indent: 72),
-          _PrefTile(
-            icon: Icons.person_add_rounded,
-            title: 'Arkadaşlık İsteği',
-            subtitle: 'Yeni arkadaşlık isteklerinde bildirim al',
-            value: prefs.friendRequest,
-            onChanged: (v) => _toggle('friendRequest', v),
-          ),
-          const Divider(height: 1, indent: 72),
-          _PrefTile(
-            icon: Icons.meeting_room_rounded,
-            title: 'Oda Daveti',
-            subtitle: 'Bir odaya davet edildiğinde bildirim al',
-            value: prefs.roomInvite,
-            onChanged: (v) => _toggle('roomInvite', v),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -127,12 +149,12 @@ class _PrefTile extends StatelessWidget {
         subtitle,
         style: TextStyle(
           fontSize: 12,
-          color: colorScheme.onSurface.withOpacity(0.6),
+          color: colorScheme.onSurface.withValues(alpha: 0.6),
         ),
       ),
       value: value,
       onChanged: onChanged,
-      activeColor: colorScheme.primary,
+      activeThumbColor: colorScheme.primary,
     );
   }
 }

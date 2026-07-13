@@ -15,6 +15,7 @@ import 'package:cloud_firestore/cloud_firestore.dart' as firestore;
 import '../firebase_options.dart';
 import '../core/services/interstitial_ad_manager.dart';
 import '../core/services/notification_service.dart';
+import '../core/services/remote_config_service.dart';
 import '../core/services/rewarded_ad_manager.dart';
 import 'app.dart';
 
@@ -41,6 +42,7 @@ Future<void> bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ensureFirebaseInitialized();
   await NotificationService.instance.initialize();
+  await RemoteConfigService.instance.initialize();
 
   setupGlobalErrorHandler();
 
@@ -87,17 +89,14 @@ Future<void> requestTrackingAuthorizationIfNeeded() async {
 }
 
 Future<void> ensureFirebaseInitialized() async {
-  if (_firebaseInitialization == null) {
-    _firebaseInitialization = Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    ).then((_) {
-      firestore.FirebaseFirestore.instance.settings = firestore.Settings(
-        persistenceEnabled: true,
-        cacheSizeBytes: firestore.Settings.CACHE_SIZE_UNLIMITED,
-      );
-    });
-  }
-  return _firebaseInitialization;
+  return _firebaseInitialization ??= Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  ).then((_) {
+    firestore.FirebaseFirestore.instance.settings = firestore.Settings(
+      persistenceEnabled: true,
+      cacheSizeBytes: firestore.Settings.CACHE_SIZE_UNLIMITED,
+    );
+  });
 }
 
 Future<void> ensureFreshMapboxData() async {

@@ -1,6 +1,10 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart' hide Source;
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../domain/models/campus_map_state.dart';
 import '../../presentation/map/map_areas.dart';
@@ -130,7 +134,18 @@ class MapProgressService {
       );
     }
 
+    unawaited(_logFirstMapCreatedOnce(uid));
+
     return mapId;
+  }
+
+  /// Onboarding hunisi için: hesap başına yalnızca ilk harita oluşturmada loglanır.
+  Future<void> _logFirstMapCreatedOnce(String uid) async {
+    final prefs = await SharedPreferences.getInstance();
+    final key = 'has_logged_first_map_$uid';
+    if (prefs.getBool(key) ?? false) return;
+    await prefs.setBool(key, true);
+    await FirebaseAnalytics.instance.logEvent(name: 'first_map_created');
   }
 
   Stream<List<UserMapRecord>> watchMapHistory(String uid) {

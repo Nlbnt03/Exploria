@@ -1,3 +1,4 @@
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:flutter/material.dart';
 
 import '../core/services/notification_service.dart';
@@ -14,6 +15,9 @@ class KesfedrioApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: AppTheme.dark,
       navigatorKey: NotificationService.navigatorKey,
+      navigatorObservers: [
+        FirebaseAnalyticsObserver(analytics: FirebaseAnalytics.instance),
+      ],
       initialRoute: AppRouter.startup,
       onGenerateRoute: AppRouter.onGenerateRoute,
     );

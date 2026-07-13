@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/game_provider.dart';
 import '../widgets/quest_card.dart';
+import '../core/services/remote_config_service.dart';
 
 class QuestsScreen extends ConsumerStatefulWidget {
   const QuestsScreen({super.key});
@@ -86,7 +87,7 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
                     QuestCard(
                       title: 'İlk Adım',
                       description: 'Haftanın ilk mekanını keşfet.',
-                      xpReward: 50,
+                      xpReward: RemoteConfigService.instance.questXp('ilkAdim'),
                       category: QuestCategory.kesif,
                       questItem: quests.ilkAdim,
                     ),
@@ -94,7 +95,7 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
                     QuestCard(
                       title: 'Kaşif Ruhu',
                       description: 'Toplamda 5 farklı mekan ziyaret et.',
-                      xpReward: 100,
+                      xpReward: RemoteConfigService.instance.questXp('kasifRuhu'),
                       category: QuestCategory.kesif,
                       questItem: quests.kasifRuhu,
                     ),
@@ -102,7 +103,7 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
                     QuestCard(
                       title: 'Çeşitli Kaşif',
                       description: '2 farklı kategorideki (örn: Cami, Müze) mekanları ziyaret et.',
-                      xpReward: 75,
+                      xpReward: RemoteConfigService.instance.questXp('cesitliKasif'),
                       category: QuestCategory.kesif,
                       questItem: quests.cesitliKasif,
                     ),
@@ -112,7 +113,7 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
                     QuestCard(
                       title: 'Takım Oyuncusu',
                       description: 'Bir mekanı Co-op modunda keşfet.',
-                      xpReward: 100,
+                      xpReward: RemoteConfigService.instance.questXp('takimOyuncusu'),
                       category: QuestCategory.sosyal,
                       questItem: quests.takimOyuncusu,
                     ),
@@ -120,7 +121,7 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
                     QuestCard(
                       title: 'Takım Kaşifi',
                       description: 'Co-op modunda 5 farklı mekanı keşfet.',
-                      xpReward: 100,
+                      xpReward: RemoteConfigService.instance.questXp('takimKasifi'),
                       category: QuestCategory.sosyal,
                       questItem: quests.takimKasifi,
                     ),
@@ -130,7 +131,7 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
                     QuestCard(
                       title: 'Düzenli Gezgin',
                       description: 'Hafta boyunca 3 farklı gün mekan ziyaret et.',
-                      xpReward: 75,
+                      xpReward: RemoteConfigService.instance.questXp('duzenliGezgin'),
                       category: QuestCategory.ozel,
                       questItem: quests.duzenliGezgin,
                     ),
@@ -138,7 +139,7 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
                     QuestCard(
                       title: 'Tam Hafta',
                       description: 'Hafta boyunca tam 5 farklı gün aktif olup mekan gez.',
-                      xpReward: 300,
+                      xpReward: RemoteConfigService.instance.questXp('tamHafta'),
                       category: QuestCategory.ozel,
                       questItem: quests.tamHafta,
                     ),
@@ -194,16 +195,17 @@ class _XPSummary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    int maxXP = 50 + 100 + 75 + 100 + 100 + 75 + 300;
+    final rc = RemoteConfigService.instance;
+    int maxXP = rc.weeklyXpGoal;
     int earnedXP = 0;
-    
-    if (quests.ilkAdim.done) earnedXP += 50;
-    if (quests.kasifRuhu.done) earnedXP += 100;
-    if (quests.cesitliKasif.done) earnedXP += 75;
-    if (quests.takimOyuncusu.done) earnedXP += 100;
-    if (quests.takimKasifi.done) earnedXP += 100;
-    if (quests.duzenliGezgin.done) earnedXP += 75;
-    if (quests.tamHafta.done) earnedXP += 300;
+
+    if (quests.ilkAdim.done) earnedXP += rc.questXp('ilkAdim');
+    if (quests.kasifRuhu.done) earnedXP += rc.questXp('kasifRuhu');
+    if (quests.cesitliKasif.done) earnedXP += rc.questXp('cesitliKasif');
+    if (quests.takimOyuncusu.done) earnedXP += rc.questXp('takimOyuncusu');
+    if (quests.takimKasifi.done) earnedXP += rc.questXp('takimKasifi');
+    if (quests.duzenliGezgin.done) earnedXP += rc.questXp('duzenliGezgin');
+    if (quests.tamHafta.done) earnedXP += rc.questXp('tamHafta');
 
     return Container(
       padding: const EdgeInsets.all(16),

@@ -66,8 +66,13 @@ class _LoginPageState extends State<LoginPage> {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
         final prefs = await SharedPreferences.getInstance();
-        final hasSeenOnboarding = prefs.getBool('has_seen_onboarding_${user.uid}') ?? false;
-        Navigator.pushReplacementNamed(context, hasSeenOnboarding ? AppRouter.home : AppRouter.onboarding);
+        final hasSeenOnboarding =
+            prefs.getBool('has_seen_onboarding_${user.uid}') ?? false;
+        if (!mounted) return;
+        Navigator.pushReplacementNamed(
+          context,
+          hasSeenOnboarding ? AppRouter.home : AppRouter.onboarding,
+        );
       } else {
         Navigator.pushReplacementNamed(context, AppRouter.home);
       }
@@ -157,10 +162,8 @@ class _LoginPageState extends State<LoginPage> {
           Align(
             alignment: Alignment.centerRight,
             child: TextButton(
-              onPressed: () => Navigator.pushNamed(
-                context,
-                AppRouter.forgotPassword,
-              ),
+              onPressed:
+                  () => Navigator.pushNamed(context, AppRouter.forgotPassword),
               child: const Text(
                 'Şifremi unuttum?',
                 style: TextStyle(

@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:firebase_analytics/firebase_analytics.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -49,8 +52,10 @@ class _OnboardingPageState extends State<OnboardingPage> {
       await prefs.setBool('has_seen_onboarding_$uid', true);
     }
 
+    unawaited(FirebaseAnalytics.instance.logEvent(name: 'onboarding_complete'));
+
     if (!mounted) return;
-    Navigator.pushReplacementNamed(context, AppRouter.home);
+    Navigator.pushReplacementNamed(context, AppRouter.onboardingDemo);
   }
 
   void _nextPage() {

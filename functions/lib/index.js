@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onAdminNotificationWritten = exports.doubleQuestReward = exports.claimDailyAdReward = exports.resetWeeklyXP = exports.onRoomInviteWritten = exports.onFriendRequestWritten = exports.sendWeeklyTaskReminders = exports.verifyAndCheckIn = exports.onMapPoiWritten = exports.reconcileActiveMapCounts = exports.onUserMapStateWritten = exports.deleteMap = exports.createMap = exports.unblockUser = exports.blockUser = exports.sendFriendRequest = void 0;
+exports.onAdminNotificationWritten = exports.doubleQuestReward = exports.claimDailyAdReward = exports.resetWeeklyXP = exports.onRoomInviteWritten = exports.onPlaceSuggestionWritten = exports.onFriendRequestWritten = exports.sendWeeklyTaskReminders = exports.verifyAndCheckIn = exports.onMapPoiWritten = exports.reconcileActiveMapCounts = exports.onUserMapStateWritten = exports.deleteMap = exports.createMap = exports.unblockUser = exports.blockUser = exports.sendFriendRequest = void 0;
 const functions = require("firebase-functions");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-functions/v2/firestore");
@@ -657,6 +657,7 @@ exports.verifyAndCheckIn = functions.https.onCall(async (request) => {
             const percent = totalPois > 0 ? Math.round((visitedAfter / totalPois) * 10000) / 100 : 0;
             const mapCompleted = totalPois > 0 && visitedAfter >= totalPois;
             const now = admin.firestore.FieldValue.serverTimestamp();
+            transaction.set(userRef, { lastActiveAt: now }, { merge: true });
             transaction.set(checkInRef, {
                 venueId,
                 mapId,
@@ -743,69 +744,80 @@ async function sendNotification(uid, token, title, body, data) {
     }
 }
 // ────────────────────────────────────────────────────────────
-// 1. HAFTALIK GÖREV HATIRLATICI
-//    Her gün 09:00 İstanbul (UTC 06:00) saatinde çalışır.
-//
-//    Gerekli Firestore Composite Index:
-//      Collection : weeklyTasks
-//      Fields     : completed (ASC), dueAt (ASC)
+// 1. GÜNLÜK ETKİLEŞİM BİLDİRİMLERİ (segmentli)
+//    Her gün 09:00 İstanbul (UTC 06:00) saatinde çalışır. Tek geçişte iki
+//    segmenti değerlendirir:
+//      a) Haftanın ikinci yarısında hâlâ bitmemiş görevi olan aktif kullanıcılar
+//      b) 3+ gündür `lastActiveAt` güncellenmemiş (uygulamayı açmamış/check-in
+//         yapmamış) kullanıcılar → re-engagement bildirimi
+//    Not: users/{uid}.weeklyQuests gerçek görev verisidir (bkz. game_provider.dart).
+//    Eski sürüm hiç yazılmayan "weeklyTasks" koleksiyonunu sorguladığı için
+//    sessizce hiçbir bildirim göndermiyordu.
 // ────────────────────────────────────────────────────────────
+const WEEKLY_QUEST_KEYS = [
+    "ilkAdim",
+    "kasifRuhu",
+    "cesitliKasif",
+    "duzenliGezgin",
+    "takimOyuncusu",
+    "takimKasifi",
+    "tamHafta",
+];
+function currentWeekStart() {
+    const now = new Date();
+    const jsDay = now.getDay(); // 0=Pazar..6=Cumartesi
+    const isoWeekday = jsDay === 0 ? 7 : jsDay; // 1=Pazartesi..7=Pazar
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - (isoWeekday - 1));
+    const y = monday.getFullYear();
+    const m = (monday.getMonth() + 1).toString().padStart(2, "0");
+    const d = monday.getDate().toString().padStart(2, "0");
+    return `${y}-${m}-${d}`;
+}
 exports.sendWeeklyTaskReminders = (0, scheduler_1.onSchedule)({ schedule: "0 6 * * *", timeZone: "Europe/Istanbul" }, async () => {
     const db = admin.firestore();
-    // Haftanın sonunu hesapla (Pazar 23:59:59)
+    const weekStart = currentWeekStart();
     const now = new Date();
-    const endOfWeek = new Date(now);
-    const dayOfWeek = now.getDay(); // 0=Pazar
-    const daysUntilSunday = dayOfWeek === 0 ? 0 : 7 - dayOfWeek;
-    endOfWeek.setDate(now.getDate() + daysUntilSunday);
-    endOfWeek.setHours(23, 59, 59, 999);
+    const jsDay = now.getDay();
+    const isoWeekday = jsDay === 0 ? 7 : jsDay;
+    const isLaterHalfOfWeek = isoWeekday >= 4; // Perşembe'den itibaren hatırlat
+    const inactivityCutoffMs = Date.now() - 3 * 24 * 60 * 60 * 1000;
     try {
-        // Tamamlanmamış ve bu haftaya ait görevleri çek
-        const tasksSnap = await db
-            .collection("weeklyTasks")
-            .where("completed", "==", false)
-            .where("dueAt", "<=", admin.firestore.Timestamp.fromDate(endOfWeek))
-            .get();
-        if (tasksSnap.empty) {
-            console.log("[WeeklyTask] Bekleyen görev yok.");
-            return;
-        }
-        // uid → görev başlıkları eşlemesi oluştur (bir kullanıcının N görevi olabilir)
-        const tasksByUid = new Map();
-        for (const doc of tasksSnap.docs) {
-            const { assignedTo, title } = doc.data();
-            if (!tasksByUid.has(assignedTo))
-                tasksByUid.set(assignedTo, []);
-            tasksByUid.get(assignedTo).push(title);
-        }
-        // Kullanıcıları batch olarak çek (getAll — tek round trip)
-        const uids = Array.from(tasksByUid.keys());
-        const userRefs = uids.map((uid) => db.collection("users").doc(uid));
-        const userDocs = await db.getAll(...userRefs);
+        const usersSnap = await db.collection("users").get();
         const sendPromises = [];
-        for (const userDoc of userDocs) {
-            if (!userDoc.exists)
-                continue;
+        for (const userDoc of usersSnap.docs) {
             const uid = userDoc.id;
             const userData = userDoc.data();
             const token = userData.fcmToken;
             if (!token)
                 continue;
-            if (userData.notificationPrefs?.weeklyTask === false)
-                continue;
-            const titles = tasksByUid.get(uid) ?? [];
-            const bodyText = titles.length === 1
-                ? titles[0]
-                : `${titles[0]} ve ${titles.length - 1} görev daha seni bekliyor`;
-            sendPromises.push(sendNotification(uid, token, "📋 Görevin seni bekliyor!", bodyText, {
-                route: "/tasks",
-            }));
+            // Segment A: bu hafta hâlâ bitmemiş görevi olan aktif kullanıcı
+            const quests = userData.weeklyQuests;
+            if (isLaterHalfOfWeek &&
+                quests?.weekStart === weekStart &&
+                userData.notificationPrefs?.weeklyTask !== false) {
+                const hasIncomplete = WEEKLY_QUEST_KEYS.some((key) => {
+                    const quest = quests[key];
+                    return quest !== undefined && quest.done !== true;
+                });
+                if (hasIncomplete) {
+                    sendPromises.push(sendNotification(uid, token, "📋 Görevin seni bekliyor!", "Bu haftaki görevlerini tamamlamana az kaldı, hafta bitmeden keşfe çık!", { route: "/tasks" }));
+                    continue; // aynı gün iki bildirimle boğmayalım
+                }
+            }
+            // Segment B: 3+ gündür aktif değil → re-engagement
+            const lastActiveMs = userData.lastActiveAt?.toMillis();
+            if (lastActiveMs !== undefined &&
+                lastActiveMs <= inactivityCutoffMs &&
+                userData.notificationPrefs?.reengagement !== false) {
+                sendPromises.push(sendNotification(uid, token, "🌫️ Sisin geri gelmene az kaldı!", "Şehrinde hâlâ keşfedilmeyi bekleyen yerler var, hadi devam et!", { route: "/" }));
+            }
         }
         await Promise.all(sendPromises);
-        console.log(`[WeeklyTask] ${sendPromises.length} bildirim gönderildi.`);
+        console.log(`[DailyEngagement] ${sendPromises.length} bildirim gönderildi.`);
     }
     catch (error) {
-        console.error("[WeeklyTask] Hata:", error);
+        console.error("[DailyEngagement] Hata:", error);
     }
 });
 // ────────────────────────────────────────────────────────────
@@ -844,6 +856,78 @@ exports.onFriendRequestWritten = (0, firestore_1.onDocumentWritten)("friendReque
     }
     catch (error) {
         console.error("[FriendRequest] Hata:", error);
+    }
+});
+// ────────────────────────────────────────────────────────────
+// 2.5 MEKAN ÖNERİSİ ONAYLANDI — XP + Bildirim
+//    Admin panel placeSuggestions/{id}.status'u "approved" yaptığında
+//    tetiklenir. Kullanıcıya XP verir, pendingSuggestionRewards'a ekler
+//    (client bir sonraki açılışta tebrik dialoğu gösterip temizler) ve
+//    push bildirimi yollar.
+// ────────────────────────────────────────────────────────────
+exports.onPlaceSuggestionWritten = (0, firestore_1.onDocumentWritten)("placeSuggestions/{suggestionId}", async (event) => {
+    const snap = event.data;
+    if (!snap)
+        return;
+    const afterData = snap.after.data();
+    const beforeData = snap.before.data();
+    if (!afterData)
+        return; // deleted
+    if (afterData.status !== "approved")
+        return;
+    if (beforeData && beforeData.status === "approved")
+        return; // didn't change
+    const { userId, name } = afterData;
+    if (!userId)
+        return;
+    const suggestionId = event.params.suggestionId;
+    const db = admin.firestore();
+    const userRef = db.collection("users").doc(userId);
+    try {
+        const xpAwarded = await getRemoteConfigInt("place_suggestion_xp", 100);
+        let token;
+        let notifyPref;
+        await db.runTransaction(async (transaction) => {
+            const userDoc = await transaction.get(userRef);
+            if (!userDoc.exists)
+                return;
+            const data = userDoc.data();
+            const currentXP = data.xp ?? 0;
+            const currentWeeklyXP = data.weeklyXP ?? 0;
+            const username = data.username ?? "";
+            const newXP = currentXP + xpAwarded;
+            const newWeeklyXP = currentWeeklyXP + xpAwarded;
+            token = data.fcmToken;
+            notifyPref = data.notificationPrefs
+                ?.placeSuggestion;
+            transaction.set(userRef, {
+                xp: newXP,
+                weeklyXP: newWeeklyXP,
+                weeklyXPUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                pendingSuggestionRewards: admin.firestore.FieldValue.arrayUnion({
+                    suggestionId,
+                    name: name ?? "",
+                    xp: xpAwarded,
+                }),
+            }, { merge: true });
+            const { title, colorHex } = getUserTitleAndColor(newXP);
+            const leaderboardRef = db.collection("leaderboard").doc(userId);
+            transaction.set(leaderboardRef, {
+                weeklyXP: newWeeklyXP,
+                totalXP: newXP,
+                title,
+                titleColorHex: colorHex,
+                username,
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+        });
+        if (token && notifyPref !== false) {
+            await sendNotification(userId, token, "🎉 Mekan önerin onaylandı!", `"${name ?? "Önerin"}" haritaya eklendi, +${xpAwarded} XP kazandın!`, { route: "/" });
+        }
+        console.log(`[PlaceSuggestion] ${userId} → +${xpAwarded} XP (${suggestionId})`);
+    }
+    catch (error) {
+        console.error("[PlaceSuggestion] Hata:", error);
     }
 });
 // ────────────────────────────────────────────────────────────
@@ -995,6 +1079,24 @@ exports.resetWeeklyXP = (0, scheduler_1.onSchedule)({ schedule: "0 0 * * 1", tim
     }
     await Promise.all(allWrites.map((b) => b.commit()));
     console.log(`[WeeklyReset] ${leaderboardSnap.size} leaderboard + ${usersSnap.size} users sıfırlandı.`);
+    // Haftalık ritmi vurgulamak için tüm kullanıcılara tek bir topic bildirimi
+    // gönder (herkes bootstrap'ta "announcements" topic'ine abone olur).
+    // Reset işleminin kendisini etkilememesi için ayrı try/catch içinde.
+    try {
+        await admin.messaging().send({
+            topic: "announcements",
+            notification: {
+                title: "🎉 Yeni hafta başladı!",
+                body: "Liderlik tablosu sıfırlandı. İlk adımını at ve zirveye tırman!",
+            },
+            android: { priority: "high" },
+            apns: { payload: { aps: { sound: "default" } } },
+        });
+        console.log("[WeeklyReset] Yeni hafta bildirimi gönderildi.");
+    }
+    catch (error) {
+        console.error("[WeeklyReset] Yeni hafta bildirimi gönderilemedi:", error);
+    }
 });
 // ────────────────────────────────────────────────────────────
 // 5. ADMIN PANEL GENEL BİLDİRİMİ (TOPIC)
@@ -1016,6 +1118,35 @@ function getUserTitleAndColor(xp) {
     return { title: "Yolcu", colorHex: "ff94a3b8" };
 }
 // ────────────────────────────────────────────────────────────
+// YARDIMCI: Remote Config parametrelerini oku (client'ın kullandığı aynı
+// parametre adları). Şablonu tekrar tekrar çekmemek için 5 dk modül-içi
+// cache kullanılır; okuma başarısız olursa (henüz konsolda parametre
+// yoksa vs.) çağıran taraftan verilen fallback'e düşülür.
+// ────────────────────────────────────────────────────────────
+let rcCache = null;
+const RC_CACHE_TTL_MS = 5 * 60 * 1000;
+async function getRemoteConfigInt(key, fallback) {
+    const now = Date.now();
+    if (!rcCache || now - rcCache.fetchedAt > RC_CACHE_TTL_MS) {
+        try {
+            const template = await admin.remoteConfig().getTemplate();
+            const params = {};
+            for (const [k, param] of Object.entries(template.parameters)) {
+                const dv = param.defaultValue;
+                if (dv && "value" in dv)
+                    params[k] = dv.value;
+            }
+            rcCache = { params, fetchedAt: now };
+        }
+        catch (error) {
+            console.error("[RemoteConfig] Şablon okunamadı, fallback kullanılacak:", error);
+            return fallback;
+        }
+    }
+    const parsed = parseInt(rcCache.params[key] ?? "", 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
+// ────────────────────────────────────────────────────────────
 // 6. GÜNLÜK ÖDÜLLÜ REKLAM — XP EKLE
 //    Client: rewarded reklamı göster → bu fonksiyonu çağır.
 //    Günlük limit: 3 izleme / gün. XP sunucu tarafında eklenir.
@@ -1029,8 +1160,8 @@ exports.claimDailyAdReward = functions.https.onCall(async (request) => {
     const userRef = db.collection("users").doc(userId);
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-    const dailyXP = 25;
-    const maxDaily = 3;
+    const dailyXP = await getRemoteConfigInt("daily_ad_reward_xp", 25);
+    const maxDaily = await getRemoteConfigInt("daily_ad_reward_max", 3);
     let watchedToday = 0;
     try {
         await db.runTransaction(async (transaction) => {
@@ -1091,8 +1222,10 @@ exports.doubleQuestReward = functions.https.onCall(async (request) => {
     }
     const userId = request.auth.uid;
     const questKey = request.data?.questKey;
-    // Server-authoritative quest XP map
-    const questXpMap = {
+    // Fallback XP değerleri — Remote Config'te "quest_xp_<key>" parametresi
+    // yoksa veya okunamazsa bunlar kullanılır. Asıl değer client'ın da
+    // okuduğu Remote Config şablonundan gelir (getRemoteConfigInt).
+    const questXpDefaults = {
         ilkAdim: 50,
         kasifRuhu: 100,
         cesitliKasif: 75,
@@ -1101,10 +1234,10 @@ exports.doubleQuestReward = functions.https.onCall(async (request) => {
         takimKasifi: 100,
         tamHafta: 300,
     };
-    if (!questKey || !(questKey in questXpMap)) {
+    if (!questKey || !(questKey in questXpDefaults)) {
         throw new functions.https.HttpsError("invalid-argument", "Geçersiz görev anahtarı");
     }
-    const bonusXP = questXpMap[questKey];
+    const bonusXP = await getRemoteConfigInt(`quest_xp_${questKey}`, questXpDefaults[questKey]);
     const db = admin.firestore();
     const userRef = db.collection("users").doc(userId);
     try {

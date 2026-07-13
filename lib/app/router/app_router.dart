@@ -16,6 +16,7 @@ import '../../features/multi_room/presentation/screens/create_room_screen.dart';
 import '../../features/multi_room/presentation/screens/multi_map_screen.dart';
 import '../../features/multi_room/presentation/screens/pending_invites_screen.dart';
 import '../../features/multi_room/presentation/screens/waiting_room_screen.dart';
+import '../../features/onboarding/presentation/pages/onboarding_demo_page.dart';
 import '../../features/onboarding/presentation/pages/onboarding_page.dart';
 
 class HomePageArgs {
@@ -39,6 +40,7 @@ class AppRouter {
   static const String friendsList = '/friends-list';
   static const String mapPreview = '/map-preview';
   static const String onboarding = '/onboarding';
+  static const String onboardingDemo = '/onboarding-demo';
 
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
     switch (settings.name) {
@@ -162,6 +164,11 @@ class AppRouter {
       case onboarding:
         return FadeScaleRoute<void>(
           builder: (_) => const OnboardingPage(),
+          settings: settings,
+        );
+      case onboardingDemo:
+        return FadeScaleRoute<void>(
+          builder: (_) => const OnboardingDemoPage(),
           settings: settings,
         );
       default:

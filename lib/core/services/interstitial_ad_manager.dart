@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
 
 import '../constants/ad_constants.dart';
+import 'remote_config_service.dart';
 
 class InterstitialAdManager {
   InterstitialAdManager._();
@@ -11,9 +12,9 @@ class InterstitialAdManager {
 
   InterstitialAd? _interstitial;
   int _showCount = 0;
+  int _exitAttempts = 0;
   DateTime? _lastShown;
   bool _loading = false;
-  bool _skipNext = false;
   Timer? _retryTimer;
   int _loadFailures = 0;
 
@@ -74,7 +75,8 @@ class InterstitialAdManager {
   bool get _canShow {
     if (_interstitial == null) return false;
     if (_showCount >= _maxPerSession) return false;
-    if (_skipNext) return false;
+    final frequency = RemoteConfigService.instance.interstitialFrequency;
+    if (_exitAttempts % frequency != 0) return false;
     if (_lastShown != null &&
         DateTime.now().difference(_lastShown!) < _minInterval) {
       return false;
@@ -85,8 +87,8 @@ class InterstitialAdManager {
   /// Returns true if an ad was shown, false otherwise.
   /// When true, the returned Future completes once the ad is dismissed.
   Future<bool> show() async {
+    _exitAttempts++;
     if (!_canShow) {
-      _skipNext = false;
       return false;
     }
 
@@ -94,7 +96,6 @@ class InterstitialAdManager {
     _interstitial = null;
     _showCount++;
     _lastShown = DateTime.now();
-    _skipNext = true;
 
     final completer = Completer<bool>();
     ad.fullScreenContentCallback = FullScreenContentCallback(

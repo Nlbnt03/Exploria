@@ -1,3 +1,5 @@
+import '../core/services/remote_config_service.dart';
+
 class WeeklyQuestCompletionInfo {
   final String questKey;
   final String questName;
@@ -12,6 +14,10 @@ class WeeklyQuestCompletionInfo {
     required this.description,
     required this.xpReward,
   });
+
+  /// Remote Config'ten okunan güncel XP değeri. Görüntüleme/ödül hesabında
+  /// [xpReward] (derleme zamanı varsayılanı) yerine bu kullanılmalı.
+  int get resolvedXpReward => RemoteConfigService.instance.questXp(questKey);
 
   static const Map<String, WeeklyQuestCompletionInfo> definitions = {
     'ilkAdim': WeeklyQuestCompletionInfo(
@@ -65,6 +71,6 @@ class WeeklyQuestCompletionInfo {
     ),
   };
 
-  /// Total XP available from all weekly quests.
-  static const int weeklyXPGoal = 800;
+  /// Total XP available from all weekly quests (Remote Config'ten toplanır).
+  static int get weeklyXPGoal => RemoteConfigService.instance.weeklyXpGoal;
 }

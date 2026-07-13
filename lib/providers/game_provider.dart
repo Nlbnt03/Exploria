@@ -6,6 +6,8 @@ import '../models/user_xp.dart';
 import '../models/leaderboard_entry.dart';
 import '../models/weekly_quest.dart';
 import '../models/weekly_quest_completion.dart';
+import '../models/suggestion_reward.dart';
+import '../core/services/remote_config_service.dart';
 import '../features/auth/data/services/leaderboard_service.dart';
 import 'package:flutter/material.dart';
 import '../features/badges/data/badge_award_service.dart';
@@ -25,12 +27,22 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
   bool _isProcessingSnapshot = false;
 
   final List<WeeklyQuestCompletionInfo> _pendingQuestCompletions = [];
+  final List<SuggestionReward> _pendingSuggestionCelebrations = [];
 
   /// Returns and clears quests that were just completed.
   /// Call immediately after [onPlaceVisited] to show celebration dialogs.
   List<WeeklyQuestCompletionInfo> consumePendingQuestCompletions() {
     final list = List<WeeklyQuestCompletionInfo>.from(_pendingQuestCompletions);
     _pendingQuestCompletions.clear();
+    return list;
+  }
+
+  /// Returns and clears place suggestions that were just approved
+  /// (server-side, e.g. via the admin panel). Call from the home shell to
+  /// show celebration dialogs whenever the user doc snapshot updates.
+  List<SuggestionReward> consumePendingSuggestionCelebrations() {
+    final list = List<SuggestionReward>.from(_pendingSuggestionCelebrations);
+    _pendingSuggestionCelebrations.clear();
     return list;
   }
 
@@ -83,6 +95,20 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
           onTitleChanged?.call(newXP.currentTitle);
         }
         _previousTitle = newXP.currentTitle;
+
+        final pendingRewardsRaw = snapshot.data()?['pendingSuggestionRewards'];
+        if (pendingRewardsRaw is List && pendingRewardsRaw.isNotEmpty) {
+          for (final raw in pendingRewardsRaw) {
+            if (raw is Map<String, dynamic>) {
+              _pendingSuggestionCelebrations.add(SuggestionReward.fromMap(raw));
+            } else if (raw is Map) {
+              _pendingSuggestionCelebrations.add(
+                SuggestionReward.fromMap(Map<String, dynamic>.from(raw)),
+              );
+            }
+          }
+          docRef.update({'pendingSuggestionRewards': []});
+        }
 
         final defaultStart = WeeklyQuests.getWeekStart(DateTime.now());
         if (newXP.weeklyQuests.weekStart != defaultStart) {
@@ -244,10 +270,12 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
         // transaction, but cleared at the top so retries don't duplicate entries.
         newlyCompletedKeys.clear();
 
+        final rc = RemoteConfigService.instance;
+
         WeeklyQuestItem ilkAdim = quests.ilkAdim;
         if (!ilkAdim.done) {
           ilkAdim = ilkAdim.copyWith(current: 1, done: true);
-          xpToAdd += 50;
+          xpToAdd += rc.questXp('ilkAdim');
           newlyCompletedKeys.add('ilkAdim');
         }
 
@@ -257,7 +285,7 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
           bool newDone = newCurrent >= kasifRuhu.target;
           kasifRuhu = kasifRuhu.copyWith(current: newCurrent, done: newDone);
           if (newDone) {
-            xpToAdd += 100;
+            xpToAdd += rc.questXp('kasifRuhu');
             newlyCompletedKeys.add('kasifRuhu');
           }
         }
@@ -271,7 +299,7 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
           bool newDone = updatedCategories.length >= cesitliKasif.target;
           cesitliKasif = cesitliKasif.copyWith(categories: updatedCategories, done: newDone);
           if (newDone) {
-            xpToAdd += 75;
+            xpToAdd += rc.questXp('cesitliKasif');
             newlyCompletedKeys.add('cesitliKasif');
           }
         }
@@ -285,7 +313,7 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
           bool newDone = updatedDays.length >= duzenliGezgin.target;
           duzenliGezgin = duzenliGezgin.copyWith(activeDays: updatedDays, done: newDone);
           if (newDone) {
-            xpToAdd += 75;
+            xpToAdd += rc.questXp('duzenliGezgin');
             newlyCompletedKeys.add('duzenliGezgin');
           }
         }
@@ -296,7 +324,7 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
         if (isCoop) {
           if (!takimOyuncusu.done) {
             takimOyuncusu = takimOyuncusu.copyWith(current: 1, done: true);
-            xpToAdd += 100;
+            xpToAdd += rc.questXp('takimOyuncusu');
             newlyCompletedKeys.add('takimOyuncusu');
           }
           if (!takimKasifi.done) {
@@ -304,7 +332,7 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
             bool newDone = newCurrent >= takimKasifi.target;
             takimKasifi = takimKasifi.copyWith(current: newCurrent, done: newDone);
             if (newDone) {
-              xpToAdd += 100;
+              xpToAdd += rc.questXp('takimKasifi');
               newlyCompletedKeys.add('takimKasifi');
             }
           }
@@ -319,7 +347,7 @@ class GameNotifier extends AutoDisposeAsyncNotifier<UserXP> {
           bool newDone = updatedDays.length >= tamHafta.target;
           tamHafta = tamHafta.copyWith(activeDays: updatedDays, done: newDone);
           if (newDone) {
-            xpToAdd += 300;
+            xpToAdd += rc.questXp('tamHafta');
             newlyCompletedKeys.add('tamHafta');
           }
         }

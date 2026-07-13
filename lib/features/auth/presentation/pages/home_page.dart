@@ -14,9 +14,11 @@ import '../../../multi_room/services/multi_room_firestore_service.dart';
 import 'city_selection_page.dart';
 import 'user_profile_page.dart';
 import '../../../../models/user_xp.dart';
+import '../../../../models/suggestion_reward.dart';
 import '../../../../providers/game_provider.dart';
 import '../../../../providers/leaderboard_provider.dart';
 import '../../../../widgets/daily_reward_strip.dart';
+import '../../../../widgets/suggestion_approved_dialog.dart';
 import '../../../../screens/history_page.dart';
 import '../../../../screens/quests_screen.dart';
 import '../../../../screens/social_page.dart';
@@ -67,6 +69,13 @@ class _HomePageState extends ConsumerState<HomePage> {
     return s[0].toUpperCase() + s.substring(1).toLowerCase();
   }
 
+  Future<void> _showSuggestionCelebrations(List<SuggestionReward> rewards) async {
+    for (final reward in rewards) {
+      if (!mounted) return;
+      await SuggestionApprovedDialog.show(context, reward);
+    }
+  }
+
   Future<void> _signOut() async {
     setState(() => _isSigningOut = true);
     await FirebaseAuth.instance.signOut();
@@ -108,6 +117,12 @@ class _HomePageState extends ConsumerState<HomePage> {
 
     final userXPStr = ref.watch(gameProvider);
     final hasIncompleteQuests = userXPStr.valueOrNull?.weeklyQuests.hasAnyIncomplete ?? false;
+
+    ref.listen(gameProvider, (previous, next) {
+      final rewards =
+          ref.read(gameProvider.notifier).consumePendingSuggestionCelebrations();
+      if (rewards.isNotEmpty) _showSuggestionCelebrations(rewards);
+    });
 
     final tabs = <Widget>[
       // 0: Ana Sayfa
