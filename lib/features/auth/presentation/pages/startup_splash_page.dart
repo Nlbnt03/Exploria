@@ -54,14 +54,26 @@ class _StartupSplashPageState extends State<StartupSplashPage>
         return;
       }
 
-      final user = FirebaseAuth.instance.currentUser;
-      final hasSession = user != null;
+      final auth = FirebaseAuth.instance;
+      final user = auth.currentUser;
 
       String nextRoute = AppRouter.login;
-      if (hasSession) {
+      if (user != null) {
+        await user.reload();
+        final refreshedUser = auth.currentUser;
+        if (refreshedUser == null || !refreshedUser.emailVerified) {
+          final email = refreshedUser?.email ?? user.email;
+          await auth.signOut();
+          if (!mounted) return;
+          await _showEmailVerificationWarning(email);
+          if (!mounted) return;
+          Navigator.pushReplacementNamed(context, AppRouter.login);
+          return;
+        }
+
         final prefs = await SharedPreferences.getInstance();
         final hasSeenOnboarding =
-            prefs.getBool('has_seen_onboarding_${user.uid}') ?? false;
+            prefs.getBool('has_seen_onboarding_${refreshedUser.uid}') ?? false;
         nextRoute = hasSeenOnboarding ? AppRouter.home : AppRouter.onboarding;
       }
 
@@ -71,6 +83,75 @@ class _StartupSplashPageState extends State<StartupSplashPage>
       if (!mounted) return;
       setState(() => _initializationError = error);
     }
+  }
+
+  Future<void> _showEmailVerificationWarning(String? email) {
+    final emailText = email == null || email.trim().isEmpty ? '' : '\n\n$email';
+
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder:
+          (dialogContext) => AlertDialog(
+            backgroundColor: const Color(0xFF1F0734),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+            ),
+            title: const Row(
+              children: <Widget>[
+                Icon(
+                  Icons.mark_email_unread_outlined,
+                  color: AppColors.primary,
+                  size: 26,
+                ),
+                SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'E-posta Doğrulanmadı',
+                    style: TextStyle(
+                      color: AppColors.textMain,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            content: Text(
+              'Hesabını kullanmaya devam etmek için e-posta adresine '
+              'gönderdiğimiz doğrulama bağlantısını açmalısın.$emailText\n\n'
+              'Mail gelen kutunda görünmüyorsa Spam / Gereksiz klasörünü '
+              'mutlaka kontrol et.\n\n'
+              'Giriş ekranında tekrar giriş yaptığında yeni bir doğrulama '
+              'maili gönderilir.',
+              style: const TextStyle(
+                color: AppColors.textMain,
+                fontSize: 14,
+                height: 1.55,
+              ),
+            ),
+            actions: <Widget>[
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    'Giriş Sayfasına Git',
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                  ),
+                ),
+              ),
+            ],
+          ),
+    );
   }
 
   Future<void> _openStore() async {

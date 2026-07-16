@@ -94,7 +94,8 @@ class AuthRepository {
         return const SignInResult(
           status: SignInStatus.emailNotVerified,
           message:
-              'E-posta doğrulanmamış. Yeni doğrulama e-postası gönderildi.',
+              'E-posta doğrulanmamış. Yeni doğrulama e-postası gönderildi. '
+              'Mail görünmüyorsa Spam / Gereksiz klasörünü kontrol et.',
         );
       }
 
