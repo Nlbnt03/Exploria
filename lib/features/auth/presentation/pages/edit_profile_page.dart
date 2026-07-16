@@ -1,4 +1,5 @@
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/material.dart';
 
 import '../../../../core/theme/app_colors.dart';
@@ -155,8 +156,9 @@ class _EditProfilePageState extends State<EditProfilePage> {
     try {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null) {
-        await _firestoreUserService.deleteUser(widget.uid);
-        await user.delete();
+        await user.getIdToken(true);
+        await _firestoreUserService.deleteCurrentUser();
+        await FirebaseAuth.instance.signOut();
       }
       if (mounted) {
         Navigator.pushNamedAndRemoveUntil(context, '/login', (route) => false);
@@ -168,6 +170,14 @@ class _EditProfilePageState extends State<EditProfilePage> {
         );
       } else {
         _showMessage('Hata: ${e.message}');
+      }
+    } on FirebaseFunctionsException catch (e) {
+      if (e.code == 'failed-precondition') {
+        _showMessage(
+          'Güvenlik nedeniyle tekrar giriş yapmanız gerekmektedir. Lütfen çıkış yapıp tekrar giriş yapın ve hesabı silmeyi tekrar deneyin.',
+        );
+      } else {
+        _showMessage('Hesap silme başarısız: ${e.message ?? e.code}');
       }
     } catch (e) {
       _showMessage('Hesap silme başarısız: $e');

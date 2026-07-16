@@ -1,12 +1,17 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:cloud_functions/cloud_functions.dart';
 
 class FirestoreUserService {
-  FirestoreUserService({FirebaseFirestore? firestore})
-    : _firestore = firestore ?? FirebaseFirestore.instance;
+  FirestoreUserService({
+    FirebaseFirestore? firestore,
+    FirebaseFunctions? functions,
+  }) : _firestore = firestore ?? FirebaseFirestore.instance,
+       _functions = functions ?? FirebaseFunctions.instance;
 
   static final RegExp _usernamePattern = RegExp(r'^[a-z0-9._-]{3,30}$');
 
   final FirebaseFirestore _firestore;
+  final FirebaseFunctions _functions;
 
   CollectionReference<Map<String, dynamic>> get _users =>
       _firestore.collection('users');
@@ -192,28 +197,7 @@ class FirestoreUserService {
     }
   }
 
-  Future<void> deleteUser(String uid) async {
-    final userRef = _users.doc(uid);
-    final userDoc = await userRef.get();
-    if (userDoc.exists) {
-      final data = userDoc.data() ?? {};
-      final usernameLower = (data['usernameLower'] as String?)?.trim();
-      if (usernameLower != null && usernameLower.isNotEmpty) {
-        await _usernames.doc(usernameLower).delete();
-      }
-      
-      final friends = List<String>.from(data['friends'] ?? []);
-      await Future.wait(
-        friends.map((friendUid) {
-          return _users.doc(friendUid).collection('friends').doc(uid).delete().catchError((_) {});
-        }),
-      );
-
-      try {
-        await _firestore.collection('leaderboard').doc(uid).delete();
-      } catch (_) {}
-
-      await userRef.delete();
-    }
+  Future<void> deleteCurrentUser() async {
+    await _functions.httpsCallable('deleteAccount').call<void>();
   }
 }

@@ -248,7 +248,8 @@ class HistoryPageState extends State<HistoryPage> {
             style: TextStyle(color: AppColors.textMain),
           ),
           content: Text(
-            '"${record.mapName}" haritası kalıcı olarak silinecek. Alttaki bildiriden geri alabilirsin.',
+            '"${record.mapName}" aktif haritalarından kaldırılacak. '
+            'Kazandığın pasaport pulları ve ziyaret tarihleri korunacak.',
             style: const TextStyle(color: AppColors.textMuted),
           ),
           actions: [
@@ -310,7 +311,9 @@ class HistoryPageState extends State<HistoryPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Harita kalıcı olarak silindi.'),
+          content: Text(
+            'Harita kaldırıldı. Pasaport pulların korunmaya devam ediyor.',
+          ),
           behavior: SnackBarBehavior.floating,
         ),
       );

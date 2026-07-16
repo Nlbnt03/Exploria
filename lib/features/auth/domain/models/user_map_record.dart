@@ -31,4 +31,5 @@ class UserMapRecord {
 
   bool get isActive => status == 'active';
   bool get isCompleted => status == 'completed';
+  bool get isDeleted => status == 'deleted';
 }

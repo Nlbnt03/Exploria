@@ -453,6 +453,7 @@ class MultiRoomFirestoreService {
 
     await roomRef.update({
       'status': 'finished',
+      'finishedAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     });
   }
@@ -484,6 +485,7 @@ class MultiRoomFirestoreService {
         } else {
           await roomRef.update({
             'status': 'finished',
+            'finishedAt': FieldValue.serverTimestamp(),
             'updatedAt': FieldValue.serverTimestamp(),
           });
         }

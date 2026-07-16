@@ -4,13 +4,18 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../widgets/adaptive_banner.dart';
 import '../../data/services/firestore_user_service.dart';
 import '../../data/services/friends_service.dart';
+import '../../data/services/map_progress_service.dart';
+import '../../domain/models/user_map_record.dart';
 import '../../../multi_room/services/multi_room_firestore_service.dart';
+import '../../../passport/presentation/passport_screen.dart';
+import '../map/map_areas.dart';
 import 'city_selection_page.dart';
 import 'user_profile_page.dart';
 import '../../../../models/user_xp.dart';
@@ -24,6 +29,7 @@ import '../../../../screens/quests_screen.dart';
 import '../../../../screens/social_page.dart';
 
 enum TravelMode { solo, multi }
+
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key, this.openFriendRequests = false});
 
@@ -36,18 +42,138 @@ class HomePage extends ConsumerStatefulWidget {
 class _HomePageState extends ConsumerState<HomePage> {
   bool _isSigningOut = false;
   bool _focusIncomingRequests = false;
-  int _selectedIndex = 0;
+  int _selectedIndex = 2;
   TravelMode _selectedMode = TravelMode.solo;
   String? _firestoreName;
+  final MapProgressService _passportMapService = MapProgressService();
+  StreamSubscription<List<UserMapRecord>>? _passportHistorySubscription;
+  final Set<String> _completedPassportAreaIds = <String>{};
+  final Set<String> _seenPassportAreaIds = <String>{};
+  String? _passportTargetAreaId;
+  String? _passportCompletionAreaId;
+  String? _passportCompletionName;
+  bool _passportHistoryInitialized = false;
+  List<UserMapRecord> _passportRecords = const <UserMapRecord>[];
+  final Set<int> _initializedTabs = <int>{2};
 
   @override
   void initState() {
     super.initState();
     _loadFirestoreName();
+    _watchPassportCompletions();
     if (widget.openFriendRequests) {
-      _selectedIndex = 2;
+      _selectedIndex = 3;
       _focusIncomingRequests = true;
     }
+  }
+
+  @override
+  void dispose() {
+    unawaited(_passportHistorySubscription?.cancel());
+    super.dispose();
+  }
+
+  String _passportSeenKey(String uid) => 'passport_seen_seals_$uid';
+
+  Future<void> _watchPassportCompletions() async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    final key = _passportSeenKey(uid);
+    final hasStoredBaseline = prefs.containsKey(key);
+    _seenPassportAreaIds.addAll(prefs.getStringList(key) ?? const <String>[]);
+
+    _passportHistorySubscription = _passportMapService
+        .watchMapHistory(uid, includeDeleted: true)
+        .listen((records) async {
+          _passportRecords = records;
+          final completedRecords =
+              records
+                  .where(
+                    (record) =>
+                        !record.isDeleted &&
+                        (record.isCompleted || record.progressPercent >= 100),
+                  )
+                  .toList();
+          final completedIds =
+              completedRecords.map((record) => record.areaId).toSet();
+
+          if (!_passportHistoryInitialized) {
+            _passportHistoryInitialized = true;
+            _completedPassportAreaIds
+              ..clear()
+              ..addAll(completedIds);
+            if (!hasStoredBaseline) {
+              _seenPassportAreaIds.addAll(completedIds);
+              await prefs.setStringList(
+                key,
+                _seenPassportAreaIds.toList(growable: false),
+              );
+            }
+            if (mounted) setState(() {});
+            return;
+          }
+
+          final newlyCompleted = completedIds.difference(
+            _completedPassportAreaIds,
+          );
+          _completedPassportAreaIds
+            ..clear()
+            ..addAll(completedIds);
+          if (newlyCompleted.isNotEmpty) {
+            final record = completedRecords.firstWhere(
+              (item) => newlyCompleted.contains(item.areaId),
+            );
+            _passportCompletionAreaId = record.areaId;
+            _passportCompletionName = _passportRegionName(record);
+          }
+          if (mounted) setState(() {});
+        });
+  }
+
+  bool get _hasNewPassportSeal =>
+      _completedPassportAreaIds.difference(_seenPassportAreaIds).isNotEmpty;
+
+  String _passportRegionName(UserMapRecord record) {
+    for (final area in selectableMapAreas) {
+      if (area.id == record.areaId) return area.title;
+    }
+    return record.mapName;
+  }
+
+  Future<void> _markPassportSealsSeen(Iterable<String> areaIds) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    _seenPassportAreaIds.addAll(areaIds);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(
+      _passportSeenKey(uid),
+      _seenPassportAreaIds.toList(growable: false),
+    );
+    if (mounted) setState(() {});
+  }
+
+  void _openPassport({String? areaId}) {
+    setState(() {
+      _passportTargetAreaId = areaId;
+      _passportCompletionAreaId = null;
+      _passportCompletionName = null;
+      _selectedIndex = 1;
+      _focusIncomingRequests = false;
+    });
+    final seen = areaId == null ? _completedPassportAreaIds : <String>{areaId};
+    unawaited(_markPassportSealsSeen(seen));
+  }
+
+  void _handleNavigationTap(int index) {
+    if (index == 1) {
+      _openPassport();
+      return;
+    }
+    setState(() {
+      _selectedIndex = index;
+      if (index != 3) _focusIncomingRequests = false;
+    });
   }
 
   Future<void> _loadFirestoreName() async {
@@ -69,7 +195,9 @@ class _HomePageState extends ConsumerState<HomePage> {
     return s[0].toUpperCase() + s.substring(1).toLowerCase();
   }
 
-  Future<void> _showSuggestionCelebrations(List<SuggestionReward> rewards) async {
+  Future<void> _showSuggestionCelebrations(
+    List<SuggestionReward> rewards,
+  ) async {
     for (final reward in rewards) {
       if (!mounted) return;
       await SuggestionApprovedDialog.show(context, reward);
@@ -100,13 +228,14 @@ class _HomePageState extends ConsumerState<HomePage> {
 
   void _openIncomingRequests() {
     setState(() {
-      _selectedIndex = 2;
+      _selectedIndex = 3;
       _focusIncomingRequests = true;
     });
   }
 
   @override
   Widget build(BuildContext context) {
+    _initializedTabs.add(_selectedIndex);
     final user = FirebaseAuth.instance.currentUser;
     final fallbackName = (user?.displayName ?? '').trim();
     final titleName =
@@ -116,49 +245,81 @@ class _HomePageState extends ConsumerState<HomePage> {
             : (user?.email?.split('@').first ?? 'Kaşif'));
 
     final userXPStr = ref.watch(gameProvider);
-    final hasIncompleteQuests = userXPStr.valueOrNull?.weeklyQuests.hasAnyIncomplete ?? false;
+    final hasIncompleteQuests =
+        userXPStr.valueOrNull?.weeklyQuests.hasAnyIncomplete ?? false;
 
     ref.listen(gameProvider, (previous, next) {
       final rewards =
-          ref.read(gameProvider.notifier).consumePendingSuggestionCelebrations();
+          ref
+              .read(gameProvider.notifier)
+              .consumePendingSuggestionCelebrations();
       if (rewards.isNotEmpty) _showSuggestionCelebrations(rewards);
     });
 
     final tabs = <Widget>[
-      // 0: Ana Sayfa
-      _HomeTab(
-        uid: user?.uid ?? '',
-        titleName: titleName,
-        selectedMode: _selectedMode,
-        onModeChanged: (mode) => setState(() => _selectedMode = mode),
-        onOpenIncomingRequests: _openIncomingRequests,
-        onStartJourney: _startJourney,
-        onGoToQuests: () => setState(() {
-          _selectedIndex = 1;
-          _focusIncomingRequests = false;
-        }),
-      ),
-      // 1: Görevler
-      const QuestsScreen(),
-      // 2: Sosyal (Arkadaşlar + Liderlik)
-      SocialPage(
-        uid: user?.uid ?? '',
-        focusIncomingRequests: _focusIncomingRequests,
-        onFocusHandled: () {
-          if (!mounted || !_focusIncomingRequests) {
-            return;
-          }
-          setState(() => _focusIncomingRequests = false);
-        },
-        onAddFriends: null, // already on the same page
-      ),
-      // 3: Profil
-      UserProfilePage(
-        uid: user?.uid ?? '',
-        isTab: true,
-        isSigningOut: _isSigningOut,
-        onSignOut: _isSigningOut ? null : _signOut,
-      ),
+      // 0: Görevler
+      _initializedTabs.contains(0)
+          ? const QuestsScreen()
+          : const SizedBox.shrink(),
+      // 1: Pasaport
+      _initializedTabs.contains(1)
+          ? PassportScreen(
+            uid: user?.uid ?? '',
+            userName: titleName,
+            records: _passportRecords,
+            active: _selectedIndex == 1,
+            initialAreaId: _passportTargetAreaId,
+          )
+          : const SizedBox.shrink(),
+      // 2: Ana Sayfa
+      _initializedTabs.contains(2)
+          ? _HomeTab(
+            uid: user?.uid ?? '',
+            titleName: titleName,
+            selectedMode: _selectedMode,
+            onModeChanged: (mode) => setState(() => _selectedMode = mode),
+            onOpenIncomingRequests: _openIncomingRequests,
+            onStartJourney: _startJourney,
+            onGoToQuests:
+                () => setState(() {
+                  _selectedIndex = 0;
+                  _focusIncomingRequests = false;
+                }),
+            completedPassportName: _passportCompletionName,
+            onOpenCompletedPassport:
+                _passportCompletionAreaId == null
+                    ? null
+                    : () => _openPassport(areaId: _passportCompletionAreaId),
+            onDismissPassportCompletion:
+                () => setState(() {
+                  _passportCompletionAreaId = null;
+                  _passportCompletionName = null;
+                }),
+          )
+          : const SizedBox.shrink(),
+      // 3: Sosyal (Arkadaşlar + Liderlik)
+      _initializedTabs.contains(3)
+          ? SocialPage(
+            uid: user?.uid ?? '',
+            focusIncomingRequests: _focusIncomingRequests,
+            onFocusHandled: () {
+              if (!mounted || !_focusIncomingRequests) {
+                return;
+              }
+              setState(() => _focusIncomingRequests = false);
+            },
+            onAddFriends: null, // already on the same page
+          )
+          : const SizedBox.shrink(),
+      // 4: Profil
+      _initializedTabs.contains(4)
+          ? UserProfilePage(
+            uid: user?.uid ?? '',
+            isTab: true,
+            isSigningOut: _isSigningOut,
+            onSignOut: _isSigningOut ? null : _signOut,
+          )
+          : const SizedBox.shrink(),
     ];
 
     return PopScope(
@@ -182,7 +343,8 @@ class _HomePageState extends ConsumerState<HomePage> {
                 ),
               ),
             ),
-            if (_selectedIndex != 0) const AdaptiveBanner(),
+            if (_selectedIndex != 1 && _selectedIndex != 2)
+              const AdaptiveBanner(),
             SafeArea(
               top: false,
               child: Padding(
@@ -197,13 +359,7 @@ class _HomePageState extends ConsumerState<HomePage> {
                   ),
                   child: BottomNavigationBar(
                     currentIndex: _selectedIndex,
-                    onTap:
-                        (index) => setState(() {
-                          _selectedIndex = index;
-                          if (index != 2) {
-                            _focusIncomingRequests = false;
-                          }
-                        }),
+                    onTap: _handleNavigationTap,
                     type: BottomNavigationBarType.fixed,
                     backgroundColor: Colors.transparent,
                     elevation: 0,
@@ -218,11 +374,6 @@ class _HomePageState extends ConsumerState<HomePage> {
                       fontSize: 10,
                     ),
                     items: [
-                      const BottomNavigationBarItem(
-                        icon: Icon(Icons.home_outlined),
-                        activeIcon: Icon(Icons.home),
-                        label: 'Ana Sayfa',
-                      ),
                       BottomNavigationBarItem(
                         icon: Stack(
                           clipBehavior: Clip.none,
@@ -245,6 +396,34 @@ class _HomePageState extends ConsumerState<HomePage> {
                         ),
                         activeIcon: const Icon(Icons.emoji_events),
                         label: 'Görevler',
+                      ),
+                      BottomNavigationBarItem(
+                        icon: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            const Icon(Icons.menu_book_outlined),
+                            if (_hasNewPassportSeal)
+                              Positioned(
+                                right: -3,
+                                top: -3,
+                                child: Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFFF6B73C),
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        activeIcon: const Icon(Icons.menu_book_rounded),
+                        label: 'Pasaport',
+                      ),
+                      const BottomNavigationBarItem(
+                        icon: Icon(Icons.home_outlined),
+                        activeIcon: Icon(Icons.home_rounded),
+                        label: 'Ana Sayfa',
                       ),
                       const BottomNavigationBarItem(
                         icon: Icon(Icons.groups_outlined),
@@ -291,6 +470,9 @@ class _HomeTab extends StatelessWidget {
     required this.onOpenIncomingRequests,
     required this.onStartJourney,
     required this.onGoToQuests,
+    required this.completedPassportName,
+    required this.onOpenCompletedPassport,
+    required this.onDismissPassportCompletion,
   });
 
   final String uid;
@@ -300,6 +482,9 @@ class _HomeTab extends StatelessWidget {
   final VoidCallback onOpenIncomingRequests;
   final VoidCallback onStartJourney;
   final VoidCallback onGoToQuests;
+  final String? completedPassportName;
+  final VoidCallback? onOpenCompletedPassport;
+  final VoidCallback onDismissPassportCompletion;
 
   @override
   Widget build(BuildContext context) {
@@ -337,10 +522,7 @@ class _HomeTab extends StatelessWidget {
                 ),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(16),
-                  child: Image.asset(
-                    'assets/logo.png',
-                    fit: BoxFit.cover,
-                  ),
+                  child: Image.asset('assets/logo.png', fit: BoxFit.cover),
                 ),
               ),
               const Spacer(),
@@ -359,6 +541,15 @@ class _HomeTab extends StatelessWidget {
               height: 1.1,
             ),
           ),
+          if (completedPassportName != null &&
+              onOpenCompletedPassport != null) ...[
+            const SizedBox(height: 14),
+            _PassportCompletionCard(
+              regionName: completedPassportName!,
+              onTap: onOpenCompletedPassport!,
+              onDismiss: onDismissPassportCompletion,
+            ),
+          ],
           const SizedBox(height: 14),
           _HomePageWeeklyQuestsSummary(onTap: onGoToQuests),
           const SizedBox(height: 12),
@@ -400,6 +591,99 @@ class _HomeTab extends StatelessWidget {
   }
 }
 
+class _PassportCompletionCard extends StatelessWidget {
+  const _PassportCompletionCard({
+    required this.regionName,
+    required this.onTap,
+    required this.onDismiss,
+  });
+
+  final String regionName;
+  final VoidCallback onTap;
+  final VoidCallback onDismiss;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: const ValueKey('passport-completion-card'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(18),
+        child: Ink(
+          padding: const EdgeInsets.fromLTRB(15, 14, 8, 14),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF3D2458), Color(0xFF241438)],
+            ),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: const Color(0xFFF6B73C).withValues(alpha: 0.62),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFFF6B73C).withValues(alpha: 0.12),
+                blurRadius: 18,
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF6B73C).withValues(alpha: 0.16),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0xFFF6B73C)),
+                ),
+                child: const Icon(
+                  Icons.workspace_premium_rounded,
+                  color: Color(0xFFF6B73C),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(
+                        text: '$regionName sayfan tamamlandı!\n',
+                        style: const TextStyle(
+                          color: AppColors.textMain,
+                          fontWeight: FontWeight.w800,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const TextSpan(
+                        text: 'Mührü görmek için pasaportu aç',
+                        style: TextStyle(
+                          color: Color(0xFFF6B73C),
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Kapat',
+                onPressed: onDismiss,
+                icon: const Icon(
+                  Icons.close_rounded,
+                  color: AppColors.textMuted,
+                  size: 19,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _HistoryIcon extends StatelessWidget {
   const _HistoryIcon({required this.uid});
 
@@ -428,11 +712,7 @@ class _HistoryIcon extends StatelessWidget {
             ),
           ),
           child: const Center(
-            child: Icon(
-              Icons.history,
-              color: AppColors.textMain,
-              size: 24,
-            ),
+            child: Icon(Icons.history, color: AppColors.textMain, size: 24),
           ),
         ),
       ),
@@ -662,17 +942,20 @@ class _JourneyModeCard extends StatelessWidget {
                   child: CachedNetworkImage(
                     imageUrl: imageUrl,
                     fit: BoxFit.cover,
-                    placeholder: (context, url) => Container(color: const Color(0x33111111)),
-                    errorWidget: (context, url, error) => Container(
-                      color: const Color(0x33111111),
-                      child: const Center(
-                        child: Icon(
-                          Icons.landscape_rounded,
-                          color: AppColors.textMuted,
-                          size: 36,
+                    placeholder:
+                        (context, url) =>
+                            Container(color: const Color(0x33111111)),
+                    errorWidget:
+                        (context, url, error) => Container(
+                          color: const Color(0x33111111),
+                          child: const Center(
+                            child: Icon(
+                              Icons.landscape_rounded,
+                              color: AppColors.textMuted,
+                              size: 36,
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
                   ),
                 ),
                 Positioned.fill(
@@ -732,7 +1015,7 @@ class _JourneyModeCard extends StatelessWidget {
 
 class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
   const _HomePageWeeklyQuestsSummary({required this.onTap});
-  
+
   final VoidCallback onTap;
 
   @override
@@ -746,16 +1029,38 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
         int earnedQuestXP = 0;
         int completedCount = 0;
         const int totalQuests = 7;
-        
-        if (quests.ilkAdim.done) { earnedQuestXP += 50; completedCount++; }
-        if (quests.kasifRuhu.done) { earnedQuestXP += 100; completedCount++; }
-        if (quests.cesitliKasif.done) { earnedQuestXP += 75; completedCount++; }
-        if (quests.takimOyuncusu.done) { earnedQuestXP += 100; completedCount++; }
-        if (quests.takimKasifi.done) { earnedQuestXP += 100; completedCount++; }
-        if (quests.duzenliGezgin.done) { earnedQuestXP += 75; completedCount++; }
-        if (quests.tamHafta.done) { earnedQuestXP += 300; completedCount++; }
 
-        final questProgress = maxQuestXP > 0 ? (earnedQuestXP / maxQuestXP) : 0.0;
+        if (quests.ilkAdim.done) {
+          earnedQuestXP += 50;
+          completedCount++;
+        }
+        if (quests.kasifRuhu.done) {
+          earnedQuestXP += 100;
+          completedCount++;
+        }
+        if (quests.cesitliKasif.done) {
+          earnedQuestXP += 75;
+          completedCount++;
+        }
+        if (quests.takimOyuncusu.done) {
+          earnedQuestXP += 100;
+          completedCount++;
+        }
+        if (quests.takimKasifi.done) {
+          earnedQuestXP += 100;
+          completedCount++;
+        }
+        if (quests.duzenliGezgin.done) {
+          earnedQuestXP += 75;
+          completedCount++;
+        }
+        if (quests.tamHafta.done) {
+          earnedQuestXP += 300;
+          completedCount++;
+        }
+
+        final questProgress =
+            maxQuestXP > 0 ? (earnedQuestXP / maxQuestXP) : 0.0;
 
         return Container(
           decoration: BoxDecoration(
@@ -822,7 +1127,10 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
                         ),
                         if (userXP.currentTitle != UserTitle.efsane)
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
                             decoration: BoxDecoration(
                               color: Colors.white.withValues(alpha: 0.08),
                               borderRadius: BorderRadius.circular(20),
@@ -838,7 +1146,10 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
                           )
                         else
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
                             decoration: BoxDecoration(
                               color: Colors.amber.withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(20),
@@ -856,7 +1167,10 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
                     ),
                     const SizedBox(height: 8),
                     TweenAnimationBuilder<double>(
-                      tween: Tween<double>(begin: 0, end: userXP.progressPercentage),
+                      tween: Tween<double>(
+                        begin: 0,
+                        end: userXP.progressPercentage,
+                      ),
                       duration: const Duration(milliseconds: 1200),
                       curve: Curves.easeOutCubic,
                       builder: (context, value, child) {
@@ -865,8 +1179,12 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
                           child: LinearProgressIndicator(
                             value: value,
                             minHeight: 6,
-                            backgroundColor: Colors.white.withValues(alpha: 0.08),
-                            valueColor: AlwaysStoppedAnimation<Color>(userXP.titleColor),
+                            backgroundColor: Colors.white.withValues(
+                              alpha: 0.08,
+                            ),
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              userXP.titleColor,
+                            ),
                           ),
                         );
                       },
@@ -896,10 +1214,7 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
                       children: [
                         Row(
                           children: [
-                            const Text(
-                              '🏆',
-                              style: TextStyle(fontSize: 15),
-                            ),
+                            const Text('🏆', style: TextStyle(fontSize: 15)),
                             const SizedBox(width: 6),
                             Text(
                               'Haftalık Görevler',
@@ -937,8 +1252,12 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
                               child: LinearProgressIndicator(
                                 value: value.isNaN ? 0 : value,
                                 minHeight: 5,
-                                backgroundColor: Colors.white.withValues(alpha: 0.08),
-                                valueColor: AlwaysStoppedAnimation<Color>(userXP.titleColor.withValues(alpha: 0.7)),
+                                backgroundColor: Colors.white.withValues(
+                                  alpha: 0.08,
+                                ),
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  userXP.titleColor.withValues(alpha: 0.7),
+                                ),
                               ),
                             );
                           },
@@ -946,8 +1265,8 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
                         const SizedBox(height: 4),
                         Text(
                           earnedQuestXP > 0
-                            ? 'Bu hafta görevlerden +$earnedQuestXP XP'
-                            : 'Görevlere tıklayarak detay gör',
+                              ? 'Bu hafta görevlerden +$earnedQuestXP XP'
+                              : 'Görevlere tıklayarak detay gör',
                           style: TextStyle(
                             color: Colors.white.withValues(alpha: 0.5),
                             fontSize: 10,
@@ -962,16 +1281,16 @@ class _HomePageWeeklyQuestsSummary extends ConsumerWidget {
           ),
         );
       },
-      loading: () => Container(
-        height: 130,
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E1040),
-          borderRadius: BorderRadius.circular(16),
-        ),
-        child: const Center(child: CircularProgressIndicator()),
-      ),
+      loading:
+          () => Container(
+            height: 130,
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E1040),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: const Center(child: CircularProgressIndicator()),
+          ),
       error: (_, __) => const SizedBox(),
     );
   }
 }
-

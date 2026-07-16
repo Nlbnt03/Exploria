@@ -40,11 +40,6 @@ service cloud.firestore {
         );
     }
 
-    function requestStatusNowIs(requestId, wantedStatus) {
-      return exists(/databases/$(database)/documents/friendRequests/$(requestId))
-        && get(/databases/$(database)/documents/friendRequests/$(requestId)).data.status == wantedStatus;
-    }
-
     function requestStatusNowOrAfterIs(requestId, wantedStatus) {
       return (
           existsAfter(/databases/$(database)/documents/friendRequests/$(requestId))
@@ -167,7 +162,9 @@ service cloud.firestore {
         )
       );
 
-      allow delete: if isOwner(uid);
+      // Hesap silme, alt koleksiyonları ve oda sahipliğini güvenli biçimde
+      // temizleyen deleteAccount Cloud Function üzerinden yapılır.
+      allow delete: if false;
 
       match /friends/{friendUid} {
         allow read: if isSignedIn() && (isOwner(uid) || isOwner(friendUid));
@@ -412,9 +409,30 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
           'hostId',
           'status',
+          'finishedAt',
           'updatedAt'
         ])
-        && (request.resource.data.status in ['active', 'finished'] || request.resource.data.keys().hasOnly(['hostId', 'updatedAt']))
+        && (
+          (
+            request.resource.data.status == 'active'
+            && resource.data.status == 'waiting'
+            && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['finishedAt'])
+          )
+          ||
+          (
+            request.resource.data.status == 'finished'
+            && resource.data.status in ['waiting', 'active']
+            && request.resource.data.finishedAt == request.time
+          )
+          ||
+          (
+            request.resource.data.status == resource.data.status
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'hostId',
+              'updatedAt'
+            ])
+          )
+        )
         && resource.data.status in ['waiting', 'active', 'finished'];
 
       allow delete: if false;
@@ -596,6 +614,14 @@ service cloud.firestore {
 
         allow delete: if false;
       }
+    }
+
+    match /venue_checkins/{checkInId} {
+      // Pasaport ekranı yalnızca oturum sahibinin kendi ziyaret tarihlerini
+      // okuyabilir. Check-in yazımları doğrulama Cloud Function'ında kalır.
+      allow read: if isSignedIn()
+        && resource.data.userId == request.auth.uid;
+      allow write: if false;
     }
 
     match /pois/{poiId} {

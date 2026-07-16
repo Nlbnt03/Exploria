@@ -148,16 +148,60 @@ class MapProgressService {
     await FirebaseAnalytics.instance.logEvent(name: 'first_map_created');
   }
 
-  Stream<List<UserMapRecord>> watchMapHistory(String uid) {
-    return _statesCollection(uid)
-        .orderBy('updatedAt', descending: true)
-        .limit(100)
-        .snapshots()
-        .map((snapshot) => _parseMapHistory(snapshot.docs))
-        .timeout(
-          _defaultTimeout * 2,
-          onTimeout: (sink) => sink.add(const <UserMapRecord>[]),
+  Stream<List<UserMapRecord>> watchMapHistory(
+    String uid, {
+    bool includeDeleted = false,
+  }) {
+    final legacyRecords = _fetchLegacyMapHistory(
+      uid,
+      includeDeleted: includeDeleted,
+    );
+    return _statesCollection(uid).limit(100).snapshots().asyncMap((
+      snapshot,
+    ) async {
+      final recordsById = <String, UserMapRecord>{
+        for (final record in await legacyRecords) record.mapId: record,
+        for (final record in _parseMapHistory(
+          snapshot.docs,
+          includeDeleted: includeDeleted,
+        ))
+          record.mapId: record,
+      };
+      final records = recordsById.values.toList(growable: false);
+      _sortMapHistory(records);
+      return records;
+    });
+  }
+
+  Future<List<UserMapRecord>> _fetchLegacyMapHistory(
+    String uid, {
+    required bool includeDeleted,
+  }) async {
+    try {
+      final parent = await _mapStates
+          .doc(uid)
+          .get(const GetOptions(source: Source.serverAndCache))
+          .timeout(_defaultTimeout);
+      final rawStates = parent.data()?['mapStates'];
+      if (rawStates is! Map<dynamic, dynamic>) {
+        return const <UserMapRecord>[];
+      }
+
+      final records = <UserMapRecord>[];
+      for (final entry in rawStates.entries) {
+        if (entry.value is! Map<dynamic, dynamic>) continue;
+        final record = _parseMapRecord(
+          entry.key.toString(),
+          (entry.value as Map<dynamic, dynamic>).cast<String, dynamic>(),
         );
+        if (record == null || (!includeDeleted && record.isDeleted)) continue;
+        records.add(record);
+      }
+      _sortMapHistory(records);
+      return records;
+    } catch (_) {
+      return const <UserMapRecord>[];
+    }
   }
 
   Future<UserMapRecord?> fetchMapById({
@@ -262,17 +306,23 @@ class MapProgressService {
   }
 
   List<UserMapRecord> _parseMapHistory(
-    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
-  ) {
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs, {
+    required bool includeDeleted,
+  }) {
     final records = <UserMapRecord>[];
     for (final doc in docs) {
       final data = doc.data();
       final record = _parseMapRecord(doc.id, data);
       if (record == null) continue;
-      if (record.status == 'deleted') continue;
+      if (!includeDeleted && record.isDeleted) continue;
       records.add(record);
     }
 
+    _sortMapHistory(records);
+    return records;
+  }
+
+  void _sortMapHistory(List<UserMapRecord> records) {
     records.sort((a, b) {
       final bTime =
           b.updatedAt ?? b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
@@ -280,8 +330,6 @@ class MapProgressService {
           a.updatedAt ?? a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
       return bTime.compareTo(aTime);
     });
-
-    return records;
   }
 
   UserMapRecord? _parseMapRecord(String mapId, Map<String, dynamic> raw) {

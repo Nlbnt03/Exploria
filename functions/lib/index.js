@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onAdminNotificationWritten = exports.doubleQuestReward = exports.claimDailyAdReward = exports.resetWeeklyXP = exports.onRoomInviteWritten = exports.onPlaceSuggestionWritten = exports.onFriendRequestWritten = exports.sendWeeklyTaskReminders = exports.verifyAndCheckIn = exports.onMapPoiWritten = exports.reconcileActiveMapCounts = exports.onUserMapStateWritten = exports.deleteMap = exports.createMap = exports.unblockUser = exports.blockUser = exports.sendFriendRequest = void 0;
+exports.onAdminNotificationWritten = exports.doubleQuestReward = exports.claimDailyAdReward = exports.resetWeeklyXP = exports.onRoomInviteWritten = exports.onPlaceSuggestionWritten = exports.onFriendRequestWritten = exports.sendWeeklyTaskReminders = exports.verifyAndCheckIn = exports.onMapPoiWritten = exports.reconcileActiveMapCounts = exports.retryPendingAccountDeletions = exports.cleanupExpiredRoomsAndInvites = exports.onUserMapStateWritten = exports.deleteMap = exports.createMap = exports.deleteAccount = exports.unblockUser = exports.blockUser = exports.sendFriendRequest = void 0;
 const functions = require("firebase-functions");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-functions/v2/firestore");
@@ -21,6 +21,11 @@ function deg2rad(deg) {
     return deg * (Math.PI / 180);
 }
 const MAX_ACTIVE_MAPS = 5;
+const ROOM_RETENTION_DAYS = 30;
+const CLOSED_INVITE_RETENTION_DAYS = 30;
+const PENDING_INVITE_RETENTION_DAYS = 7;
+const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
+const CLEANUP_BATCH_LIMIT = 200;
 function assertString(value, field, maxLength) {
     if (typeof value !== "string") {
         throw new functions.https.HttpsError("invalid-argument", `${field} metin olmalı.`);
@@ -119,31 +124,208 @@ function mapStateRef(uid, mapId) {
         .collection("states")
         .doc(mapId);
 }
+async function deleteQueryDocuments(db, query) {
+    const snapshot = await query.get();
+    if (snapshot.empty)
+        return 0;
+    const writer = db.bulkWriter();
+    for (const doc of snapshot.docs) {
+        writer.delete(doc.ref);
+    }
+    await writer.close();
+    return snapshot.size;
+}
+async function removeDeletedUserFromFriendEdges(db, uid) {
+    const edges = await db.collectionGroup("friends")
+        .where("friendUid", "==", uid)
+        .get();
+    for (const edge of edges.docs) {
+        const ownerRef = edge.ref.parent.parent;
+        if (!ownerRef || ownerRef.id === uid)
+            continue;
+        await db.runTransaction(async (transaction) => {
+            const [edgeSnap, ownerSnap] = await Promise.all([
+                transaction.get(edge.ref),
+                transaction.get(ownerRef),
+            ]);
+            if (!edgeSnap.exists)
+                return;
+            transaction.delete(edge.ref);
+            if (!ownerSnap.exists)
+                return;
+            const currentCount = ownerSnap.data()?.friendsCount ?? 0;
+            transaction.set(ownerRef, {
+                friends: admin.firestore.FieldValue.arrayRemove(uid),
+                friendsCount: Math.max(0, currentCount - 1),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+        });
+    }
+    // Eski veya yarım kalmış kayıtlarda alt koleksiyon kenarı bulunmasa bile
+    // users.friends dizisinde silinen kullanıcı kalmasın.
+    const danglingUsers = await db.collection("users")
+        .where("friends", "array-contains", uid)
+        .get();
+    for (const user of danglingUsers.docs) {
+        if (user.id === uid)
+            continue;
+        await db.runTransaction(async (transaction) => {
+            const snapshot = await transaction.get(user.ref);
+            if (!snapshot.exists)
+                return;
+            const friends = snapshot.data()?.friends;
+            if (!Array.isArray(friends) || !friends.includes(uid))
+                return;
+            const currentCount = snapshot.data()?.friendsCount ?? 0;
+            transaction.set(user.ref, {
+                friends: admin.firestore.FieldValue.arrayRemove(uid),
+                friendsCount: Math.max(0, currentCount - 1),
+                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+            }, { merge: true });
+        });
+    }
+}
+async function detachDeletedUserFromRooms(db, uid) {
+    const memberships = await db.collectionGroup("members")
+        .where("uid", "==", uid)
+        .get();
+    for (const membership of memberships.docs) {
+        const roomRef = membership.ref.parent.parent;
+        if (!roomRef)
+            continue;
+        await db.runTransaction(async (transaction) => {
+            const roomSnap = await transaction.get(roomRef);
+            if (!roomSnap.exists) {
+                transaction.delete(membership.ref);
+                transaction.delete(roomRef.collection("locations").doc(uid));
+                transaction.delete(roomRef.collection("presence").doc(uid));
+                return;
+            }
+            const room = roomSnap.data() ?? {};
+            const status = room.status ?? "waiting";
+            const isHost = room.hostId === uid;
+            if (isHost && status !== "finished") {
+                const members = await transaction.get(roomRef.collection("members"));
+                const nextHost = members.docs.find((doc) => doc.id !== uid);
+                if (nextHost) {
+                    transaction.set(roomRef, {
+                        hostId: nextHost.id,
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    }, { merge: true });
+                }
+                else {
+                    transaction.set(roomRef, {
+                        status: "finished",
+                        finishedAt: admin.firestore.FieldValue.serverTimestamp(),
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    }, { merge: true });
+                }
+            }
+            else if (isHost) {
+                transaction.set(roomRef, { hostId: "deleted-user" }, { merge: true });
+            }
+            transaction.delete(membership.ref);
+            transaction.delete(roomRef.collection("locations").doc(uid));
+            transaction.delete(roomRef.collection("presence").doc(uid));
+        });
+    }
+    // Eski veya tutarsız odalarda üyelik belgesi kayıp olsa bile silinen
+    // kullanıcı host olarak kalıp odayı kilitlemesin.
+    const hostedRooms = await db.collection("rooms")
+        .where("hostId", "==", uid)
+        .get();
+    for (const hostedRoom of hostedRooms.docs) {
+        await db.runTransaction(async (transaction) => {
+            const [roomSnap, members] = await Promise.all([
+                transaction.get(hostedRoom.ref),
+                transaction.get(hostedRoom.ref.collection("members")),
+            ]);
+            if (!roomSnap.exists || roomSnap.data()?.hostId !== uid)
+                return;
+            const status = roomSnap.data()?.status ?? "waiting";
+            const nextHost = members.docs.find((doc) => doc.id !== uid);
+            if (status !== "finished" && nextHost) {
+                transaction.set(hostedRoom.ref, {
+                    hostId: nextHost.id,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                }, { merge: true });
+            }
+            else if (status !== "finished") {
+                transaction.set(hostedRoom.ref, {
+                    status: "finished",
+                    finishedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                }, { merge: true });
+            }
+            else {
+                transaction.set(hostedRoom.ref, { hostId: "deleted-user" }, { merge: true });
+            }
+        });
+    }
+    const visits = await db.collectionGroup("visits")
+        .where("visitedBy", "==", uid)
+        .get();
+    if (!visits.empty) {
+        const writer = db.bulkWriter();
+        for (const visit of visits.docs) {
+            writer.update(visit.ref, { visitedBy: "deleted-user" });
+        }
+        await writer.close();
+    }
+}
+async function deleteUserOwnedData(db, uid) {
+    const userRef = db.collection("users").doc(uid);
+    const userMapStateRef = db.collection("userMapStates").doc(uid);
+    await removeDeletedUserFromFriendEdges(db, uid);
+    await detachDeletedUserFromRooms(db, uid);
+    const queries = [
+        db.collection("usernames").where("uid", "==", uid),
+        db.collection("friendRequests").where("fromUid", "==", uid),
+        db.collection("friendRequests").where("toUid", "==", uid),
+        db.collection("invites").where("fromUserId", "==", uid),
+        db.collection("invites").where("toUserId", "==", uid),
+        db.collection("multiInvites").where("fromUid", "==", uid),
+        db.collection("multiInvites").where("toUid", "==", uid),
+        db.collection("venue_checkins").where("userId", "==", uid),
+        db.collection("placeSuggestions").where("userId", "==", uid),
+        db.collection("userReports").where("reporterUid", "==", uid),
+        db.collection("userReports").where("reportedUid", "==", uid),
+        db.collectionGroup("blockedUsers").where("blockedUid", "==", uid),
+    ];
+    for (const query of queries) {
+        await deleteQueryDocuments(db, query);
+    }
+    await db.recursiveDelete(userMapStateRef);
+    await db.recursiveDelete(userRef);
+    await db.collection("leaderboard").doc(uid).delete();
+}
+async function processAccountDeletion(db, uid) {
+    const jobRef = db.collection("accountDeletionJobs").doc(uid);
+    try {
+        await deleteUserOwnedData(db, uid);
+        try {
+            await admin.auth().deleteUser(uid);
+        }
+        catch (error) {
+            const code = error.code;
+            if (code !== "auth/user-not-found")
+                throw error;
+        }
+        await jobRef.delete();
+    }
+    catch (error) {
+        await jobRef.set({
+            uid,
+            status: "pending",
+            attempts: admin.firestore.FieldValue.increment(1),
+            lastError: error instanceof Error ? error.message.slice(0, 500) : "unknown",
+            updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        }, { merge: true });
+        throw error;
+    }
+}
 function pairKey(uidA, uidB) {
     return [uidA, uidB].sort().join("_");
-}
-async function deleteVenueCheckInsForMap(db, uid, mapId) {
-    const prefix = `${uid}_${mapId}_`;
-    let deleted = 0;
-    while (true) {
-        const snapshot = await db.collection("venue_checkins")
-            .orderBy(admin.firestore.FieldPath.documentId())
-            .startAt(prefix)
-            .endAt(`${prefix}\uf8ff`)
-            .limit(450)
-            .get();
-        if (snapshot.empty)
-            break;
-        const batch = db.batch();
-        for (const doc of snapshot.docs) {
-            batch.delete(doc.ref);
-        }
-        await batch.commit();
-        deleted += snapshot.size;
-        if (snapshot.size < 450)
-            break;
-    }
-    return deleted;
 }
 exports.sendFriendRequest = functions.https.onCall(async (request) => {
     if (!request.auth) {
@@ -292,6 +474,26 @@ exports.unblockUser = functions.https.onCall(async (request) => {
         .delete();
     return { status: "unblocked" };
 });
+exports.deleteAccount = functions.https.onCall({ timeoutSeconds: 540, memory: "512MiB" }, async (request) => {
+    if (!request.auth) {
+        throw new functions.https.HttpsError("unauthenticated", "Oturum yok.");
+    }
+    const authTime = Number(request.auth.token.auth_time ?? 0);
+    const signedInSeconds = Math.floor(Date.now() / 1000) - authTime;
+    if (!authTime || signedInSeconds > 10 * 60) {
+        throw new functions.https.HttpsError("failed-precondition", "Hesabı silmek için yeniden giriş yapmalısın.");
+    }
+    const uid = request.auth.uid;
+    const db = admin.firestore();
+    await db.collection("accountDeletionJobs").doc(uid).set({
+        uid,
+        status: "processing",
+        requestedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+    await processAccountDeletion(db, uid);
+    return { status: "deleted" };
+});
 exports.createMap = functions.https.onCall(async (request) => {
     if (!request.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Oturum yok.");
@@ -370,23 +572,33 @@ exports.deleteMap = functions.https.onCall(async (request) => {
             throw new functions.https.HttpsError("permission-denied", "Bu haritayı silme yetkin yok.");
         }
         const status = map.status ?? "active";
+        if (status === "deleted") {
+            return;
+        }
+        const now = admin.firestore.FieldValue.serverTimestamp();
         if (status === "active") {
             transaction.set(userRef, {
                 activeMapCount: admin.firestore.FieldValue.increment(-1),
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                updatedAt: now,
             }, { merge: true });
         }
         if (parentSnap.data()?.lastOpenedMapId === mapId) {
             transaction.set(parentRef, {
                 lastOpenedMapId: admin.firestore.FieldValue.delete(),
-                lastOpenedAt: admin.firestore.FieldValue.serverTimestamp(),
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                lastOpenedAt: now,
+                updatedAt: now,
             }, { merge: true });
         }
-        transaction.delete(ref);
+        // Aktif harita listesinden kaldır, fakat Pasaport için kazanılmış
+        // pulları ve check-in tarihlerini kalıcı olarak koru.
+        transaction.set(ref, {
+            status: "deleted",
+            statusBeforeDelete: status,
+            deletedAt: now,
+            updatedAt: now,
+        }, { merge: true });
     });
-    const deletedCheckIns = await deleteVenueCheckInsForMap(db, uid, mapId);
-    return { status: "deleted", deletedCheckIns };
+    return { status: "deleted", passportDataPreserved: true };
 });
 exports.onUserMapStateWritten = (0, firestore_1.onDocumentWritten)("userMapStates/{uid}/states/{mapId}", async (event) => {
     const before = event.data?.before.data();
@@ -419,6 +631,74 @@ exports.onUserMapStateWritten = (0, firestore_1.onDocumentWritten)("userMapState
             updatedAt: admin.firestore.FieldValue.serverTimestamp(),
         }, { merge: true });
     }
+});
+exports.cleanupExpiredRoomsAndInvites = (0, scheduler_1.onSchedule)({
+    schedule: "30 3 * * *",
+    timeZone: "Europe/Istanbul",
+    timeoutSeconds: 540,
+    memory: "512MiB",
+}, async () => {
+    const db = admin.firestore();
+    const now = Date.now();
+    const roomCutoff = admin.firestore.Timestamp.fromMillis(now - ROOM_RETENTION_DAYS * MILLIS_PER_DAY);
+    const closedInviteCutoff = admin.firestore.Timestamp.fromMillis(now - CLOSED_INVITE_RETENTION_DAYS * MILLIS_PER_DAY);
+    const pendingInviteCutoff = admin.firestore.Timestamp.fromMillis(now - PENDING_INVITE_RETENTION_DAYS * MILLIS_PER_DAY);
+    const expiredRooms = await db.collection("rooms")
+        .where("status", "==", "finished")
+        .where("updatedAt", "<=", roomCutoff)
+        .orderBy("updatedAt", "asc")
+        .limit(CLEANUP_BATCH_LIMIT)
+        .get();
+    let deletedRooms = 0;
+    let deletedRoomInvites = 0;
+    for (const room of expiredRooms.docs) {
+        try {
+            deletedRoomInvites += await deleteQueryDocuments(db, db.collection("invites").where("roomId", "==", room.id));
+            await db.recursiveDelete(room.ref);
+            deletedRooms++;
+        }
+        catch (error) {
+            console.error(`[Cleanup] Oda silinemedi: ${room.id}`, error);
+        }
+    }
+    const closedInvites = db.collection("invites")
+        .where("status", "in", ["accepted", "rejected"])
+        .where("updatedAt", "<=", closedInviteCutoff)
+        .orderBy("updatedAt", "asc")
+        .limit(CLEANUP_BATCH_LIMIT);
+    const deletedClosedInvites = await deleteQueryDocuments(db, closedInvites);
+    const pendingInvites = db.collection("invites")
+        .where("status", "==", "pending")
+        .where("createdAt", "<=", pendingInviteCutoff)
+        .orderBy("createdAt", "asc")
+        .limit(CLEANUP_BATCH_LIMIT);
+    const deletedPendingInvites = await deleteQueryDocuments(db, pendingInvites);
+    console.log("[Cleanup] Tamamlandı", {
+        deletedRooms,
+        deletedRoomInvites,
+        deletedClosedInvites,
+        deletedPendingInvites,
+    });
+});
+exports.retryPendingAccountDeletions = (0, scheduler_1.onSchedule)({
+    schedule: "15 4 * * *",
+    timeZone: "Europe/Istanbul",
+    timeoutSeconds: 540,
+    memory: "512MiB",
+}, async () => {
+    const db = admin.firestore();
+    const jobs = await db.collection("accountDeletionJobs").limit(20).get();
+    let completed = 0;
+    for (const job of jobs.docs) {
+        try {
+            await processAccountDeletion(db, job.id);
+            completed++;
+        }
+        catch (error) {
+            console.error(`[AccountDeletion] Tekrar denenecek: ${job.id}`, error);
+        }
+    }
+    console.log(`[AccountDeletion] ${completed}/${jobs.size} iş tamamlandı.`);
 });
 exports.reconcileActiveMapCounts = (0, scheduler_1.onSchedule)({ schedule: "0 4 * * *", timeZone: "Europe/Istanbul" }, async () => {
     const db = admin.firestore();
