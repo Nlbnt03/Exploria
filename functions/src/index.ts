@@ -41,6 +41,17 @@ type CheckInResult = {
   mapCompleted?: boolean;
 };
 
+function assertVerifiedEmail(auth: {
+  token: Record<string, unknown>;
+}): void {
+  if (auth.token.email_verified !== true) {
+    throw new functions.https.HttpsError(
+      "failed-precondition",
+      "Bu işlem için e-posta adresini doğrulamalısın."
+    );
+  }
+}
+
 function assertString(value: unknown, field: string, maxLength: number): string {
   if (typeof value !== "string") {
     throw new functions.https.HttpsError("invalid-argument", `${field} metin olmalı.`);
@@ -388,6 +399,7 @@ export const sendFriendRequest = functions.https.onCall(async (request) => {
   if (!request.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Oturum yok.");
   }
+  assertVerifiedEmail(request.auth);
 
   const fromUid = request.auth.uid;
   const data = request.data as Record<string, unknown>;
@@ -468,6 +480,7 @@ export const blockUser = functions.https.onCall(async (request) => {
   if (!request.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Oturum yok.");
   }
+  assertVerifiedEmail(request.auth);
 
   const currentUid = request.auth.uid;
   const data = request.data as Record<string, unknown>;
@@ -550,6 +563,7 @@ export const unblockUser = functions.https.onCall(async (request) => {
   if (!request.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Oturum yok.");
   }
+  assertVerifiedEmail(request.auth);
 
   const currentUid = request.auth.uid;
   const data = request.data as Record<string, unknown>;
@@ -603,6 +617,7 @@ export const createMap = functions.https.onCall(async (request) => {
   if (!request.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Oturum yok.");
   }
+  assertVerifiedEmail(request.auth);
 
   const uid = request.auth.uid;
   const data = request.data as Record<string, unknown>;
@@ -671,6 +686,7 @@ export const deleteMap = functions.https.onCall(async (request) => {
   if (!request.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Oturum yok.");
   }
+  assertVerifiedEmail(request.auth);
 
   const uid = request.auth.uid;
   const data = request.data as Record<string, unknown>;
@@ -1008,6 +1024,7 @@ export const verifyAndCheckIn = functions.https.onCall(async (request) => {
   if (!request.auth) {
     throw new functions.https.HttpsError('unauthenticated', 'Token yok');
   }
+  assertVerifiedEmail(request.auth);
 
   const userId = request.auth.uid;
   const data = request.data as Record<string, unknown>;
@@ -1778,6 +1795,7 @@ export const claimDailyAdReward = functions.https.onCall(async (request) => {
   if (!request.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Token yok");
   }
+  assertVerifiedEmail(request.auth);
 
   const userId = request.auth.uid;
   const db = admin.firestore();
@@ -1852,6 +1870,7 @@ export const doubleQuestReward = functions.https.onCall(async (request) => {
   if (!request.auth) {
     throw new functions.https.HttpsError("unauthenticated", "Token yok");
   }
+  assertVerifiedEmail(request.auth);
 
   const userId   = request.auth.uid;
   const questKey = request.data?.questKey as string | undefined;

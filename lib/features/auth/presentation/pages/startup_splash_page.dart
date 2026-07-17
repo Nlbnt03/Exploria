@@ -59,8 +59,15 @@ class _StartupSplashPageState extends State<StartupSplashPage>
 
       String nextRoute = AppRouter.login;
       if (user != null) {
-        await user.reload();
-        final refreshedUser = auth.currentUser;
+        User? refreshedUser = user;
+        try {
+          await user.reload();
+          refreshedUser = auth.currentUser;
+        } on FirebaseAuthException catch (error) {
+          // Doğrulanmış kullanıcının çevrimdışıyken uygulamayı açabilmesi için
+          // son bilinen güvenli durumu kullan. Diğer kimlik hatalarını gizleme.
+          if (error.code != 'network-request-failed') rethrow;
+        }
         if (refreshedUser == null || !refreshedUser.emailVerified) {
           final email = refreshedUser?.email ?? user.email;
           await auth.signOut();

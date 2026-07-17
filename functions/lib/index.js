@@ -26,6 +26,11 @@ const CLOSED_INVITE_RETENTION_DAYS = 30;
 const PENDING_INVITE_RETENTION_DAYS = 7;
 const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
 const CLEANUP_BATCH_LIMIT = 200;
+function assertVerifiedEmail(auth) {
+    if (auth.token.email_verified !== true) {
+        throw new functions.https.HttpsError("failed-precondition", "Bu işlem için e-posta adresini doğrulamalısın.");
+    }
+}
 function assertString(value, field, maxLength) {
     if (typeof value !== "string") {
         throw new functions.https.HttpsError("invalid-argument", `${field} metin olmalı.`);
@@ -331,6 +336,7 @@ exports.sendFriendRequest = functions.https.onCall(async (request) => {
     if (!request.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Oturum yok.");
     }
+    assertVerifiedEmail(request.auth);
     const fromUid = request.auth.uid;
     const data = request.data;
     const toUid = assertString(data.toUid, "toUid", 160);
@@ -393,6 +399,7 @@ exports.blockUser = functions.https.onCall(async (request) => {
     if (!request.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Oturum yok.");
     }
+    assertVerifiedEmail(request.auth);
     const currentUid = request.auth.uid;
     const data = request.data;
     const blockedUid = assertString(data.blockedUid, "blockedUid", 160);
@@ -460,6 +467,7 @@ exports.unblockUser = functions.https.onCall(async (request) => {
     if (!request.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Oturum yok.");
     }
+    assertVerifiedEmail(request.auth);
     const currentUid = request.auth.uid;
     const data = request.data;
     const blockedUid = assertString(data.blockedUid, "blockedUid", 160);
@@ -498,6 +506,7 @@ exports.createMap = functions.https.onCall(async (request) => {
     if (!request.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Oturum yok.");
     }
+    assertVerifiedEmail(request.auth);
     const uid = request.auth.uid;
     const data = request.data;
     const title = assertString(data.title, "title", 60);
@@ -553,6 +562,7 @@ exports.deleteMap = functions.https.onCall(async (request) => {
     if (!request.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Oturum yok.");
     }
+    assertVerifiedEmail(request.auth);
     const uid = request.auth.uid;
     const data = request.data;
     const mapId = assertString(data.mapId, "mapId", 160);
@@ -836,6 +846,7 @@ exports.verifyAndCheckIn = functions.https.onCall(async (request) => {
     if (!request.auth) {
         throw new functions.https.HttpsError('unauthenticated', 'Token yok');
     }
+    assertVerifiedEmail(request.auth);
     const userId = request.auth.uid;
     const data = request.data;
     const venueId = assertString(data.venueId, "venueId", 180);
@@ -1435,6 +1446,7 @@ exports.claimDailyAdReward = functions.https.onCall(async (request) => {
     if (!request.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Token yok");
     }
+    assertVerifiedEmail(request.auth);
     const userId = request.auth.uid;
     const db = admin.firestore();
     const userRef = db.collection("users").doc(userId);
@@ -1500,6 +1512,7 @@ exports.doubleQuestReward = functions.https.onCall(async (request) => {
     if (!request.auth) {
         throw new functions.https.HttpsError("unauthenticated", "Token yok");
     }
+    assertVerifiedEmail(request.auth);
     const userId = request.auth.uid;
     const questKey = request.data?.questKey;
     // Fallback XP değerleri — Remote Config'te "quest_xp_<key>" parametresi
