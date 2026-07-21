@@ -19,6 +19,7 @@ class CampusMapController extends ChangeNotifier {
     this.onPersistStateRequested,
     this.areaMinZoom = 14.8,
     this.skipLocationVerification = false,
+    this.fogEnabled = true,
   }) : _lastInsidePosition =
            restoredState?.lastInsidePosition ?? initialUserPosition,
        _currentZoom = restoredState?.zoom ?? 16.0,
@@ -36,6 +37,12 @@ class CampusMapController extends ChangeNotifier {
   final Future<void> Function(CampusMapState state)? onPersistStateRequested;
   final double areaMinZoom;
   final bool skipLocationVerification;
+
+  /// True = Keşif Modu (fog-of-war active); false = Yürüyüş Modu — the fog
+  /// grid is never built and no fog/cloud layers are added to the style.
+  /// Boundary math (`fogManager.bounds`/`.contains`) is unaffected either
+  /// way since those work off the raw polygon, not the fog cell grid.
+  final bool fogEnabled;
 
   GeoJsonSource? _fogSource;
   GeoJsonSource? _cloudSource;
@@ -101,10 +108,12 @@ class CampusMapController extends ChangeNotifier {
     if (map == null) return;
 
     try {
-      await fogManager.initialize();
-      fogManager.restoreRevealedCells(
-        restoredState?.revealedCellIds ?? const <String>[],
-      );
+      if (fogEnabled) {
+        await fogManager.initialize();
+        fogManager.restoreRevealedCells(
+          restoredState?.revealedCellIds ?? const <String>[],
+        );
+      }
 
       await map.setBounds(
         CameraBoundsOptions(
@@ -116,7 +125,9 @@ class CampusMapController extends ChangeNotifier {
         ),
       );
 
-      await _upsertFogSourceAndLayer();
+      if (fogEnabled) {
+        await _upsertFogSourceAndLayer();
+      }
       // Gerçek cihaz GPS'ini gösteren native puck, skip modunda (demo)
       // yanlış/alakasız bir konumu gösterebileceği için devre dışı bırakılır.
       if (!skipLocationVerification) {
@@ -477,6 +488,7 @@ class CampusMapController extends ChangeNotifier {
     }
     await _cloudSource?.updateGeoJSON(_emptyFeatureCollection);
     _lastRenderedCloudGeoJson = _emptyFeatureCollection;
+    fogManager.invalidateRenderCache();
 
     try {
       await map.style.addLayer(
@@ -539,6 +551,10 @@ class CampusMapController extends ChangeNotifier {
     _locationSubscription?.cancel();
     _locationSubscription = locationService.positionStream.listen(
       _onLocationUpdate,
+      onError: (Object error, StackTrace stackTrace) {
+        debugPrint('[Map] Konum akışı hatası: $error');
+      },
+      cancelOnError: false,
     );
   }
 
@@ -564,22 +580,28 @@ class CampusMapController extends ChangeNotifier {
       notifyListeners();
     }
 
-    final revealed = fogManager.revealForPosition(currentLocation);
-    if (revealed) {
-      _startRevealAnimationTicker();
-      _scheduleFogRefresh(delay: const Duration(milliseconds: 16));
+    if (fogEnabled) {
+      final revealed = fogManager.revealForPosition(currentLocation);
+      if (revealed) {
+        _startRevealAnimationTicker();
+        _scheduleFogRefresh(delay: const Duration(milliseconds: 16));
 
-      // Batch threshold: >= 10 new cells → immediate persist
-      final newCellsSinceLastPersist =
-          fogManager.revealedCount - _cellCountAtLastPersist;
-      if (newCellsSinceLastPersist >= _batchCellThreshold) {
-        _schedulePersist(delay: Duration.zero);
-      } else {
-        _schedulePersist(delay: const Duration(milliseconds: 600));
+        // Batch threshold: >= 10 new cells → immediate persist
+        final newCellsSinceLastPersist =
+            fogManager.revealedCount - _cellCountAtLastPersist;
+        if (newCellsSinceLastPersist >= _batchCellThreshold) {
+          _schedulePersist(delay: Duration.zero);
+        } else {
+          _schedulePersist(delay: const Duration(milliseconds: 600));
+        }
+        notifyListeners();
+      } else if (fogManager.hasPendingRevealAnimation) {
+        _startRevealAnimationTicker();
       }
-      notifyListeners();
-    } else if (fogManager.hasPendingRevealAnimation) {
-      _startRevealAnimationTicker();
+    } else {
+      // Yürüyüş Modu: no fog to reveal, but keep persisting position/POI
+      // progress on the same cadence fog mode would.
+      _schedulePersist(delay: const Duration(milliseconds: 600));
     }
 
     if (_isBackground) {
@@ -659,22 +681,20 @@ class CampusMapController extends ChangeNotifier {
       final bounds = await map.coordinateBoundsForCamera(
         cameraState.toCameraOptions(),
       );
-      final geoJson = fogManager.geoJsonForViewport(
+      final render = fogManager.renderForViewport(
         southwest: bounds.southwest.coordinates,
         northeast: bounds.northeast.coordinates,
+        zoom: cameraState.zoom,
       );
-      if (geoJson != _lastRenderedFogGeoJson) {
-        await fogSource.updateGeoJSON(geoJson);
-        _lastRenderedFogGeoJson = geoJson;
-      }
+      if (render == null) return;
 
-      final cloudGeoJson = fogManager.cloudGeoJsonForViewport(
-        southwest: bounds.southwest.coordinates,
-        northeast: bounds.northeast.coordinates,
-      );
-      if (cloudGeoJson != _lastRenderedCloudGeoJson) {
-        await cloudSource.updateGeoJSON(cloudGeoJson);
-        _lastRenderedCloudGeoJson = cloudGeoJson;
+      if (render.fogGeoJson != _lastRenderedFogGeoJson) {
+        await fogSource.updateGeoJSON(render.fogGeoJson);
+        _lastRenderedFogGeoJson = render.fogGeoJson;
+      }
+      if (render.cloudGeoJson != _lastRenderedCloudGeoJson) {
+        await cloudSource.updateGeoJSON(render.cloudGeoJson);
+        _lastRenderedCloudGeoJson = render.cloudGeoJson;
       }
     } finally {
       _refreshInFlight = false;

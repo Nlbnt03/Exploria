@@ -40,11 +40,10 @@ const String _mapboxCacheRefreshKey = 'mapbox_cache_refresh_version';
 
 Future<void> bootstrap() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await ensureFirebaseInitialized();
-  await NotificationService.instance.initialize();
-  await RemoteConfigService.instance.initialize();
-
   setupGlobalErrorHandler();
+  await ensureFirebaseInitialized();
+  NotificationService.instance.registerBackgroundHandler();
+  await RemoteConfigService.instance.prepareDefaults();
 
   MapboxMapsOptions.setTileStoreUsageMode(TileStoreUsageMode.DISABLED);
   MapboxOptions.setAccessToken(
@@ -55,12 +54,37 @@ Future<void> bootstrap() async {
   );
   runApp(const ProviderScope(child: KesfedrioApp()));
 
-  // Deferred until the first frame is on screen: the ATT system prompt only
-  // renders once the app's window is key and visible, and AdMob must not be
-  // initialized (and must not collect the IDFA) before that consent resolves.
   WidgetsBinding.instance.addPostFrameCallback((_) {
-    unawaited(_initializeAdsAfterTrackingConsent());
+    unawaited(_initializeDeferredServices());
   });
+}
+
+Future<void> _initializeDeferredServices() async {
+  unawaited(
+    _runDeferred('Remote Config', RemoteConfigService.instance.fetchLatest),
+  );
+  unawaited(_runDeferred('Mapbox cache', ensureFreshMapboxData));
+
+  await _runDeferred(
+    'Local notifications',
+    NotificationService.instance.initialize,
+  );
+  await _runDeferred(
+    'Notification permission',
+    NotificationService.instance.requestPermissionAndStartSync,
+  );
+  await _runDeferred('Ads', _initializeAdsAfterTrackingConsent);
+}
+
+Future<void> _runDeferred(
+  String name,
+  Future<void> Function() operation,
+) async {
+  try {
+    await operation();
+  } catch (error, stackTrace) {
+    debugPrint('[Startup] $name başlatılamadı: $error\n$stackTrace');
+  }
 }
 
 Future<void> _initializeAdsAfterTrackingConsent() async {

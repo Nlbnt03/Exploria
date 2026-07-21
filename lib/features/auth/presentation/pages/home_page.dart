@@ -28,7 +28,7 @@ import '../../../../screens/history_page.dart';
 import '../../../../screens/quests_screen.dart';
 import '../../../../screens/social_page.dart';
 
-enum TravelMode { solo, multi }
+enum TravelMode { solo, multi, freeWalk }
 
 class HomePage extends ConsumerStatefulWidget {
   const HomePage({super.key, this.openFriendRequests = false});
@@ -218,6 +218,11 @@ class _HomePageState extends ConsumerState<HomePage> {
   }
 
   void _startJourney() {
+    if (_selectedMode == TravelMode.freeWalk) {
+      Navigator.pushNamed(context, AppRouter.freeWalkMap);
+      return;
+    }
+
     final mode = _selectedMode == TravelMode.solo ? 'solo' : 'multi';
     Navigator.pushNamed(
       context,
@@ -489,17 +494,39 @@ class _HomeTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isSolo = selectedMode == TravelMode.solo;
-    final title = isSolo ? 'Tekli Mod' : 'Çoklu Mod';
-    final subtitle =
-        isSolo
-            ? 'Tek başına gez, kendi ritminde keşfet. Derin odak ve tam özgürlük.'
-            : 'Ekibinle keşfet, rotaları birlikte tamamla ve daha hızlı ilerle.';
-    final imageUrl =
-        isSolo
-            ? 'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1200&q=80'
-            : 'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=1200&q=80';
-    final buttonText = isSolo ? 'TEKLİ KEŞFE BAŞLA' : 'ÇOKLU KEŞFE BAŞLA';
-    final icon = isSolo ? Icons.person_rounded : Icons.groups_rounded;
+    final isMulti = selectedMode == TravelMode.multi;
+    final isFreeWalk = selectedMode == TravelMode.freeWalk;
+    final title = switch (selectedMode) {
+      TravelMode.solo => 'Tekli Mod',
+      TravelMode.multi => 'Çoklu Mod',
+      TravelMode.freeWalk => 'Serbest Yürüyüş',
+    };
+    final subtitle = switch (selectedMode) {
+      TravelMode.solo =>
+        'Tek başına gez, kendi ritminde keşfet. Derin odak ve tam özgürlük.',
+      TravelMode.multi =>
+        'Ekibinle keşfet, rotaları birlikte tamamla ve daha hızlı ilerle.',
+      TravelMode.freeWalk =>
+        'Şehir veya alan seçmeden bulunduğun yerde yürüyüşe çık. Sis ve sınır olmadan haritanı aç.',
+    };
+    final imageUrl = switch (selectedMode) {
+      TravelMode.solo =>
+        'https://images.unsplash.com/photo-1464822759023-fed622ff2c3b?auto=format&fit=crop&w=1200&q=80',
+      TravelMode.multi =>
+        'https://images.unsplash.com/photo-1529156069898-49953e39b3ac?auto=format&fit=crop&w=1200&q=80',
+      TravelMode.freeWalk =>
+        'https://images.unsplash.com/photo-1476480862126-209bfaa8edc8?auto=format&fit=crop&w=1200&q=80',
+    };
+    final buttonText = switch (selectedMode) {
+      TravelMode.solo => 'TEKLİ KEŞFE BAŞLA',
+      TravelMode.multi => 'ÇOKLU KEŞFE BAŞLA',
+      TravelMode.freeWalk => 'SERBEST YÜRÜYÜŞÜ AÇ',
+    };
+    final icon = switch (selectedMode) {
+      TravelMode.solo => Icons.person_rounded,
+      TravelMode.multi => Icons.groups_rounded,
+      TravelMode.freeWalk => Icons.directions_walk_rounded,
+    };
 
     return _PageShell(
       child: Column(
@@ -570,8 +597,17 @@ class _HomeTab extends StatelessWidget {
                 child: _ModeChip(
                   title: 'Çoklu',
                   icon: Icons.groups_rounded,
-                  isSelected: !isSolo,
+                  isSelected: isMulti,
                   onTap: () => onModeChanged(TravelMode.multi),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: _ModeChip(
+                  title: 'Serbest',
+                  icon: Icons.directions_walk_rounded,
+                  isSelected: isFreeWalk,
+                  onTap: () => onModeChanged(TravelMode.freeWalk),
                 ),
               ),
             ],

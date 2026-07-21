@@ -11,6 +11,7 @@ class UserMapRecord {
     this.visitedPois = 0,
     this.progressPercent = 0,
     this.earnedXp = 0,
+    this.fogEnabled = true,
     this.createdAt,
     this.updatedAt,
     this.completedAt,
@@ -25,6 +26,11 @@ class UserMapRecord {
   final int visitedPois;
   final double progressPercent;
   final int earnedXp;
+
+  /// True = Keşif Modu (fog-of-war active); false = Yürüyüş Modu (plain
+  /// walking tracker, no fog). Fixed at map creation; defaults to true so
+  /// maps created before this field existed keep their original behavior.
+  final bool fogEnabled;
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final DateTime? completedAt;

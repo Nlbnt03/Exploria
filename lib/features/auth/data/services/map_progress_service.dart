@@ -112,6 +112,7 @@ class MapProgressService {
     required String areaId,
     required String mapName,
     MapAreaConfig? areaConfig,
+    bool fogEnabled = true,
   }) async {
     final normalizedName = _normalizeMapName(mapName);
     final config = areaConfig ?? resolveMapArea(areaId);
@@ -122,6 +123,7 @@ class MapProgressService {
           'title': normalizedName,
           'totalPois': config.totalPois,
           'bounds': _boundsToPayload(config.boundary),
+          'fogEnabled': fogEnabled,
         })
         .timeout(_defaultTimeout);
 
@@ -360,6 +362,7 @@ class MapProgressService {
       ).clamp(0, 1000000),
       progressPercent: _parseProgressDouble(raw['progress'], 'percent'),
       earnedXp: _parseProgressInt(raw['progress'], 'earnedXp'),
+      fogEnabled: (raw['fogEnabled'] as bool?) ?? true,
       createdAt: _parseDateTime(raw['createdAt']),
       updatedAt: _parseDateTime(raw['updatedAt']),
       completedAt: _parseDateTime(raw['completedAt']),

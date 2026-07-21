@@ -12,6 +12,12 @@ import '../features/auth/presentation/pages/city_map_page.dart';
 import '../features/multi_room/presentation/screens/waiting_room_screen.dart';
 import '../features/multi_room/presentation/screens/multi_map_screen.dart';
 import '../features/auth/domain/models/user_map_record.dart';
+import '../features/daily_exploration/data/services/share_map_snapshot_service.dart';
+import '../features/daily_exploration/presentation/widgets/exploration_share_card.dart';
+import '../features/free_walk/data/services/free_walk_history_service.dart';
+import '../features/free_walk/domain/models/free_walk_result.dart';
+import '../features/free_walk/presentation/pages/free_walk_share_preview_page.dart';
+import '../features/free_walk/presentation/widgets/free_walk_share_card.dart';
 
 class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key, required this.uid});
@@ -26,10 +32,17 @@ class HistoryPageState extends State<HistoryPage> {
   final MapProgressService _mapProgressService = MapProgressService();
   final MultiRoomFirestoreService _multiRoomService =
       MultiRoomFirestoreService();
+  final FreeWalkHistoryService _freeWalkHistoryService =
+      FreeWalkHistoryService();
+  final ShareMapSnapshotService _shareMapSnapshotService =
+      const ShareMapSnapshotService();
   static const Duration _deleteUndoDuration = Duration(seconds: 6);
   final Set<String> _pendingDeleteMapIds = <String>{};
+  final Set<String> _pendingDeleteWalkIds = <String>{};
   String? _deletingMapId;
   String? _openingMapId;
+  String? _deletingWalkId;
+  String? _openingWalkId;
 
   Future<void> _openMap(UserMapRecord record) async {
     if (_openingMapId != null) {
@@ -50,6 +63,7 @@ class HistoryPageState extends State<HistoryPage> {
           areaId: record.areaId,
           mapId: record.mapId,
           mapName: record.mapName,
+          fogEnabled: record.fogEnabled,
         ),
       );
     } on FirebaseException catch (e) {
@@ -283,7 +297,7 @@ class HistoryPageState extends State<HistoryPage> {
                 duration: _deleteUndoDuration,
                 behavior: SnackBarBehavior.floating,
                 content: _DeleteUndoSnackBarContent(
-                  mapName: record.mapName,
+                  itemLabel: record.mapName,
                   duration: _deleteUndoDuration,
                   onUndo:
                       () => messenger.hideCurrentSnackBar(
@@ -346,6 +360,140 @@ class HistoryPageState extends State<HistoryPage> {
       'Keşfedio’da "${record.mapName}" haritasını tamamladım. '
       '$visited mekan gezildi$earnedXp.',
     );
+  }
+
+  Future<void> _openWalk(FreeWalkResult walk) async {
+    if (_openingWalkId != null) return;
+    setState(() => _openingWalkId = walk.id);
+    try {
+      final scene = walk.toShareScene();
+      final mapSnapshot = await _shareMapSnapshotService.createSnapshot(scene);
+      if (!mounted) return;
+      await Navigator.push<bool>(
+        context,
+        MaterialPageRoute<bool>(
+          builder:
+              (_) => FreeWalkSharePreviewPage(
+                result: walk,
+                initialMapSnapshot: mapSnapshot,
+                createMapSnapshot:
+                    () => _shareMapSnapshotService.createSnapshot(scene),
+              ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Yürüyüş kartı oluşturulamadı: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _openingWalkId = null);
+    }
+  }
+
+  Future<void> _deleteWalk(FreeWalkResult walk) async {
+    if (_pendingDeleteWalkIds.contains(walk.id) || _deletingWalkId == walk.id) {
+      return;
+    }
+
+    final label =
+        '${FreeWalkShareFormatting.shortDate(walk.startedAt)} yürüyüşü';
+    final shouldDelete = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) {
+        return AlertDialog(
+          backgroundColor: AppColors.bgBottom,
+          surfaceTintColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: BorderSide(
+              color: AppColors.inputBorder.withValues(alpha: 0.4),
+            ),
+          ),
+          title: const Text(
+            'Yürüyüşü Sil',
+            style: TextStyle(color: AppColors.textMain),
+          ),
+          content: Text(
+            '"$label" yürüyüş geçmişinden kaldırılacak.',
+            style: const TextStyle(color: AppColors.textMuted),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text(
+                'Vazgeç',
+                style: TextStyle(color: AppColors.textMuted),
+              ),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: AppColors.primary),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Sil'),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (!mounted || shouldDelete != true) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _pendingDeleteWalkIds.add(walk.id));
+
+    messenger.hideCurrentSnackBar();
+    final closedReason =
+        await messenger
+            .showSnackBar(
+              SnackBar(
+                duration: _deleteUndoDuration,
+                behavior: SnackBarBehavior.floating,
+                content: _DeleteUndoSnackBarContent(
+                  itemLabel: label,
+                  duration: _deleteUndoDuration,
+                  onUndo:
+                      () => messenger.hideCurrentSnackBar(
+                        reason: SnackBarClosedReason.action,
+                      ),
+                ),
+              ),
+            )
+            .closed;
+
+    if (closedReason == SnackBarClosedReason.action) {
+      if (mounted) {
+        setState(() => _pendingDeleteWalkIds.remove(walk.id));
+      }
+      return;
+    }
+
+    if (mounted) {
+      setState(() => _deletingWalkId = walk.id);
+    }
+    try {
+      await _freeWalkHistoryService
+          .deleteWalk(uid: widget.uid, walkId: walk.id)
+          .timeout(const Duration(seconds: 10));
+    } catch (e) {
+      debugPrint('[History] Yürüyüş silme hatası: $e');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Yürüyüş silinemedi, lütfen tekrar dene.'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _deletingWalkId = null;
+          _pendingDeleteWalkIds.remove(walk.id);
+        });
+      }
+    }
   }
 
   @override
@@ -467,6 +615,14 @@ class HistoryPageState extends State<HistoryPage> {
                       onOpen: (record) => unawaited(_openMap(record)),
                       onDelete: (record) => unawaited(_deleteMap(record)),
                       onShare: _shareMap,
+                      walksStream: _freeWalkHistoryService.watchHistory(
+                        widget.uid,
+                      ),
+                      pendingDeleteWalkIds: _pendingDeleteWalkIds,
+                      openingWalkId: _openingWalkId,
+                      deletingWalkId: _deletingWalkId,
+                      onOpenWalk: (walk) => unawaited(_openWalk(walk)),
+                      onDeleteWalk: (walk) => unawaited(_deleteWalk(walk)),
                     );
                   },
                 ),
@@ -480,12 +636,12 @@ class HistoryPageState extends State<HistoryPage> {
 
 class _DeleteUndoSnackBarContent extends StatelessWidget {
   const _DeleteUndoSnackBarContent({
-    required this.mapName,
+    required this.itemLabel,
     required this.duration,
     required this.onUndo,
   });
 
-  final String mapName;
+  final String itemLabel;
   final Duration duration;
   final VoidCallback onUndo;
 
@@ -501,7 +657,7 @@ class _DeleteUndoSnackBarContent extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                '"$mapName" silinecek.',
+                '"$itemLabel" silinecek.',
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -594,6 +750,12 @@ class _HistoryTabbedList extends StatefulWidget {
     required this.onOpen,
     required this.onDelete,
     required this.onShare,
+    required this.walksStream,
+    required this.pendingDeleteWalkIds,
+    required this.openingWalkId,
+    required this.deletingWalkId,
+    required this.onOpenWalk,
+    required this.onDeleteWalk,
   });
 
   final List<UserMapRecord> activeRecords;
@@ -603,6 +765,12 @@ class _HistoryTabbedList extends StatefulWidget {
   final ValueChanged<UserMapRecord> onOpen;
   final ValueChanged<UserMapRecord> onDelete;
   final ValueChanged<UserMapRecord> onShare;
+  final Stream<List<FreeWalkResult>> walksStream;
+  final Set<String> pendingDeleteWalkIds;
+  final String? openingWalkId;
+  final String? deletingWalkId;
+  final ValueChanged<FreeWalkResult> onOpenWalk;
+  final ValueChanged<FreeWalkResult> onDeleteWalk;
 
   @override
   State<_HistoryTabbedList> createState() => _HistoryTabbedListState();
@@ -614,6 +782,8 @@ class _HistoryTabbedListState extends State<_HistoryTabbedList> {
   @override
   Widget build(BuildContext context) {
     final isActiveTab = _selectedIndex == 0;
+    final isCompletedTab = _selectedIndex == 1;
+    final isWalksTab = _selectedIndex == 2;
     final records =
         isActiveTab ? widget.activeRecords : widget.completedRecords;
 
@@ -633,8 +803,16 @@ class _HistoryTabbedListState extends State<_HistoryTabbedList> {
             Expanded(
               child: _HistoryTabButton(
                 label: 'Tamamlanan',
-                selected: !isActiveTab,
+                selected: isCompletedTab,
                 onTap: () => setState(() => _selectedIndex = 1),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _HistoryTabButton(
+                label: 'Yürüyüş Geçmişi',
+                selected: isWalksTab,
+                onTap: () => setState(() => _selectedIndex = 2),
               ),
             ),
           ],
@@ -662,7 +840,78 @@ class _HistoryTabbedListState extends State<_HistoryTabbedList> {
           ),
         ],
         const SizedBox(height: 12),
-        if (records.isEmpty)
+        if (isWalksTab)
+          StreamBuilder<List<FreeWalkResult>>(
+            stream: widget.walksStream,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 32),
+                  child: Center(
+                    child: CircularProgressIndicator(color: AppColors.primary),
+                  ),
+                );
+              }
+              if (snapshot.hasError) {
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.card,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: AppColors.inputBorder.withValues(alpha: 0.45),
+                    ),
+                  ),
+                  child: Text(
+                    'Yürüyüş geçmişi yüklenemedi: ${snapshot.error}',
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 14,
+                      height: 1.4,
+                    ),
+                  ),
+                );
+              }
+              final walks =
+                  (snapshot.data ?? const <FreeWalkResult>[])
+                      .where(
+                        (walk) =>
+                            !widget.pendingDeleteWalkIds.contains(walk.id),
+                      )
+                      .toList();
+              if (walks.isEmpty) {
+                return Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.card,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: AppColors.inputBorder.withValues(alpha: 0.45),
+                    ),
+                  ),
+                  child: const Text(
+                    'Henüz tamamlanmış bir serbest yürüyüşün yok.',
+                    style: TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 15,
+                      height: 1.4,
+                    ),
+                  ),
+                );
+              }
+              return _FreeWalkAnimatedList(
+                key: const ValueKey('walks'),
+                walks: walks,
+                openingWalkId: widget.openingWalkId,
+                deletingWalkId: widget.deletingWalkId,
+                onOpen: widget.onOpenWalk,
+                onDelete: widget.onDeleteWalk,
+              );
+            },
+          )
+        else if (records.isEmpty)
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(16),
@@ -943,5 +1192,161 @@ class _AnimatedHistoryListState extends State<_AnimatedHistoryList>
     if (days > 0) return '${days}g ${hours}s';
     if (hours > 0) return '${hours}s ${minutes}dk';
     return '${minutes.clamp(1, 59)}dk';
+  }
+}
+
+class _FreeWalkAnimatedList extends StatefulWidget {
+  const _FreeWalkAnimatedList({
+    super.key,
+    required this.walks,
+    required this.openingWalkId,
+    required this.deletingWalkId,
+    required this.onOpen,
+    required this.onDelete,
+  });
+
+  final List<FreeWalkResult> walks;
+  final String? openingWalkId;
+  final String? deletingWalkId;
+  final ValueChanged<FreeWalkResult> onOpen;
+  final ValueChanged<FreeWalkResult> onDelete;
+
+  @override
+  State<_FreeWalkAnimatedList> createState() => _FreeWalkAnimatedListState();
+}
+
+class _FreeWalkAnimatedListState extends State<_FreeWalkAnimatedList>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: Duration(
+        milliseconds: 300 + (widget.walks.length * 80).clamp(0, 600),
+      ),
+    )..forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final count = widget.walks.length;
+    return Column(
+      children: List.generate(count, (index) {
+        final walk = widget.walks[index];
+        final distance = ExplorationShareFormatting.kilometers(
+          walk.distanceMeters,
+        );
+        final duration = ExplorationShareFormatting.duration(
+          walk.durationSeconds,
+        );
+        final pace = FreeWalkShareFormatting.pace(
+          walk.distanceMeters,
+          walk.durationSeconds,
+        );
+        final dateText =
+            '${FreeWalkShareFormatting.shortDate(walk.startedAt)} · '
+            '${FreeWalkShareFormatting.startTime(walk.startedAt)}';
+        final isDeleting = widget.deletingWalkId == walk.id;
+        final isOpening = widget.openingWalkId == walk.id;
+
+        final start = (index / count).clamp(0.0, 1.0);
+        final end = ((index + 1) / count).clamp(0.0, 1.0);
+        final animation = CurvedAnimation(
+          parent: _controller,
+          curve: Interval(start, end, curve: Curves.easeOutCubic),
+        );
+
+        return AnimatedBuilder(
+          animation: animation,
+          builder: (context, child) {
+            return Opacity(
+              opacity: animation.value,
+              child: Transform.translate(
+                offset: Offset(0, 20 * (1 - animation.value)),
+                child: child,
+              ),
+            );
+          },
+          child: Container(
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: AppColors.card,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: AppColors.inputBorder.withValues(alpha: 0.45),
+              ),
+            ),
+            child: Material(
+              color: Colors.transparent,
+              child: ListTile(
+                onTap:
+                    (isDeleting || isOpening) ? null : () => widget.onOpen(walk),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 14,
+                  vertical: 6,
+                ),
+                leading: Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: AppColors.primary.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.directions_walk_rounded,
+                    color: AppColors.primary,
+                  ),
+                ),
+                title: Text(
+                  dateText,
+                  style: const TextStyle(
+                    color: AppColors.textMain,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 3),
+                  child: Text(
+                    '$distance • $duration • $pace/km',
+                    style: const TextStyle(
+                      color: AppColors.textMuted,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                trailing:
+                    (isDeleting || isOpening)
+                        ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: AppColors.primary,
+                          ),
+                        )
+                        : IconButton(
+                          tooltip: 'Yürüyüşü sil',
+                          onPressed: () => widget.onDelete(walk),
+                          icon: const Icon(
+                            Icons.delete_outline_rounded,
+                            color: AppColors.textMuted,
+                          ),
+                        ),
+              ),
+            ),
+          ),
+        );
+      }),
+    );
   }
 }

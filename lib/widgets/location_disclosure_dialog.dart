@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import '../core/theme/app_colors.dart';
 
 const String kLocationDisclosureText =
-    'Keşfedio, harita keşfi, sis açma, check-in ve çoklu oda canlı konum '
+    'Keşfedio, harita keşfi, serbest yürüyüş, sis açma, check-in ve çoklu oda canlı konum '
     'özelliklerini çalıştırmak için hassas konum verinizi toplar ve kullanır. '
     'Çoklu oda modunda konumunuz aynı odadaki kullanıcılarla paylaşılabilir. '
     'Arka plan takibini etkinleştirirseniz, uygulama kapalıyken veya ekran '
@@ -129,7 +129,10 @@ class _LocationDisclosureContent extends StatelessWidget {
           text: const TextSpan(
             style: baseStyle,
             children: [
-              TextSpan(text: 'Keşfedio, harita keşfi, sis açma, check-in ve '),
+              TextSpan(
+                text:
+                    'Keşfedio, harita keşfi, serbest yürüyüş, sis açma, check-in ve ',
+              ),
               TextSpan(text: 'çoklu oda canlı konum', style: strongStyle),
               TextSpan(
                 text:

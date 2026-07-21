@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart' show IconData, Icons;
@@ -17,7 +18,6 @@ const String mapAreaAnkara = 'ankara_merkez';
 
 const String defaultMapAreaId = mapAreaGtu;
 
-
 class MapAreaConfig {
   const MapAreaConfig({
     required this.id,
@@ -29,6 +29,7 @@ class MapAreaConfig {
     required this.styleUri,
     required this.center,
     required this.boundary,
+    this.boundaryGeoJson,
     this.gridSizeMeters = 50,
     this.minZoom = 14.8,
     this.skipLocationVerification = false,
@@ -43,6 +44,7 @@ class MapAreaConfig {
   final String styleUri;
   final Position center;
   final List<Position> boundary;
+  final String? boundaryGeoJson;
   final double gridSizeMeters;
   final double minZoom;
   final bool skipLocationVerification;
@@ -80,11 +82,16 @@ class MapAreaConfig {
     final city = (data['city'] as String?)?.trim() ?? '';
     final cityCategory =
         (data['cityCategory'] as String?)?.trim().toLowerCase() ?? 'diger';
-    final skipLoc =
-        data['skipLocationVerification'] as bool? ?? false;
+    final skipLoc = data['skipLocationVerification'] as bool? ?? false;
 
     final totalPois =
         poiCountOverride ?? (data['totalPois'] as num?)?.toInt() ?? 0;
+    final rawBoundaryGeoJson = data['boundaryGeoJson'];
+    final boundaryGeoJson = switch (rawBoundaryGeoJson) {
+      String value when value.trim().isNotEmpty => value,
+      Map<dynamic, dynamic> value => jsonEncode(value),
+      _ => null,
+    };
 
     return MapAreaConfig(
       id: id,
@@ -96,6 +103,7 @@ class MapAreaConfig {
       styleUri: defaultMapStyleUri,
       center: Position((west + east) / 2, (south + north) / 2),
       boundary: boundary,
+      boundaryGeoJson: boundaryGeoJson,
       skipLocationVerification: skipLoc,
     );
   }

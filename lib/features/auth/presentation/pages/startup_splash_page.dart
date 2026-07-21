@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
-import '../../../../app/bootstrap.dart';
 import '../../../../app/router/app_router.dart';
 import '../../../../core/services/app_version_service.dart';
 import '../../../../core/theme/app_colors.dart';
@@ -40,48 +39,47 @@ class _StartupSplashPageState extends State<StartupSplashPage>
       _forceUpdateInfo = null;
     });
     try {
-      await Future.wait<void>(<Future<void>>[
-        ensureFirebaseInitialized(),
-        ensureFreshMapboxData(),
-        Future<void>.delayed(const Duration(milliseconds: 900)),
-      ]);
+      final auth = FirebaseAuth.instance;
+      final user = auth.currentUser;
+      final minimumSplashTime = Future<void>.delayed(
+        const Duration(milliseconds: 450),
+      );
+      final forceUpdateFuture =
+          AppVersionService.instance.checkForRequiredUpdate();
+      final refreshedUserFuture =
+          user == null
+              ? Future<User?>.value(null)
+              : _refreshCurrentUser(auth: auth, user: user);
+
+      await minimumSplashTime;
       if (!mounted) return;
-      final forceUpdateInfo =
-          await AppVersionService.instance.checkForRequiredUpdate();
+      final forceUpdateInfo = await forceUpdateFuture;
       if (!mounted) return;
       if (forceUpdateInfo != null) {
         setState(() => _forceUpdateInfo = forceUpdateInfo);
         return;
       }
 
-      final auth = FirebaseAuth.instance;
-      final user = auth.currentUser;
-
       String nextRoute = AppRouter.login;
       if (user != null) {
-        User? refreshedUser = user;
-        try {
-          await user.reload();
-          refreshedUser = auth.currentUser;
-        } on FirebaseAuthException catch (error) {
-          // Doğrulanmış kullanıcının çevrimdışıyken uygulamayı açabilmesi için
-          // son bilinen güvenli durumu kullan. Diğer kimlik hatalarını gizleme.
-          if (error.code != 'network-request-failed') rethrow;
-        }
-        if (refreshedUser == null || !refreshedUser.emailVerified) {
-          final email = refreshedUser?.email ?? user.email;
+        final refreshedUser = await refreshedUserFuture;
+        if (refreshedUser == null) {
+          await auth.signOut();
+        } else if (!refreshedUser.emailVerified) {
+          final email = refreshedUser.email ?? user.email;
           await auth.signOut();
           if (!mounted) return;
           await _showEmailVerificationWarning(email);
           if (!mounted) return;
           Navigator.pushReplacementNamed(context, AppRouter.login);
           return;
+        } else {
+          final prefs = await SharedPreferences.getInstance();
+          final hasSeenOnboarding =
+              prefs.getBool('has_seen_onboarding_${refreshedUser.uid}') ??
+              false;
+          nextRoute = hasSeenOnboarding ? AppRouter.home : AppRouter.onboarding;
         }
-
-        final prefs = await SharedPreferences.getInstance();
-        final hasSeenOnboarding =
-            prefs.getBool('has_seen_onboarding_${refreshedUser.uid}') ?? false;
-        nextRoute = hasSeenOnboarding ? AppRouter.home : AppRouter.onboarding;
       }
 
       if (!mounted) return;
@@ -89,6 +87,29 @@ class _StartupSplashPageState extends State<StartupSplashPage>
     } catch (error) {
       if (!mounted) return;
       setState(() => _initializationError = error);
+    }
+  }
+
+  Future<User?> _refreshCurrentUser({
+    required FirebaseAuth auth,
+    required User user,
+  }) async {
+    try {
+      await user.reload().timeout(const Duration(seconds: 2));
+      return auth.currentUser ?? user;
+    } on TimeoutException {
+      // Ağ yavaşsa son doğrulanmış yerel oturumla devam et. reload işlemi
+      // platform tarafında tamamlanırsa sonraki auth olayı güncel durumu taşır.
+      return user;
+    } on FirebaseAuthException catch (error) {
+      if (error.code == 'network-request-failed') return user;
+      try {
+        await auth.signOut();
+      } catch (_) {}
+      return null;
+    } catch (error) {
+      debugPrint('[Startup] Kullanıcı yenilenemedi: $error');
+      return user;
     }
   }
 

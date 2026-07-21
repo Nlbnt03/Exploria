@@ -1797,6 +1797,7 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
 
     await _cloudSource?.updateGeoJSON(_emptyFeatureCollection());
     _lastRenderedCloudGeoJson = _emptyFeatureCollection();
+    fogManager.invalidateRenderCache();
 
     try {
       await map.style.addLayer(
@@ -1981,22 +1982,20 @@ class _MultiMapScreenState extends ConsumerState<MultiMapScreen>
       final bounds = await map.coordinateBoundsForCamera(
         cameraState.toCameraOptions(),
       );
-      final geoJson = fogManager.geoJsonForViewport(
+      final render = fogManager.renderForViewport(
         southwest: bounds.southwest.coordinates,
         northeast: bounds.northeast.coordinates,
+        zoom: cameraState.zoom,
       );
-      if (geoJson != _lastRenderedFogGeoJson) {
-        await fogSource.updateGeoJSON(geoJson);
-        _lastRenderedFogGeoJson = geoJson;
-      }
+      if (render == null) return;
 
-      final cloudGeoJson = fogManager.cloudGeoJsonForViewport(
-        southwest: bounds.southwest.coordinates,
-        northeast: bounds.northeast.coordinates,
-      );
-      if (cloudGeoJson != _lastRenderedCloudGeoJson) {
-        await cloudSource.updateGeoJSON(cloudGeoJson);
-        _lastRenderedCloudGeoJson = cloudGeoJson;
+      if (render.fogGeoJson != _lastRenderedFogGeoJson) {
+        await fogSource.updateGeoJSON(render.fogGeoJson);
+        _lastRenderedFogGeoJson = render.fogGeoJson;
+      }
+      if (render.cloudGeoJson != _lastRenderedCloudGeoJson) {
+        await cloudSource.updateGeoJSON(render.cloudGeoJson);
+        _lastRenderedCloudGeoJson = render.cloudGeoJson;
       }
     } finally {
       _fogRefreshInFlight = false;

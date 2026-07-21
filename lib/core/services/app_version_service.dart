@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:package_info_plus/package_info_plus.dart';
@@ -29,8 +31,25 @@ class AppVersionService {
     final packageInfo = await PackageInfo.fromPlatform();
     final currentBuildNumber = int.tryParse(packageInfo.buildNumber) ?? 0;
 
-    final snapshot =
-        await _firestore.collection('appConfig').doc('version').get();
+    final versionRef = _firestore.collection('appConfig').doc('version');
+    DocumentSnapshot<Map<String, dynamic>> snapshot;
+    try {
+      snapshot = await versionRef
+          .get(const GetOptions(source: Source.serverAndCache))
+          .timeout(const Duration(seconds: 2));
+    } on TimeoutException {
+      try {
+        snapshot = await versionRef.get(const GetOptions(source: Source.cache));
+      } catch (_) {
+        return null;
+      }
+    } on FirebaseException {
+      try {
+        snapshot = await versionRef.get(const GetOptions(source: Source.cache));
+      } catch (_) {
+        return null;
+      }
+    }
     final data = snapshot.data();
     if (data == null) return null;
 

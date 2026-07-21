@@ -5,6 +5,7 @@ import 'dart:math' as math;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
@@ -34,6 +35,15 @@ import '../../../../core/services/interstitial_ad_manager.dart';
 import '../../../place_suggestion/presentation/suggest_place_button.dart';
 import '../../../place_suggestion/presentation/place_suggestion_form_sheet.dart';
 import '../../../place_suggestion/presentation/animated_map_pin.dart';
+import '../../../daily_exploration/data/services/daily_exploration_analytics.dart';
+import '../../../daily_exploration/data/services/daily_exploration_service.dart';
+import '../../../daily_exploration/data/services/share_map_snapshot_service.dart';
+import '../../../daily_exploration/domain/models/daily_exploration.dart';
+import '../../../daily_exploration/domain/models/debug_sample_exploration.dart';
+import '../../../daily_exploration/domain/models/route_point.dart';
+import '../../../daily_exploration/domain/models/share_map_scene.dart';
+import '../../../daily_exploration/presentation/pages/exploration_share_preview_page.dart';
+import '../../../daily_exploration/presentation/widgets/daily_exploration_summary_sheet.dart';
 
 class CityMapPageArgs {
   const CityMapPageArgs({
@@ -42,6 +52,7 @@ class CityMapPageArgs {
     required this.mapName,
     this.initialUserPosition,
     this.mapAreaConfig,
+    this.fogEnabled = true,
   });
 
   final String areaId;
@@ -49,6 +60,7 @@ class CityMapPageArgs {
   final String mapName;
   final Position? initialUserPosition;
   final MapAreaConfig? mapAreaConfig;
+  final bool fogEnabled;
 }
 
 class CityMapPage extends ConsumerStatefulWidget {
@@ -59,6 +71,7 @@ class CityMapPage extends ConsumerStatefulWidget {
     required this.mapName,
     this.initialUserPosition,
     this.mapAreaConfig,
+    this.fogEnabled = true,
   });
 
   final String areaId;
@@ -66,6 +79,7 @@ class CityMapPage extends ConsumerStatefulWidget {
   final String mapName;
   final Position? initialUserPosition;
   final MapAreaConfig? mapAreaConfig;
+  final bool fogEnabled;
 
   @override
   ConsumerState<CityMapPage> createState() => _CityMapPageState();
@@ -76,11 +90,18 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
   final MapProgressService _mapProgressService = MapProgressService();
   final MapAreaFirestoreService _mapAreaService = MapAreaFirestoreService();
   final BadgeAwardService _badgeAwardService = BadgeAwardService();
+  final DailyExplorationService _dailyExplorationService =
+      DailyExplorationService();
+  final DailyExplorationAnalytics _dailyExplorationAnalytics =
+      const DailyExplorationAnalytics();
+  final ShareMapSnapshotService _shareMapSnapshotService =
+      const ShareMapSnapshotService();
 
   CampusMapController? _mapController;
   late MapAreaConfig _selectedArea;
   late final String _mapId;
   late final String _mapName;
+  late bool _fogEnabled;
   late Position _initialCenter;
   double _initialZoom = 16.0;
   bool _isLoadingSession = true;
@@ -91,6 +112,9 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
   int _totalPoiCount = 0;
   bool _isReadOnlyCompletedMap = false;
   StreamSubscription<Map<String, dynamic>>? _poiTapSub;
+  bool _dailySessionStartInFlight = false;
+  bool _dailySessionEnded = false;
+  bool _exitFlowInProgress = false;
 
   // Category filtering
   List<Map<String, dynamic>> _parsedPois = [];
@@ -116,6 +140,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
     WidgetsBinding.instance.addObserver(this);
     _selectedArea = widget.mapAreaConfig ?? resolveMapArea(widget.areaId);
     _mapId = widget.mapId.trim().isEmpty ? widget.areaId : widget.mapId.trim();
+    _fogEnabled = widget.fogEnabled;
     _mapName =
         widget.mapName.trim().isEmpty
             ? _selectedArea.title
@@ -178,6 +203,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
         gridSizeMeters: _selectedArea.gridSizeMeters,
         revealRadiusMeters: _selectedArea.gridSizeMeters * 1.3,
       ),
+      fogEnabled: _fogEnabled,
       locationService: LocationService(
         pollingInterval: const Duration(seconds: 4),
         requestDisclosureConsent: _showLocationDisclosure,
@@ -285,27 +311,28 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
     final navigator = Navigator.of(context);
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Arka Plan Konum İzni Gerekli'),
-        content: const Text(
-          'Haritayı kullanmak için "Her Zaman" konum izni gerekiyor. Bu izin '
-          'daha önce reddedildiği için uygulama üzerinden tekrar sorulamıyor '
-          '— izni açmak için Ayarlar\'a gitmen gerekiyor.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Vazgeç'),
+      builder:
+          (dialogContext) => AlertDialog(
+            title: const Text('Arka Plan Konum İzni Gerekli'),
+            content: const Text(
+              'Haritayı kullanmak için "Her Zaman" konum izni gerekiyor. Bu izin '
+              'daha önce reddedildiği için uygulama üzerinden tekrar sorulamıyor '
+              '— izni açmak için Ayarlar\'a gitmen gerekiyor.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('Vazgeç'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  Navigator.of(dialogContext).pop();
+                  LocationService.openSettings();
+                },
+                child: const Text('Ayarları Aç'),
+              ),
+            ],
           ),
-          FilledButton(
-            onPressed: () {
-              Navigator.of(dialogContext).pop();
-              LocationService.openSettings();
-            },
-            child: const Text('Ayarları Aç'),
-          ),
-        ],
-      ),
     );
     if (!mounted) return;
     await navigator.maybePop();
@@ -416,6 +443,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
       );
       _cachedRestoredState = record?.state;
       _isReadOnlyCompletedMap = record?.isCompleted ?? false;
+      if (record != null) _fogEnabled = record.fogEnabled;
       debugPrint(
         '[Restore] uid=$uid, mapId=$_mapId, visitedPois=${_cachedRestoredState?.visitedPoiIds.length ?? 0}, revealedCells=${_cachedRestoredState?.revealedCellIds.length ?? 0}',
       );
@@ -678,9 +706,11 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                               ),
                             ),
                           ),
-                          child: const Text(
-                            'Tamamlanan harita salt okunur. Gezilen mekanları ve açılan sisi görüntüleyebilirsin.',
-                            style: TextStyle(
+                          child: Text(
+                            _fogEnabled
+                                ? 'Tamamlanan harita salt okunur. Gezilen mekanları ve açılan sisi görüntüleyebilirsin.'
+                                : 'Tamamlanan harita salt okunur. Rotanı ve gezilen mekanları görüntüleyebilirsin.',
+                            style: const TextStyle(
                               color: AppColors.textMain,
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
@@ -758,6 +788,10 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                                         '[Gezdim] onPlaceVisited HATA: $e',
                                       );
                                     }
+                                    await _recordDailyPoi(
+                                      poiId: id,
+                                      xp: xpValue,
+                                    );
                                   } else {
                                     debugPrint(
                                       '[Gezdim] XP atlandı: completed/duplicate check-in',
@@ -822,6 +856,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                                   } catch (e) {
                                     debugPrint('[Gezdim] removeXP HATA: $e');
                                   }
+                                  await _removeDailyPoi(poiId: id, xp: xpValue);
 
                                   unawaited(
                                     _persistMapState(
@@ -1053,11 +1088,139 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
     debugPrint('[Persist] Kayıt tamamlandı.');
   }
 
+  void _startDailySessionIfReady() {
+    final controller = _mapController;
+    final uid = _uid;
+    if (controller == null ||
+        uid == null ||
+        !controller.trackingReady ||
+        _dailySessionStartInFlight ||
+        _dailySessionEnded ||
+        _dailyExplorationService.hasActiveSession) {
+      return;
+    }
+    _dailySessionStartInFlight = true;
+    unawaited(
+      _dailyExplorationService
+          .startSession(
+            uid: uid,
+            mapId: _mapId,
+            areaId: _selectedArea.id,
+            mapName: _mapName,
+            trackingStream: controller.locationService.trackingStream,
+            isInsideBoundary:
+                (point) => controller.fogManager.contains(
+                  Position(point.longitude, point.latitude),
+                ),
+          )
+          .catchError((Object error) {
+            debugPrint('[DailyExploration] Oturum başlatılamadı: $error');
+          })
+          .whenComplete(() => _dailySessionStartInFlight = false),
+    );
+  }
+
+  Future<void> _recordDailyPoi({required String poiId, required int xp}) async {
+    try {
+      await _dailyExplorationService.addPoi(poiId: poiId, xp: xp);
+    } catch (error) {
+      debugPrint('[DailyExploration] POI kaydedilemedi: $error');
+    }
+  }
+
+  Future<void> _removeDailyPoi({required String poiId, required int xp}) async {
+    try {
+      await _dailyExplorationService.removePoi(poiId: poiId, xp: xp);
+    } catch (error) {
+      debugPrint('[DailyExploration] POI iptali kaydedilemedi: $error');
+    }
+  }
+
+  ShareMapScene _shareMapScene(DailyExploration exploration) {
+    return ShareMapScene.fromDailyExploration(
+      exploration: exploration,
+      boundaryGeoJson: _selectedArea.boundaryGeoJson,
+    );
+  }
+
+  /// Debug-only preview deliberately shows just the 1080×820 map panel.
+  Future<void> _openDebugShareMapPreview() async {
+    if (!kDebugMode) return;
+    final center = _selectedArea.center;
+    final sample = buildDebugSampleExploration(
+      anchorLat: center.lat.toDouble(),
+      anchorLng: center.lng.toDouble(),
+      mapId: _mapId,
+      areaId: _selectedArea.id,
+      mapName: _mapName,
+    );
+    final scene = _shareMapScene(sample);
+    try {
+      final mapSnapshot = await _shareMapSnapshotService.createSnapshot(
+        scene,
+      );
+      if (!mounted) return;
+      await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
+          builder:
+              (_) => ExplorationSharePreviewPage(
+                exploration: sample,
+                initialMapSnapshot: mapSnapshot,
+                createMapSnapshot:
+                    () => _shareMapSnapshotService.createSnapshot(scene),
+              ),
+        ),
+      );
+    } catch (error, stackTrace) {
+      debugPrint(
+        '[ShareMapSnapshot] Debug önizleme hatası: $error\n$stackTrace',
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Harita paneli oluşturulamadı: $error')),
+      );
+    }
+  }
+
+  Future<DailyExploration?> _finishDailySession() async {
+    _dailySessionEnded = true;
+    try {
+      final exploration = await _dailyExplorationService.finishSession();
+      if (exploration == null) return null;
+      await _ensurePoisParsed();
+      final poiLocations = <String, RoutePoint>{};
+      final poiNames = <String, String>{};
+      for (final poi in _parsedPois) {
+        final id = poi['featureId']?.toString();
+        if (id == null || !exploration.newPoiIds.contains(id)) continue;
+        final lat = (poi['lat'] as num?)?.toDouble();
+        final lng = (poi['lon'] as num?)?.toDouble();
+        if (lat == null || lng == null) continue;
+        poiLocations[id] = RoutePoint(
+          latitude: lat,
+          longitude: lng,
+          accuracy: 0,
+          timestamp: exploration.date,
+        );
+        final name = poi['name']?.toString();
+        if (name != null && name.isNotEmpty) poiNames[id] = name;
+      }
+      return exploration.copyWith(
+        poiLocations: poiLocations,
+        poiNames: poiNames,
+      );
+    } catch (error) {
+      debugPrint('[DailyExploration] Oturum kapatılamadı: $error');
+      return null;
+    }
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.inactive) {
       _mapController?.flushPersist();
+      unawaited(_dailyExplorationService.flushSession());
       if (state == AppLifecycleState.paused) {
         _mapController?.setBackgroundMode(true);
       }
@@ -1070,6 +1233,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
   @override
   void deactivate() {
     _mapController?.flushPersist();
+    unawaited(_dailyExplorationService.flushSession());
     super.deactivate();
   }
 
@@ -1081,6 +1245,15 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
     if (mapController != null) {
       mapController.removeListener(_onControllerChanged);
       unawaited(mapController.disposeController());
+    }
+    if (_dailyExplorationService.hasActiveSession) {
+      unawaited(
+        _dailyExplorationService.finishSession().whenComplete(
+          _dailyExplorationService.dispose,
+        ),
+      );
+    } else {
+      unawaited(_dailyExplorationService.dispose());
     }
     super.dispose();
   }
@@ -1121,11 +1294,180 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
     return result ?? false;
   }
 
+  Future<void> _handleExit() async {
+    if (_exitFlowInProgress || !mounted) return;
+    final shouldExit = await _showExitConfirmation();
+    if (!shouldExit || !mounted) return;
+    _exitFlowInProgress = true;
+
+    final navigator = Navigator.of(context);
+    final uid = _uid;
+    var navigatedHome = false;
+    var newBadgeDefs = <BadgeDefinition>[];
+
+    try {
+      final dailyExploration = await _finishDailySession();
+      try {
+        await _mapController?.flushPersist();
+      } catch (error) {
+        debugPrint('[Exit] Flush hatası: $error');
+      }
+
+      final badgeContext = BadgeCheckContext(
+        totalVisited: _visitedPoiIds.length,
+        historicBuildingVisited:
+            _parsedPois
+                .where(
+                  (poi) =>
+                      _visitedPoiIds.contains(poi['featureId']) &&
+                      (poi['category'].toString().toLowerCase().contains(
+                            'tarih',
+                          ) ||
+                          poi['type'].toString().toLowerCase().contains(
+                            'tarih',
+                          )),
+                )
+                .length,
+        mosqueVisited:
+            _parsedPois
+                .where(
+                  (poi) =>
+                      _visitedPoiIds.contains(poi['featureId']) &&
+                      (poi['category'].toString().toLowerCase().contains(
+                            'cami',
+                          ) ||
+                          poi['type'].toString().toLowerCase().contains(
+                            'cami',
+                          )),
+                )
+                .length,
+        distinctCitiesVisited: 1,
+        coopSessionsCompleted: 0,
+        distinctCoopPartners: 0,
+        coopMapJustCompleted: false,
+        currentStreak:
+            ref
+                .read(gameProvider)
+                .valueOrNull
+                ?.weeklyQuests
+                .duzenliGezgin
+                .current ??
+            0,
+        allWeeklyQuestsJustCompleted: false,
+        visitTime: DateTime.now(),
+        recentVisitTimes: <DateTime>[DateTime.now()],
+        lastVisitedMapId: _mapId,
+        lastVisitedMapCompletion:
+            _totalPoiCount > 0 ? _visitedPoiIds.length / _totalPoiCount : 0,
+      );
+      final badgeFuture =
+          uid == null
+              ? Future<List<BadgeDefinition>>.value(const <BadgeDefinition>[])
+              : _badgeAwardService.checkNewBadges(
+                uid: uid,
+                context: badgeContext,
+              );
+
+      if (dailyExploration != null && mounted) {
+        _dailyExplorationAnalytics.promptShown(dailyExploration);
+        final action = await DailyExplorationSummarySheet.show(
+          context,
+          dailyExploration,
+        );
+        if (!mounted) return;
+        if (action == DailyExplorationSummaryAction.share) {
+          _dailyExplorationAnalytics.previewOpened(dailyExploration);
+          try {
+            final scene = _shareMapScene(dailyExploration);
+            // The card page is opened only after Snapshotter has finished.
+            final mapSnapshot = await _shareMapSnapshotService.createSnapshot(
+              scene,
+            );
+            if (!navigator.mounted) return;
+            await navigator.push<bool>(
+              MaterialPageRoute<bool>(
+                builder:
+                    (_) => ExplorationSharePreviewPage(
+                      exploration: dailyExploration,
+                      initialMapSnapshot: mapSnapshot,
+                      createMapSnapshot:
+                          () => _shareMapSnapshotService.createSnapshot(scene),
+                    ),
+              ),
+            );
+          } catch (error, stackTrace) {
+            debugPrint(
+              '[ShareMapSnapshot] Harita paneli oluşturulamadı: '
+              '$error\n$stackTrace',
+            );
+            _dailyExplorationAnalytics.failed(dailyExploration);
+            if (navigator.mounted) {
+              ScaffoldMessenger.of(navigator.context).showSnackBar(
+                SnackBar(content: Text('Harita oluşturulamadı: $error')),
+              );
+            }
+          }
+        } else {
+          _dailyExplorationAnalytics.dismissed(dailyExploration);
+        }
+      }
+
+      await InterstitialAdManager.instance.show();
+      if (navigator.mounted) {
+        navigatedHome = true;
+        navigator.pushNamedAndRemoveUntil(AppRouter.home, (route) => false);
+      }
+
+      try {
+        newBadgeDefs = await badgeFuture;
+      } catch (error) {
+        debugPrint('[Exit] Rozet kontrolü hatası: $error');
+      }
+      if (newBadgeDefs.isNotEmpty && uid != null && navigator.mounted) {
+        unawaited(
+          _badgeAwardService.awardBadges(
+            uid: uid,
+            badges: newBadgeDefs,
+            gameNotifier: ref.read(gameProvider.notifier),
+          ),
+        );
+        await BadgeCelebrationDialog.show(
+          navigator.context,
+          newBadgeDefs.map((definition) => definition.id).toList(),
+          showAsPill: true,
+        );
+      }
+    } catch (error, stackTrace) {
+      debugPrint('[Exit] Beklenmeyen hata: $error\n$stackTrace');
+    } finally {
+      if (!navigatedHome && navigator.mounted) {
+        navigatedHome = true;
+        navigator.pushNamedAndRemoveUntil(AppRouter.home, (route) => false);
+      }
+      if (navigator.mounted) {
+        final notifier = ref.read(gameProvider.notifier);
+        final completions = notifier.consumePendingQuestCompletions();
+        final earnedXp =
+            ref.read(gameProvider).valueOrNull?.weeklyQuests.earnedWeeklyXP ??
+            0;
+        for (final info in completions) {
+          if (!navigator.mounted) break;
+          await QuestCompletedDialog.show(
+            navigator.context,
+            info,
+            currentWeeklyXP: earnedXp,
+          );
+        }
+      }
+    }
+  }
+
   void _onControllerChanged() {
     if (!mounted) return;
 
     final mapController = _mapController;
     if (mapController == null) return;
+    _startDailySessionIfReady();
 
     if (mapController.isOutOfCampus && !_warningShown) {
       _warningShown = true;
@@ -1210,139 +1552,7 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
           canPop: false,
           onPopInvokedWithResult: (didPop, _) async {
             if (didPop) return;
-            final shouldPop = await _showExitConfirmation();
-            if (!shouldPop || !context.mounted) return;
-
-            final navigator = Navigator.of(context);
-            final uid = _uid;
-            List<BadgeDefinition> newBadgeDefs = [];
-
-            try {
-              // Rozet kontrolü context'i
-              final bContext = BadgeCheckContext(
-                totalVisited: _visitedPoiIds.length,
-                historicBuildingVisited:
-                    _parsedPois
-                        .where(
-                          (p) =>
-                              _visitedPoiIds.contains(p['featureId']) &&
-                              (p['category'].toString().toLowerCase().contains(
-                                    'tarih',
-                                  ) ||
-                                  p['type'].toString().toLowerCase().contains(
-                                    'tarih',
-                                  )),
-                        )
-                        .length,
-                mosqueVisited:
-                    _parsedPois
-                        .where(
-                          (p) =>
-                              _visitedPoiIds.contains(p['featureId']) &&
-                              (p['category'].toString().toLowerCase().contains(
-                                    'cami',
-                                  ) ||
-                                  p['type'].toString().toLowerCase().contains(
-                                    'cami',
-                                  )),
-                        )
-                        .length,
-                distinctCitiesVisited: 1,
-                coopSessionsCompleted: 0,
-                distinctCoopPartners: 0,
-                coopMapJustCompleted: false,
-                currentStreak:
-                    ref
-                        .read(gameProvider)
-                        .valueOrNull
-                        ?.weeklyQuests
-                        .duzenliGezgin
-                        .current ??
-                    0,
-                allWeeklyQuestsJustCompleted: false,
-                visitTime: DateTime.now(),
-                recentVisitTimes: [DateTime.now()],
-                lastVisitedMapId: _mapId,
-                lastVisitedMapCompletion:
-                    _totalPoiCount > 0
-                        ? _visitedPoiIds.length / _totalPoiCount
-                        : 0.0,
-              );
-
-              // Rozet kontrolü ve fog persist reklam izlenirken
-              // arka planda tamamlansın diye Future'ları başlat.
-              final badgeFuture =
-                  uid != null
-                      ? _badgeAwardService.checkNewBadges(
-                        uid: uid,
-                        context: bContext,
-                      )
-                      : Future<List<BadgeDefinition>>.value(const []);
-              final flushFuture = _mapController?.flushPersist();
-
-              // Geçiş reklamı
-              await InterstitialAdManager.instance.show();
-
-              // ANA SAYFAYA HEMEN YÖNLENDİR —
-              // rozet/vs arka planda tamamlansın, kullanıcı beklemesin.
-              if (navigator.mounted) {
-                navigator.pushNamedAndRemoveUntil(
-                  AppRouter.home,
-                  (route) => false,
-                );
-              }
-
-              // Arka plan işlerini bekle (ana sayfadayken)
-              try {
-                newBadgeDefs = await badgeFuture;
-              } catch (e) {
-                debugPrint('[Exit] Rozet kontrolü hatası: $e');
-              }
-              try {
-                await flushFuture;
-              } catch (e) {
-                debugPrint('[Exit] Flush hatası: $e');
-              }
-
-              if (newBadgeDefs.isNotEmpty && uid != null && navigator.mounted) {
-                unawaited(
-                  _badgeAwardService.awardBadges(
-                    uid: uid,
-                    badges: newBadgeDefs,
-                    gameNotifier: ref.read(gameProvider.notifier),
-                  ),
-                );
-                await BadgeCelebrationDialog.show(
-                  navigator.context,
-                  newBadgeDefs.map((d) => d.id).toList(),
-                  showAsPill: true,
-                );
-              }
-            } catch (e) {
-              debugPrint('[Exit] Beklenmeyen hata: $e');
-            } finally {
-              // Her durumda kullanıcı ana sayfaya ulaşmış olur.
-              if (navigator.mounted) {
-                final notifier = ref.read(gameProvider.notifier);
-                final completions = notifier.consumePendingQuestCompletions();
-                final earnedXP =
-                    ref
-                        .read(gameProvider)
-                        .valueOrNull
-                        ?.weeklyQuests
-                        .earnedWeeklyXP ??
-                    0;
-
-                for (final info in completions) {
-                  if (!navigator.mounted) break;
-                  await QuestCompletedDialog.show(
-                    navigator.context,
-                    info,
-                    currentWeeklyXP: earnedXP,
-                  );
-                }
-              }
-            }
+            await _handleExit();
           },
           child: Scaffold(
             backgroundColor: AppColors.bgBottom,
@@ -1350,6 +1560,14 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
               backgroundColor: AppColors.bgTop,
               foregroundColor: AppColors.textMain,
               title: Text(_mapName),
+              actions: [
+                if (kDebugMode)
+                  IconButton(
+                    onPressed: _openDebugShareMapPreview,
+                    icon: const Icon(Icons.image_outlined),
+                    tooltip: 'Paylaşım haritası önizlemesi (debug)',
+                  ),
+              ],
             ),
             body: Stack(
               children: [
@@ -1492,9 +1710,9 @@ class _CityMapPageState extends ConsumerState<CityMapPage>
                                 mapController.statusMessage != null)
                             ? mapController.statusMessage!
                             : (_hasPoiData
-                                  ? 'Gezilen: ${_visitedPoiIds.length} / $_totalPoiCount'
-                                  : mapController.statusMessage ??
-                                        _selectedArea.title),
+                                ? 'Gezilen: ${_visitedPoiIds.length} / $_totalPoiCount'
+                                : mapController.statusMessage ??
+                                    _selectedArea.title),
                         style: const TextStyle(
                           color: AppColors.textMain,
                           fontWeight: FontWeight.w600,

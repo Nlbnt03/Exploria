@@ -18,6 +18,7 @@ import '../../features/multi_room/presentation/screens/pending_invites_screen.da
 import '../../features/multi_room/presentation/screens/waiting_room_screen.dart';
 import '../../features/onboarding/presentation/pages/onboarding_demo_page.dart';
 import '../../features/onboarding/presentation/pages/onboarding_page.dart';
+import '../../features/free_walk/presentation/pages/free_walk_map_page.dart';
 
 class HomePageArgs {
   const HomePageArgs({this.openFriendRequests = false});
@@ -41,6 +42,7 @@ class AppRouter {
   static const String mapPreview = '/map-preview';
   static const String onboarding = '/onboarding';
   static const String onboardingDemo = '/onboarding-demo';
+  static const String freeWalkMap = '/free-walk-map';
 
   static Route<dynamic> onGenerateRoute(RouteSettings settings) {
     switch (settings.name) {
@@ -88,6 +90,7 @@ class AppRouter {
             args is CityMapPageArgs ? args.initialUserPosition : null;
         final mapAreaConfig =
             args is CityMapPageArgs ? args.mapAreaConfig : null;
+        final fogEnabled = args is CityMapPageArgs ? args.fogEnabled : true;
         return SlideLeftRoute<void>(
           builder:
               (_) => CityMapPage(
@@ -96,6 +99,7 @@ class AppRouter {
                 mapName: mapName,
                 initialUserPosition: initialUserPosition,
                 mapAreaConfig: mapAreaConfig,
+                fogEnabled: fogEnabled,
               ),
           settings: settings,
         );
@@ -169,6 +173,11 @@ class AppRouter {
       case onboardingDemo:
         return FadeScaleRoute<void>(
           builder: (_) => const OnboardingDemoPage(),
+          settings: settings,
+        );
+      case freeWalkMap:
+        return SlideLeftRoute<void>(
+          builder: (_) => const FreeWalkMapPage(),
           settings: settings,
         );
       default:

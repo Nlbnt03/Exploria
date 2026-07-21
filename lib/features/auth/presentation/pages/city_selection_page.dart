@@ -16,6 +16,7 @@ import '../../data/services/map_progress_service.dart';
 import '../map/map_areas.dart';
 import '../map/location_service.dart';
 import 'city_map_page.dart';
+import 'exploration_mode_page.dart';
 import 'map_preview_page.dart';
 import '../../../multi_room/presentation/screens/create_room_screen.dart';
 
@@ -171,6 +172,14 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
       return;
     }
 
+    final fogEnabled = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute<bool>(
+        builder: (_) => ExplorationModePage(areaTitle: selectedArea.title),
+      ),
+    );
+    if (fogEnabled == null || !mounted) return;
+
     final mapName = await _askMapName(selectedArea.title);
     if (mapName == null || !mounted) return;
 
@@ -224,6 +233,7 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
         areaId: selectedArea.id,
         mapName: mapName,
         areaConfig: selectedArea,
+        fogEnabled: fogEnabled,
       );
       if (mapId == null || !mounted) return;
 
@@ -236,6 +246,7 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
           mapName: mapName,
           initialUserPosition: currentPosition,
           mapAreaConfig: selectedArea,
+          fogEnabled: fogEnabled,
         ),
       );
     } finally {
@@ -281,6 +292,7 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
     required String areaId,
     required String mapName,
     required MapAreaConfig areaConfig,
+    required bool fogEnabled,
   }) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) {
@@ -300,6 +312,7 @@ class _CitySelectionPageState extends State<CitySelectionPage> {
             areaId: areaId,
             mapName: mapName,
             areaConfig: areaConfig,
+            fogEnabled: fogEnabled,
           )
           .timeout(const Duration(seconds: 15));
     } on TimeoutException {

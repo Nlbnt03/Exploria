@@ -30,37 +30,67 @@ class NotificationService {
 
   final _messaging = FirebaseMessaging.instance;
   final _localNotifications = FlutterLocalNotificationsPlugin();
+  Future<void>? _initialization;
+  Future<void>? _permissionRequest;
+  Future<void>? _pushRegistration;
+  bool _backgroundHandlerRegistered = false;
+  bool _listenersConfigured = false;
 
   // Navigator key — main.dart'ta MaterialApp'e verilmeli
   static final GlobalKey<NavigatorState> navigatorKey =
       GlobalKey<NavigatorState>();
 
-  // ─── Başlatma ──────────────────────────────────────────────────────────────
-  Future<void> initialize() async {
-    // 1. Arka-plan handler
+  void registerBackgroundHandler() {
+    if (_backgroundHandlerRegistered) return;
+    _backgroundHandlerRegistered = true;
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+  }
 
-    // 2. İzin iste
-    await _messaging.requestPermission(alert: true, badge: true, sound: true);
+  // ─── Hızlı yerel başlatma ─────────────────────────────────────────────────
+  Future<void> initialize() {
+    return _initialization ??= _initializeLocalServices();
+  }
 
-    // 3. Yerel bildirim eklentisini başlat
+  Future<void> _initializeLocalServices() async {
+    registerBackgroundHandler();
     await _initLocalNotifications();
+    _setupMessageListeners();
+  }
 
-    // 3.5. iOS: APNs token gelene kadar bekle (yoksa getToken/subscribeToTopic
-    // "apns-token-not-set" hatası verir; Apple'dan token dönüşü birkaç sn sürebilir)
-    await _waitForApnsToken();
+  /// Shows the permission prompt after the first Flutter frame. APNs/FCM token
+  /// synchronization continues independently and never blocks app routing.
+  Future<void> requestPermissionAndStartSync() {
+    return _permissionRequest ??= _requestPermissionAndStartSync();
+  }
 
-    // 4. FCM token'ı Firestore'a kaydet ve genel kanala abone ol
-    await _saveTokenToFirestore();
-    _messaging.onTokenRefresh.listen((_) => _saveTokenToFirestore());
+  Future<void> _requestPermissionAndStartSync() async {
+    NotificationSettings? settings;
     try {
+      settings = await _messaging.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+      );
+    } catch (e) {
+      debugPrint('[FCM] Bildirim izni istenemedi: $e');
+    }
+    if (settings == null ||
+        settings.authorizationStatus == AuthorizationStatus.denied) {
+      return;
+    }
+    _pushRegistration ??= _syncPushRegistration();
+  }
+
+  Future<void> _syncPushRegistration() async {
+    try {
+      await _waitForApnsToken();
+      await _saveTokenToFirestore();
+      _messaging.onTokenRefresh.listen((_) => _saveTokenToFirestore());
       await _messaging.subscribeToTopic('announcements');
       debugPrint('[FCM] Abone olundu: announcements');
     } catch (e) {
-      debugPrint('[FCM] announcements kanalına abone olunamadı: $e');
+      debugPrint('[FCM] Push kaydı tamamlanamadı: $e');
     }
-    // 5. Dinleyicileri kur
-    _setupMessageListeners();
   }
 
   // ─── APNs token bekleme (iOS) ─────────────────────────────────────────────
@@ -127,6 +157,8 @@ class NotificationService {
 
   // ─── Mesaj dinleyicileri ───────────────────────────────────────────────────
   void _setupMessageListeners() {
+    if (_listenersConfigured) return;
+    _listenersConfigured = true;
     // Foreground: in-app bildirim göster
     FirebaseMessaging.onMessage.listen(
       (message) {

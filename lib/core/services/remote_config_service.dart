@@ -32,9 +32,17 @@ class RemoteConfigService {
   };
 
   FirebaseRemoteConfig? _rc;
+  Future<void>? _defaultsInitialization;
+  Future<void>? _fetchInFlight;
 
-  Future<void> initialize() async {
+  /// Makes local defaults available without waiting for a network request.
+  Future<void> prepareDefaults() {
+    return _defaultsInitialization ??= _prepareDefaults();
+  }
+
+  Future<void> _prepareDefaults() async {
     final rc = FirebaseRemoteConfig.instance;
+    _rc = rc;
     try {
       await rc.setConfigSettings(
         RemoteConfigSettings(
@@ -43,21 +51,49 @@ class RemoteConfigService {
         ),
       );
       await rc.setDefaults(_defaults);
-      _rc = rc;
+    } catch (e) {
+      debugPrint('[RemoteConfig] Varsayılanlar hazırlanamadı: $e');
+    }
+  }
+
+  /// Refreshes server values in the background. Local defaults remain usable
+  /// if the network is slow or unavailable.
+  Future<void> fetchLatest() {
+    final running = _fetchInFlight;
+    if (running != null) return running;
+    final future = _fetchLatest();
+    _fetchInFlight = future;
+    return future.whenComplete(() {
+      if (identical(_fetchInFlight, future)) _fetchInFlight = null;
+    });
+  }
+
+  Future<void> _fetchLatest() async {
+    await prepareDefaults();
+    final rc = _rc;
+    if (rc == null) return;
+    try {
       await rc.fetchAndActivate();
     } catch (e) {
-      debugPrint('[RemoteConfig] Fetch başarısız, varsayılanlar kullanılacak: $e');
+      debugPrint(
+        '[RemoteConfig] Fetch başarısız, varsayılanlar kullanılacak: $e',
+      );
     }
+  }
+
+  Future<void> initialize() async {
+    await prepareDefaults();
+    await fetchLatest();
   }
 
   int _value(String key) => _rc?.getInt(key) ?? _defaults[key]!;
 
-  int get interstitialFrequency => _value('interstitial_frequency').clamp(1, 999);
+  int get interstitialFrequency =>
+      _value('interstitial_frequency').clamp(1, 999);
 
   int questXp(String key) => _value('quest_xp_$key');
 
-  int get weeklyXpGoal =>
-      questKeys.fold(0, (sum, key) => sum + questXp(key));
+  int get weeklyXpGoal => questKeys.fold(0, (sum, key) => sum + questXp(key));
 
   int get dailyAdRewardXp => _value('daily_ad_reward_xp');
 

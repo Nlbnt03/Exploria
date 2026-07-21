@@ -625,6 +625,7 @@ export const createMap = functions.https.onCall(async (request) => {
   const areaId = assertString(data.areaId, "areaId", 120);
   const bounds = validateBoundsGeometry(data.bounds);
   const totalPois = parseTotalPois(data.totalPois);
+  const fogEnabled = data.fogEnabled !== false;
 
   const db = admin.firestore();
   const userRef = db.collection("users").doc(uid);
@@ -655,6 +656,7 @@ export const createMap = functions.https.onCall(async (request) => {
       areaId,
       mapName: title,
       bounds,
+      fogEnabled,
       status: "active",
       progress: {
         totalPois,

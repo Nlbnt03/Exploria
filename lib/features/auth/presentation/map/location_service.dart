@@ -42,6 +42,8 @@ class LocationService {
 
   final StreamController<Position> _controller =
       StreamController<Position>.broadcast();
+  final StreamController<geo.Position> _trackingController =
+      StreamController<geo.Position>.broadcast();
 
   StreamSubscription<geo.Position>? _positionSub;
   Future<bool> Function()? _requestDisclosureConsent;
@@ -56,6 +58,7 @@ class LocationService {
       );
 
   Stream<Position> get positionStream => _controller.stream;
+  Stream<geo.Position> get trackingStream => _trackingController.stream;
   bool get isRunning => _running;
   bool get isBackgroundMode => _isBackground;
 
@@ -84,17 +87,7 @@ class LocationService {
 
     _isBackground = background;
     _running = true;
-    _positionSub = geo.Geolocator.getPositionStream(
-      locationSettings: _buildSettings(),
-    ).listen(
-      (pos) {
-        if (_running) {
-          _controller.add(Position(pos.longitude, pos.latitude));
-        }
-      },
-      onError: (_) {},
-      cancelOnError: false,
-    );
+    _listenToPositionStream();
     return true;
   }
 
@@ -106,23 +99,35 @@ class LocationService {
 
     _isBackground = background;
     await _positionSub?.cancel();
+    _listenToPositionStream();
+  }
+
+  void _listenToPositionStream() {
     _positionSub = geo.Geolocator.getPositionStream(
       locationSettings: _buildSettings(),
     ).listen(
       (pos) {
-        if (_running) {
-          _controller.add(Position(pos.longitude, pos.latitude));
+        if (!_running) return;
+        _controller.add(Position(pos.longitude, pos.latitude));
+        _trackingController.add(pos);
+      },
+      onError: (Object error, StackTrace stackTrace) {
+        if (!_controller.isClosed) _controller.addError(error, stackTrace);
+        if (!_trackingController.isClosed) {
+          _trackingController.addError(error, stackTrace);
         }
       },
-      onError: (_) {},
       cancelOnError: false,
     );
   }
 
   geo.LocationSettings _buildSettings() {
-    final accuracy =
-        _isBackground ? geo.LocationAccuracy.medium : geo.LocationAccuracy.high;
-    final distanceFilter = _isBackground ? 12 : 4;
+    // A dedicated walking/hiking tracker keeps GPS-grade accuracy in the
+    // background too — the foreground-service notification below is exactly
+    // what lets Android/iOS sustain that without the OS throttling it, so
+    // there's no accuracy tradeoff to make here.
+    const accuracy = geo.LocationAccuracy.high;
+    final distanceFilter = _isBackground ? 6 : 4;
 
     if (Platform.isAndroid) {
       return geo.AndroidSettings(
@@ -150,8 +155,9 @@ class LocationService {
   /// Full teardown — closes the stream controller and resets the singleton.
   /// Called only on logout or app-level destroy, NOT on per-map dispose.
   void shutdown() {
-    stop();
-    _controller.close();
+    unawaited(stop());
+    unawaited(_controller.close());
+    unawaited(_trackingController.close());
     _instance = null;
   }
 
@@ -203,6 +209,20 @@ class LocationService {
         status: LocationAccessStatus.unavailable,
       );
     } catch (_) {
+      // A fresh high-accuracy fix can time out indoors/weak-signal; fall
+      // back to the OS's cached last-known position rather than hard-
+      // blocking the whole "open map" flow.
+      try {
+        final lastKnown = await geo.Geolocator.getLastKnownPosition();
+        if (lastKnown != null) {
+          return LocationAccessResult(
+            status: LocationAccessStatus.granted,
+            position: Position(lastKnown.longitude, lastKnown.latitude),
+          );
+        }
+      } catch (_) {
+        // Fall through to unavailable below.
+      }
       return const LocationAccessResult(
         status: LocationAccessStatus.unavailable,
       );
@@ -319,7 +339,8 @@ class LocationService {
     }
   }
 
-  static const _iosAlwaysPromptedKey = 'kesfedio_ios_always_permission_prompted';
+  static const _iosAlwaysPromptedKey =
+      'kesfedio_ios_always_permission_prompted';
 
   static Future<bool> _hasPromptedAlwaysOnIosBefore() async {
     final prefs = await SharedPreferences.getInstance();
