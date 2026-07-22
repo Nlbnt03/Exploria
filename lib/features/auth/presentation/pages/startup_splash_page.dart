@@ -199,7 +199,12 @@ class _StartupSplashPageState extends State<StartupSplashPage>
       return;
     }
 
-    final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    bool opened = false;
+    try {
+      opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (error) {
+      debugPrint('[Startup] Mağaza bağlantısı açılamadı: $error');
+    }
     if (!mounted || opened) return;
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Mağaza bağlantısı açılamadı.')),

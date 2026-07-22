@@ -34,7 +34,10 @@ class ShareMapSnapshotService {
   static const String _markerSourceId = 'share-marker-source';
   static const String _labelSourceId = 'share-label-source';
 
-  Future<Uint8List> createSnapshot(ShareMapScene scene) async {
+  Future<Uint8List> createSnapshot(
+    ShareMapScene scene, {
+    String styleUri = shareLightStyleUri,
+  }) async {
     final routePoints = _validPositions(scene.routePoints);
     if (routePoints.length < 2) {
       throw ArgumentError.value(
@@ -75,7 +78,7 @@ class ShareMapSnapshotService {
     );
 
     try {
-      await snapshotter.style.setStyleURI(shareLightStyleUri);
+      await snapshotter.style.setStyleURI(styleUri);
       await styleReady.future.timeout(
         const Duration(seconds: 20),
         onTimeout:

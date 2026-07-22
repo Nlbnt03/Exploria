@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../app/router/app_router.dart';
@@ -367,7 +368,10 @@ class HistoryPageState extends State<HistoryPage> {
     setState(() => _openingWalkId = walk.id);
     try {
       final scene = walk.toShareScene();
-      final mapSnapshot = await _shareMapSnapshotService.createSnapshot(scene);
+      final mapSnapshot = await _shareMapSnapshotService.createSnapshot(
+        scene,
+        styleUri: MapboxStyles.OUTDOORS,
+      );
       if (!mounted) return;
       await Navigator.push<bool>(
         context,
@@ -377,7 +381,10 @@ class HistoryPageState extends State<HistoryPage> {
                 result: walk,
                 initialMapSnapshot: mapSnapshot,
                 createMapSnapshot:
-                    () => _shareMapSnapshotService.createSnapshot(scene),
+                    () => _shareMapSnapshotService.createSnapshot(
+                      scene,
+                      styleUri: MapboxStyles.OUTDOORS,
+                    ),
               ),
         ),
       );

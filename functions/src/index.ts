@@ -26,6 +26,8 @@ const MAX_ACTIVE_MAPS = 5;
 const ROOM_RETENTION_DAYS = 30;
 const CLOSED_INVITE_RETENTION_DAYS = 30;
 const PENDING_INVITE_RETENTION_DAYS = 7;
+const FRIEND_REQUEST_RESOLVED_RETENTION_DAYS = 30;
+const ADMIN_NOTIFICATION_RETENTION_DAYS = 7;
 const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
 const CLEANUP_BATCH_LIMIT = 200;
 
@@ -846,6 +848,34 @@ export const cleanupExpiredRoomsAndInvites = onSchedule(
       deletedClosedInvites,
       deletedPendingInvites,
     });
+  }
+);
+
+// Kabul edilmiş (accepted) istekler asla silinmez — hasAcceptedFriendship()
+// güvenlik kuralı arkadaşlığın varlığını bu dokümanın durumundan okuyor.
+// Sadece reddedilmiş/iptal edilmiş, artık hiçbir amaca hizmet etmeyen eski
+// istekler temizlenir.
+export const cleanupExpiredFriendRequests = onSchedule(
+  {
+    schedule: "0 4 * * *",
+    timeZone: "Europe/Istanbul",
+    timeoutSeconds: 540,
+    memory: "512MiB",
+  },
+  async () => {
+    const db = admin.firestore();
+    const cutoff = admin.firestore.Timestamp.fromMillis(
+      Date.now() - FRIEND_REQUEST_RESOLVED_RETENTION_DAYS * MILLIS_PER_DAY
+    );
+
+    const resolvedRequests = db.collection("friendRequests")
+      .where("status", "in", ["rejected", "cancelled"])
+      .where("updatedAt", "<=", cutoff)
+      .orderBy("updatedAt", "asc")
+      .limit(CLEANUP_BATCH_LIMIT);
+    const deleted = await deleteQueryDocuments(db, resolvedRequests);
+
+    console.log(`[Cleanup] ${deleted} sonuçlanmış arkadaşlık isteği silindi.`);
   }
 );
 
@@ -1985,15 +2015,24 @@ export const onAdminNotificationWritten = onDocumentWritten(
 
       await admin.messaging().send(message);
 
-      // Gönderildi olarak işaretle
-      await snap.after.ref.update({ 
-        status: "sent", 
-        sentAt: admin.firestore.FieldValue.serverTimestamp() 
+      // Gönderildi olarak işaretle. expireAt, "adminNotifications.expireAt"
+      // alanı üzerinde tanımlı Firestore TTL politikasıyla eski duyuruları
+      // otomatik olarak siler (bkz. firestore.indexes.json fieldOverrides).
+      const expireAt = admin.firestore.Timestamp.fromMillis(
+        Date.now() + ADMIN_NOTIFICATION_RETENTION_DAYS * MILLIS_PER_DAY
+      );
+      await snap.after.ref.update({
+        status: "sent",
+        sentAt: admin.firestore.FieldValue.serverTimestamp(),
+        expireAt,
       });
-      
+
       console.log(`[AdminNotification] Genel bildirim başarıyla gönderildi: ${afterData.title}`);
     } catch (error) {
-      await snap.after.ref.update({ status: "error", error: String(error) });
+      const expireAt = admin.firestore.Timestamp.fromMillis(
+        Date.now() + ADMIN_NOTIFICATION_RETENTION_DAYS * MILLIS_PER_DAY
+      );
+      await snap.after.ref.update({ status: "error", error: String(error), expireAt });
       console.error("[AdminNotification] Hata:", error);
     }
   }

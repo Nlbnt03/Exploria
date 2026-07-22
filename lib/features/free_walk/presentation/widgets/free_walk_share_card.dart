@@ -64,6 +64,7 @@ class FreeWalkShareCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final segmentCount = result.segmentCount < 1 ? 1 : result.segmentCount;
     return StoryShareCard(
+      backgroundColor: Colors.white,
       eyebrow: 'SERBEST YÜRÜYÜŞ',
       title: FreeWalkShareFormatting.shortDate(result.startedAt),
       dateLabel: ExplorationShareFormatting.date(result.startedAt),

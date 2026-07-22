@@ -436,7 +436,10 @@ class _FreeWalkMapPageState extends State<FreeWalkMapPage> {
 
     try {
       final scene = result.toShareScene();
-      final mapSnapshot = await _shareMapSnapshotService.createSnapshot(scene);
+      final mapSnapshot = await _shareMapSnapshotService.createSnapshot(
+        scene,
+        styleUri: MapboxStyles.OUTDOORS,
+      );
       if (!mounted) return;
       await Navigator.of(context).push<bool>(
         MaterialPageRoute<bool>(
@@ -445,7 +448,10 @@ class _FreeWalkMapPageState extends State<FreeWalkMapPage> {
                 result: result,
                 initialMapSnapshot: mapSnapshot,
                 createMapSnapshot:
-                    () => _shareMapSnapshotService.createSnapshot(scene),
+                    () => _shareMapSnapshotService.createSnapshot(
+                      scene,
+                      styleUri: MapboxStyles.OUTDOORS,
+                    ),
               ),
         ),
       );

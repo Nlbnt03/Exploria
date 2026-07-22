@@ -31,6 +31,7 @@ class StoryShareCard extends StatelessWidget {
     this.pillText,
     this.pillIcon = Icons.hub_outlined,
     this.noRouteMessage = 'Rota oluşturmak için biraz daha keşfet',
+    this.backgroundColor = _bg,
   }) : assert(stats.length == 3);
 
   static const Size logicalSize = Size(360, 640);
@@ -47,6 +48,7 @@ class StoryShareCard extends StatelessWidget {
   final String? pillText;
   final IconData pillIcon;
   final String noRouteMessage;
+  final Color backgroundColor;
 
   static const _bg = Color(0xFFFAF7F1);
   static const _textMain = Color(0xFF10172F);
@@ -63,7 +65,7 @@ class StoryShareCard extends StatelessWidget {
       width: logicalSize.width,
       height: logicalSize.height,
       child: ColoredBox(
-        color: _bg,
+        color: backgroundColor,
         child: Stack(
           children: <Widget>[
             Positioned(

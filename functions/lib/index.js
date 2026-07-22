@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.onAdminNotificationWritten = exports.doubleQuestReward = exports.claimDailyAdReward = exports.resetWeeklyXP = exports.onRoomInviteWritten = exports.onPlaceSuggestionWritten = exports.onFriendRequestWritten = exports.sendWeeklyTaskReminders = exports.verifyAndCheckIn = exports.onMapPoiWritten = exports.reconcileActiveMapCounts = exports.retryPendingAccountDeletions = exports.cleanupExpiredRoomsAndInvites = exports.onUserMapStateWritten = exports.deleteMap = exports.createMap = exports.deleteAccount = exports.unblockUser = exports.blockUser = exports.sendFriendRequest = void 0;
+exports.onAdminNotificationWritten = exports.doubleQuestReward = exports.claimDailyAdReward = exports.resetWeeklyXP = exports.onRoomInviteWritten = exports.onPlaceSuggestionWritten = exports.onFriendRequestWritten = exports.sendWeeklyTaskReminders = exports.verifyAndCheckIn = exports.onMapPoiWritten = exports.reconcileActiveMapCounts = exports.retryPendingAccountDeletions = exports.cleanupExpiredFriendRequests = exports.cleanupExpiredRoomsAndInvites = exports.onUserMapStateWritten = exports.deleteMap = exports.createMap = exports.deleteAccount = exports.unblockUser = exports.blockUser = exports.sendFriendRequest = void 0;
 const functions = require("firebase-functions");
 const scheduler_1 = require("firebase-functions/v2/scheduler");
 const firestore_1 = require("firebase-functions/v2/firestore");
@@ -24,6 +24,8 @@ const MAX_ACTIVE_MAPS = 5;
 const ROOM_RETENTION_DAYS = 30;
 const CLOSED_INVITE_RETENTION_DAYS = 30;
 const PENDING_INVITE_RETENTION_DAYS = 7;
+const FRIEND_REQUEST_RESOLVED_RETENTION_DAYS = 30;
+const ADMIN_NOTIFICATION_RETENTION_DAYS = 7;
 const MILLIS_PER_DAY = 24 * 60 * 60 * 1000;
 const CLEANUP_BATCH_LIMIT = 200;
 function assertVerifiedEmail(auth) {
@@ -691,6 +693,26 @@ exports.cleanupExpiredRoomsAndInvites = (0, scheduler_1.onSchedule)({
         deletedClosedInvites,
         deletedPendingInvites,
     });
+});
+// Kabul edilmiş (accepted) istekler asla silinmez — hasAcceptedFriendship()
+// güvenlik kuralı arkadaşlığın varlığını bu dokümanın durumundan okuyor.
+// Sadece reddedilmiş/iptal edilmiş, artık hiçbir amaca hizmet etmeyen eski
+// istekler temizlenir.
+exports.cleanupExpiredFriendRequests = (0, scheduler_1.onSchedule)({
+    schedule: "0 4 * * *",
+    timeZone: "Europe/Istanbul",
+    timeoutSeconds: 540,
+    memory: "512MiB",
+}, async () => {
+    const db = admin.firestore();
+    const cutoff = admin.firestore.Timestamp.fromMillis(Date.now() - FRIEND_REQUEST_RESOLVED_RETENTION_DAYS * MILLIS_PER_DAY);
+    const resolvedRequests = db.collection("friendRequests")
+        .where("status", "in", ["rejected", "cancelled"])
+        .where("updatedAt", "<=", cutoff)
+        .orderBy("updatedAt", "asc")
+        .limit(CLEANUP_BATCH_LIMIT);
+    const deleted = await deleteQueryDocuments(db, resolvedRequests);
+    console.log(`[Cleanup] ${deleted} sonuçlanmış arkadaşlık isteği silindi.`);
 });
 exports.retryPendingAccountDeletions = (0, scheduler_1.onSchedule)({
     schedule: "15 4 * * *",
@@ -1610,15 +1632,20 @@ exports.onAdminNotificationWritten = (0, firestore_1.onDocumentWritten)("adminNo
             apns: { payload: { aps: { sound: "default" } } },
         };
         await admin.messaging().send(message);
-        // Gönderildi olarak işaretle
+        // Gönderildi olarak işaretle. expireAt, "adminNotifications.expireAt"
+        // alanı üzerinde tanımlı Firestore TTL politikasıyla eski duyuruları
+        // otomatik olarak siler (bkz. firestore.indexes.json fieldOverrides).
+        const expireAt = admin.firestore.Timestamp.fromMillis(Date.now() + ADMIN_NOTIFICATION_RETENTION_DAYS * MILLIS_PER_DAY);
         await snap.after.ref.update({
             status: "sent",
-            sentAt: admin.firestore.FieldValue.serverTimestamp()
+            sentAt: admin.firestore.FieldValue.serverTimestamp(),
+            expireAt,
         });
         console.log(`[AdminNotification] Genel bildirim başarıyla gönderildi: ${afterData.title}`);
     }
     catch (error) {
-        await snap.after.ref.update({ status: "error", error: String(error) });
+        const expireAt = admin.firestore.Timestamp.fromMillis(Date.now() + ADMIN_NOTIFICATION_RETENTION_DAYS * MILLIS_PER_DAY);
+        await snap.after.ref.update({ status: "error", error: String(error), expireAt });
         console.error("[AdminNotification] Hata:", error);
     }
 });
